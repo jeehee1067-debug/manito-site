@@ -126,7 +126,9 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, allD
   }, [choice, isPraise, remote]);
 
   async function choose(card) {
-    await setDoc(doc(db, "giverMissions", myPid), { choices: { [slot]: { cardId: card.id, level: card.level, text: card.text } } }, { merge: true });
+    setError("");
+    await setDoc(doc(db, "giverMissions", myPid), { choices: { [slot]: { cardId: card.id, level: card.level, text: card.text } } }, { merge: true })
+      .catch(() => setError(redeemed ? "이미 인증된 미션이라 카드를 새로 고를 수 없어요." : "카드를 고르지 못했어요. 다시 시도해 주세요."));
   }
 
   async function complete(e) {
@@ -173,6 +175,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, allD
               </button>
             ))}
           </div>
+          {error && <p className="error" role="alert">{error}</p>}
         </>
       )}
 
@@ -182,12 +185,16 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, allD
             <div className="chosen">
               <span className={`badge level-${choice.level}`}>{LEVEL_LABEL[choice.level]}</span>
               <span>{choice.text}</span>
-              <button type="button" className="text-btn"
-                onClick={() => setDoc(doc(db, "giverMissions", myPid), { choices: { [slot]: null } }, { merge: true })}>
-                다른 카드 고르기
-              </button>
+              {/* 코드가 이미 인증된 슬롯은 보안 규칙이 카드 변경을 막는다 */}
+              {!redeemed && (
+                <button type="button" className="text-btn"
+                  onClick={() => setDoc(doc(db, "giverMissions", myPid), { choices: { [slot]: null } }, { merge: true }).catch(() => {})}>
+                  다른 카드 고르기
+                </button>
+              )}
             </div>
           )}
+          {!isPraise && redeemed && <p className="small">{receiverName}님이 이미 인증해서 카드를 바꿀 수 없어요. 완료 알리기만 눌러 주세요.</p>}
           <div className="code-tag" aria-label="인증 코드">
             <span>인증 코드</span>
             <strong>{code || "----"}</strong>

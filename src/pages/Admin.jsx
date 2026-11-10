@@ -7,9 +7,10 @@ import { useApp } from "../App.jsx";
 import Claim from "./Claim.jsx";
 import { Panel } from "../ui.jsx";
 import { PHASE, PHASES, TEAM_COUNT, CLUE_COUNT, LOCS } from "../lib/constants.js";
-import { assignManito, generateCodes, makeInviteCode, splitTeams } from "../lib/assign.js";
+import { assignManito, assignmentMemo, generateCodes, makeInviteCode, splitTeams } from "../lib/assign.js";
 import { computeTickets, pickMostTickets, rankBestManito } from "../lib/scoring.js";
 import { PRIZES } from "../config/prizes.js";
+import { rosterSummary, sameSummary } from "../lib/roster.js";
 
 // Firestore 배치는 500건 제한이라 나눠서 커밋한다.
 async function commitInChunks(ops) {
@@ -28,12 +29,33 @@ const NEXT_PHASE_NOTE = {
   4: "결과를 전원에게 공개합니다.",
 };
 
+// 운영 화면은 명단 전체(가입 여부·수상 제외 포함)를 쓴다. 참여자 화면은 public/roster 요약만 읽는다.
+// 같은 질의는 Firestore가 하나로 묶어서 여러 곳에서 써도 한 번만 읽는다.
+function useFullRoster() {
+  const [rows, setRows] = useState(null);
+  useEffect(() => onSnapshot(collection(db, "roster"), (s) => setRows(s.docs.map((d) => ({ pid: d.id, ...d.data() })))), []);
+  return rows;
+}
+
+// 명단이 요약과 다르면 요약 문서를 다시 쓴다(명단 추가·삭제·근무지·팀 변경 후 자동).
+async function publishRoster(rows) {
+  await setDoc(doc(db, "public", "roster"), { people: rosterSummary(rows), at: serverTimestamp() });
+}
+
 export default function Admin() {
-  const { config, myPid } = useApp();
+  const { config, myPid, roster: summaryList, rosterReady } = useApp();
   const phase = config.phase;
+  const fullRoster = useFullRoster();
+
+  useEffect(() => {
+    if (!fullRoster || !rosterReady) return;
+    const current = Object.fromEntries(summaryList.map(({ pid, ...p }) => [pid, p]));
+    if (!sameSummary(rosterSummary(fullRoster), current)) publishRoster(fullRoster).catch(() => {});
+  }, [fullRoster, summaryList, rosterReady]);
 
   async function advance() {
     if (!window.confirm(`${PHASES[phase]} → ${PHASES[phase + 1]}\n\n${NEXT_PHASE_NOTE[phase]}\n\n되돌릴 수 없어요. 진행할까요?`)) return;
+    if (phase === PHASE.SETUP && fullRoster) await publishRoster(fullRoster);
     await updateDoc(doc(db, "config", "app"), { phase: phase + 1 });
   }
 
@@ -65,7 +87,9 @@ export default function Admin() {
 }
 
 function Setup() {
-  const { roster } = useApp();
+  const full = useFullRoster();
+  const roster = full || [];
+  const loaded = full !== null; // 명단을 다 읽기 전에 추가하면 번호(p001…)가 겹칠 수 있다
   const [text, setText] = useState("");
   const [invites, setInvites] = useState({});
   const [msg, setMsg] = useState("");
@@ -150,11 +174,7 @@ function Setup() {
           ops.push((b) => b.set(doc(db, "codes", code), { receiverPid: receiverOf[giverPid], slot: Number(slot) }));
         }
       }
-      ops.push((b) => b.set(metaRef, {
-        codes: Object.values(codes).flatMap((c) => Object.values(c)),
-        pids: pairs.map((p) => p.giverPid),
-        at: serverTimestamp(),
-      }));
+      ops.push((b) => b.set(metaRef, { ...assignmentMemo(pairs, codes), at: serverTimestamp() }));
       await commitInChunks(ops);
       // 추리 보드가 후보를 줄일 때 쓰는 값 (짝 정보는 아님)
       await updateDoc(doc(db, "config", "app"), { siteMatched, teamExcluded });
@@ -174,7 +194,7 @@ function Setup() {
       <Panel title="1. 명단">
         <p className="small">한 줄에 한 명, "이름,근무지" 형식. 팀까지 직접 정하려면 "이름,근무지,팀번호".</p>
         <textarea className="pk-input" rows={6} value={text} onChange={(e) => setText(e.target.value)} placeholder={"홍길동,SR3\n김철수,S1L,3"} />
-        <button className="pk-btn main" onClick={addPeople} disabled={busy}>명단에 추가</button>
+        <button className="pk-btn main" onClick={addPeople} disabled={busy || !loaded}>명단에 추가</button>
       </Panel>
 
       <Panel title={`2. 팀 (${TEAM_COUNT}팀)`}>
@@ -221,7 +241,8 @@ function Setup() {
 }
 
 function Running() {
-  const { config, roster } = useApp();
+  const { config } = useApp();
+  const roster = useFullRoster() || [];
   const [progress, setProgress] = useState({});
   const [received, setReceived] = useState({});
   const [nudges, setNudges] = useState(new Set());
@@ -290,7 +311,7 @@ function Running() {
 }
 
 function Moderation() {
-  const { roster } = useApp();
+  const roster = useFullRoster() || [];
   const [items, setItems] = useState([]);
   useEffect(() => onSnapshot(collection(db, "redemptions"), (s) =>
     setItems(s.docs.map((d) => ({ code: d.id, ...d.data() })).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)))
@@ -382,7 +403,9 @@ function VotingAdmin() {
 }
 
 function Scoring() {
-  const { roster, nameOf } = useApp();
+  const { nameOf } = useApp();
+  const fullRoster = useFullRoster();
+  const roster = fullRoster || [];
   const [result, setResult] = useState(null);
   const [reviews, setReviews] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -440,7 +463,7 @@ function Scoring() {
     <>
       <Panel title="집계">
         <p className="small">응모권, 베스트 마니또 순위, 최다 응모권상(동점 시 무작위), 칭찬 벽을 계산해요. 다시 누르면 다시 계산돼요(최다 응모권상 동점 추첨도 다시 해요).</p>
-        <button className="pk-btn main" onClick={compute} disabled={busy}>{result ? "다시 집계" : "집계하기"}</button>
+        <button className="pk-btn main" onClick={compute} disabled={busy || !fullRoster}>{result ? "다시 집계" : "집계하기"}</button>
         {result && (
           <ul className="plain">
             <li>베스트 마니또: {result.bestManito.map((b, i) => `${i + 1}위 ${nameOf(b.pid)}(${b.score})`).join(", ")}</li>

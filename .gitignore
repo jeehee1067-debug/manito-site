@@ -1,0 +1,5 @@
+node_modules/
+dist/
+# Firebase 에뮬레이터·CLI 로그
+*-debug.log
+.firebase/

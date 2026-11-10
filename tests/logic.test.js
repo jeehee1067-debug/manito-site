@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { splitTeams, assignWithTeams, assignManito, generateCodes } from "../src/lib/assign.js";
+import { splitTeams, assignWithTeams, assignManito, assignmentMemo, generateCodes } from "../src/lib/assign.js";
 import { computeTickets, weightedDraw, pickMostTickets, rankBestManito } from "../src/lib/scoring.js";
 import { seededRandom } from "../src/lib/random.js";
+import { rosterSummary, summaryToList, sameSummary } from "../src/lib/roster.js";
 
 const pids = Array.from({ length: 56 }, (_, i) => `p${String(i + 1).padStart(3, "0")}`);
 
@@ -111,6 +112,22 @@ test("코드는 전체에서 중복이 없다", () => {
   assert.ok(all.every((c) => /^[2-9A-HJ-NP-Z]{4}$/.test(c)));
 });
 
+test("재배정 메모(meta/assignment)는 정렬돼 있어 배정 순서를 드러내지 않는다", () => {
+  const rand = seededRandom("memo");
+  const teams = splitTeams(pids, 8, rand);
+  const { pairs } = assignManito(pids.map((pid) => ({ pid, team: teams[pid] })), { rand });
+  const codes = generateCodes(pairs.map((p) => p.giverPid), rand);
+  const memo = assignmentMemo(pairs, codes);
+  assert.deepEqual(memo.pids, [...pids].sort());
+  const allCodes = Object.values(codes).flatMap((c) => Object.values(c));
+  assert.deepEqual(memo.codes, [...allCodes].sort());
+  // 배정 순서 그대로였다면 pids[i]의 대상이 항상 pids[i+1]이 된다
+  const map = Object.fromEntries(pairs.map((p) => [p.giverPid, p.receiverPid]));
+  const raw = pairs.map((p) => p.giverPid);
+  assert.ok(raw.every((g, i) => map[g] === raw[(i + 1) % raw.length]), "정렬 전 순서는 배정 원 순서");
+  assert.ok(!memo.pids.every((g, i) => map[g] === memo.pids[(i + 1) % memo.pids.length]), "저장 순서는 배정 원 순서가 아님");
+});
+
 test("응모권 계산: 미션·도전·입력·은신·정답", () => {
   const people = ["A", "B", "C"].map((pid) => ({ pid }));
   const assignments = { A: "B", B: "C", C: "A" };
@@ -174,4 +191,19 @@ test("베스트 마니또: 가중치 반영 정렬, 실격자 제외", () => {
     disqualified: new Set(["C"]),
   });
   assert.deepEqual(ranked.map((r) => r.giverPid), ["A", "B"]);
+});
+
+test("명단 요약: 이름·팀·근무지만, pid 순서 고정, 가입 여부·수상 제외 변화는 같은 요약", () => {
+  const rows = [
+    { pid: "p002", name: "다라", team: 2, loc: "S1L", uid: null, disqualified: false, inviteUsed: "X" },
+    { pid: "p001", name: "가나", team: 1, loc: "SR3", uid: "u1", disqualified: false },
+  ];
+  const sum = rosterSummary(rows);
+  assert.deepEqual(Object.keys(sum), ["p001", "p002"]);
+  assert.deepEqual(sum.p002, { name: "다라", team: 2, loc: "S1L" });
+  assert.deepEqual(summaryToList(sum).map((r) => r.pid), ["p001", "p002"]);
+  const claimed = rows.map((r) => ({ ...r, uid: "u-" + r.pid, disqualified: true }));
+  assert.ok(sameSummary(sum, rosterSummary(claimed)), "가입·제외만 바뀌면 다시 쓰지 않는다");
+  assert.ok(!sameSummary(sum, rosterSummary(rows.map((r) => (r.pid === "p001" ? { ...r, team: 3 } : r)))), "팀이 바뀌면 다시 쓴다");
+  assert.ok(sameSummary({ p002: sum.p002, p001: sum.p001 }, sum), "키 순서가 달라도 같은 요약");
 });

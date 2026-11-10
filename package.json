@@ -5,9 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:emu": "firebase emulators:exec --only auth,firestore --project demo-manito \"vite --mode emulator\"",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test tests/logic.test.js"
+    "test": "node --test tests/logic.test.js",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-manito \"node --test tests/rules.test.js\""
   },
   "dependencies": {
     "firebase": "10.14.1",
@@ -15,7 +17,9 @@
     "react-dom": "18.3.1"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "3.0.4",
     "@vitejs/plugin-react": "4.3.4",
+    "firebase-tools": "15.34.1",
     "vite": "5.4.11"
   }
 }

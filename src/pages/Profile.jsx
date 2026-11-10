@@ -7,7 +7,7 @@ import { syncClues } from "../lib/sync.js";
 import { Panel, avatarSrc } from "../ui.jsx";
 
 export default function Profile() {
-  const { myPid, nameOf, avatarOf } = useApp();
+  const { myPid, nameOf, avatarOf, user, loadAvatar, setAvatarLocal } = useApp();
   const [answers, setAnswers] = useState(PROFILE_QUESTIONS.map(() => ""));
   const [loaded, setLoaded] = useState(false);
   const [status, setStatus] = useState("");
@@ -19,7 +19,8 @@ export default function Profile() {
     });
   }, [myPid]);
 
-  const pickAvatar = (i) => setDoc(doc(db, "avatars", myPid), { avatar: i });
+  useEffect(() => loadAvatar(myPid), [myPid, loadAvatar]);
+  const pickAvatar = (i) => setDoc(doc(db, "avatars", myPid), { avatar: i }).then(() => setAvatarLocal(myPid, i));
 
   async function save(e) {
     e.preventDefault();
@@ -38,6 +39,11 @@ export default function Profile() {
 
   return (
     <>
+      <Panel title="내 계정">
+        <p>로그인한 메일: <strong>{user.email}</strong></p>
+        <p className="small">비밀번호를 잊으면 로그인 화면의 '비밀번호를 잊었어요'로 이 주소에서 다시 정할 수 있어요. 주소가 틀렸다면 운영진에게 알려 주세요.</p>
+      </Panel>
+
       <Panel title="내 캐릭터">
         <p className="small">결과 발표와 용의자 보드에 이 캐릭터로 나와요.</p>
         <div className="avatar-picker">
