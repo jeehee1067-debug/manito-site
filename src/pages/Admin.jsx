@@ -7,7 +7,7 @@ import { useApp } from "../App.jsx";
 import Claim from "./Claim.jsx";
 import { Panel } from "../ui.jsx";
 import { PHASE, PHASES, TEAM_COUNT, CLUE_COUNT, LOCS } from "../lib/constants.js";
-import { assignManito, generateCodes, makeInviteCode, splitTeams } from "../lib/assign.js";
+import { assignManito, assignmentMemo, generateCodes, makeInviteCode, splitTeams } from "../lib/assign.js";
 import { computeTickets, pickMostTickets, rankBestManito } from "../lib/scoring.js";
 import { PRIZES } from "../config/prizes.js";
 
@@ -150,11 +150,7 @@ function Setup() {
           ops.push((b) => b.set(doc(db, "codes", code), { receiverPid: receiverOf[giverPid], slot: Number(slot) }));
         }
       }
-      ops.push((b) => b.set(metaRef, {
-        codes: Object.values(codes).flatMap((c) => Object.values(c)),
-        pids: pairs.map((p) => p.giverPid),
-        at: serverTimestamp(),
-      }));
+      ops.push((b) => b.set(metaRef, { ...assignmentMemo(pairs, codes), at: serverTimestamp() }));
       await commitInChunks(ops);
       // 추리 보드가 후보를 줄일 때 쓰는 값 (짝 정보는 아님)
       await updateDoc(doc(db, "config", "app"), { siteMatched, teamExcluded });

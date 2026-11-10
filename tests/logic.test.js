@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { splitTeams, assignWithTeams, assignManito, generateCodes } from "../src/lib/assign.js";
+import { splitTeams, assignWithTeams, assignManito, assignmentMemo, generateCodes } from "../src/lib/assign.js";
 import { computeTickets, weightedDraw, pickMostTickets, rankBestManito } from "../src/lib/scoring.js";
 import { seededRandom } from "../src/lib/random.js";
 
@@ -109,6 +109,22 @@ test("코드는 전체에서 중복이 없다", () => {
   assert.equal(all.length, 168);
   assert.equal(new Set(all).size, 168);
   assert.ok(all.every((c) => /^[2-9A-HJ-NP-Z]{4}$/.test(c)));
+});
+
+test("재배정 메모(meta/assignment)는 정렬돼 있어 배정 순서를 드러내지 않는다", () => {
+  const rand = seededRandom("memo");
+  const teams = splitTeams(pids, 8, rand);
+  const { pairs } = assignManito(pids.map((pid) => ({ pid, team: teams[pid] })), { rand });
+  const codes = generateCodes(pairs.map((p) => p.giverPid), rand);
+  const memo = assignmentMemo(pairs, codes);
+  assert.deepEqual(memo.pids, [...pids].sort());
+  const allCodes = Object.values(codes).flatMap((c) => Object.values(c));
+  assert.deepEqual(memo.codes, [...allCodes].sort());
+  // 배정 순서 그대로였다면 pids[i]의 대상이 항상 pids[i+1]이 된다
+  const map = Object.fromEntries(pairs.map((p) => [p.giverPid, p.receiverPid]));
+  const raw = pairs.map((p) => p.giverPid);
+  assert.ok(raw.every((g, i) => map[g] === raw[(i + 1) % raw.length]), "정렬 전 순서는 배정 원 순서");
+  assert.ok(!memo.pids.every((g, i) => map[g] === memo.pids[(i + 1) % memo.pids.length]), "저장 순서는 배정 원 순서가 아님");
 });
 
 test("응모권 계산: 미션·도전·입력·은신·정답", () => {

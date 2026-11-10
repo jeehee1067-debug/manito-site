@@ -89,6 +89,14 @@ export default function Login({ bootstrap = false }) {
             {mode === "login" ? "로그인" : mode === "signup" ? "가입하고 내 이름 연결" : "운영자로 시작하기"}
           </button>
         </form>
+        {/* 로그인 전에는 config를 읽을 수 없어(보안 규칙) 첫 운영자인지 알 수 없다. 첫 운영자는 여기서 들어간다.
+            이미 운영자가 있으면 config 생성이 규칙에 막히고, 만들어진 계정은 초대 코드 연결 화면으로 간다. */}
+        {!bootstrap && mode !== "bootstrap" && (
+          <button type="button" className="text-btn" onClick={() => { setError(""); setMode("bootstrap"); }}>처음 설정하는 운영자인가요?</button>
+        )}
+        {!bootstrap && mode === "bootstrap" && (
+          <button type="button" className="text-btn" onClick={() => { setError(""); setMode("login"); }}>로그인으로 돌아가기</button>
+        )}
       </section>
       {mode === "signup" && <p className="login-note">비밀번호는 본인만 알아요. 운영진도 볼 수 없으니 잊지 않게 정해 주세요.</p>}
     </main>
