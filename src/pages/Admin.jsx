@@ -281,20 +281,26 @@ function Setup() {
       // (운영자는 단서를 읽을 수 없다). 본인이 쓰는 답이 아니라 거짓·대충이 없고, 마니또가 접속을 안 해도 나간다.
       const newVer = (config.assignVer ?? 0) + 1;
       const partOf = Object.fromEntries(roster.map((r) => [r.pid, (r.part || "").trim()]));
+      const hintOps = [];
       for (const { giverPid, receiverPid } of pairs) {
         if (!partOf[giverPid]) continue;
-        ops.push((b) => b.set(doc(db, "clues", `${receiverPid}_${PART_HINT_IDX}`), {
+        hintOps.push((b) => b.set(doc(db, "clues", `${receiverPid}_${PART_HINT_IDX}`), {
           receiverPid, idx: PART_HINT_IDX, answer: partOf[giverPid], ver: newVer,
         }));
       }
       ops.push((b) => b.set(metaRef, { ...assignmentMemo(pairs, codes), at: serverTimestamp() }));
       await commitInChunks(ops);
+      // 파트 단서는 따로 저장한다. 콘솔에 게시된 보안 규칙이 예전 것이면 이 저장만 거부되는데, 그래도 배정 자체는 되게.
+      let hintFailed = false;
+      await commitInChunks(hintOps).catch(() => { hintFailed = true; });
       // 추리 보드가 후보를 줄일 때 쓰는 값 (짝 정보는 아님)
       // 배정 회차를 올린다(배정 문서를 다 쓴 뒤에). 지난 회차 단서는 보안 규칙이 읽지 못하게 하고,
       // 각 마니또가 앱을 열 때 새 대상에게 단서를 다시 보낸다.
       await updateDoc(doc(db, "config", "app"), { siteMatched, teamExcluded, assignVer: newVer });
       const noPart = roster.filter((r) => !partOf[r.pid]).length;
-      setMsg(`${pairs.length}명 배정 완료.` + (noPart && noPart < roster.length ? ` 파트가 비어 있는 ${noPart}명이 마니또인 경우는 파트 단서가 나가지 않아요.` : "") + (warnings.length ? " " + warnings.join(" ") : siteMatched ? " 같은 근무지·다른 팀으로, 맞마니또 없이 짝지었어요." : " 다른 팀끼리, 맞마니또 없이 짝지었어요. 근무지가 다른 짝은 원격 미션 카드가 나와요."));
+      setMsg(`${pairs.length}명 배정 완료.`
+        + (hintFailed ? " ⚠ 파트 단서는 저장하지 못했어요. Firebase 콘솔에 최신 보안 규칙(firestore.rules)을 게시한 뒤 '배정하기'를 다시 눌러 주세요." : "")
+        + (noPart && noPart < roster.length ? ` 파트가 비어 있는 ${noPart}명이 마니또인 경우는 파트 단서가 나가지 않아요.` : "") + (warnings.length ? " " + warnings.join(" ") : siteMatched ? " 같은 근무지·다른 팀으로, 맞마니또 없이 짝지었어요." : " 다른 팀끼리, 맞마니또 없이 짝지었어요. 근무지가 다른 짝은 원격 미션 카드가 나와요."));
     } catch (err) {
       setMsg(err.message);
     } finally {
