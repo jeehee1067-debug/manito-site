@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, serverTimestamp, setDoc, updateDoc, writeBatch,
+  collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, serverTimestamp, setDoc, updateDoc, writeBatch,
 } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp } from "../App.jsx";
@@ -54,7 +54,12 @@ export default function Admin() {
   }, [fullRoster, summaryList, rosterReady]);
 
   async function advance() {
-    if (!window.confirm(`${PHASES[phase]} → ${PHASES[phase + 1]}\n\n${NEXT_PHASE_NOTE[phase]}\n\n되돌릴 수 없어요. 진행할까요?`)) return;
+    // 미션 시작 전: 가입 안 한 사람이 있으면 그 사람의 마니또는 인증을 받을 수 없어 미션 응모권이 0장이 된다.
+    const unjoined = phase === PHASE.SETUP && fullRoster ? fullRoster.filter((r) => !r.uid) : [];
+    const warn = unjoined.length
+      ? `\n\n⚠ 아직 가입 안 한 사람 ${unjoined.length}명: ${unjoined.map((r) => r.name).join(", ")}\n이 사람들의 마니또는 인증을 받을 수 없어요. 참여하지 않을 사람이면 명단에서 지우고 다시 배정한 뒤 시작하세요.`
+      : "";
+    if (!window.confirm(`${PHASES[phase]} → ${PHASES[phase + 1]}\n\n${NEXT_PHASE_NOTE[phase]}${warn}\n\n되돌릴 수 없어요. 진행할까요?`)) return;
     if (phase === PHASE.SETUP && fullRoster) await publishRoster(fullRoster);
     await updateDoc(doc(db, "config", "app"), { phase: phase + 1 });
   }
@@ -77,7 +82,7 @@ export default function Admin() {
 
       {phase === PHASE.SETUP && <Setup />}
       {phase === PHASE.RUNNING && <Running />}
-      {phase === PHASE.GUESSING && <Panel title="최종 지목 중"><p>지목 결과는 투표 단계부터 집계 화면에서 볼 수 있어요.</p></Panel>}
+      {phase === PHASE.GUESSING && <GuessStatus />}
       {phase >= PHASE.RUNNING && phase <= PHASE.SCORING && <Moderation />}
       {phase === PHASE.VOTING && <VotingAdmin />}
       {phase === PHASE.SCORING && <Scoring />}
@@ -177,7 +182,9 @@ function Setup() {
       ops.push((b) => b.set(metaRef, { ...assignmentMemo(pairs, codes), at: serverTimestamp() }));
       await commitInChunks(ops);
       // 추리 보드가 후보를 줄일 때 쓰는 값 (짝 정보는 아님)
-      await updateDoc(doc(db, "config", "app"), { siteMatched, teamExcluded });
+      // 배정 회차를 올린다(배정 문서를 다 쓴 뒤에). 지난 회차 단서는 보안 규칙이 읽지 못하게 하고,
+      // 각 마니또가 앱을 열 때 새 대상에게 단서를 다시 보낸다.
+      await updateDoc(doc(db, "config", "app"), { siteMatched, teamExcluded, assignVer: increment(1) });
       setMsg(`${pairs.length}명 배정 완료.` + (warnings.length ? " " + warnings.join(" ") : siteMatched ? " 같은 근무지·다른 팀으로, 맞마니또 없이 짝지었어요." : " 다른 팀끼리, 맞마니또 없이 짝지었어요. 근무지가 다른 짝은 원격 미션 카드가 나와요."));
     } catch (err) {
       setMsg(err.message);
@@ -307,6 +314,34 @@ function Running() {
         </div>
       </Panel>
     </>
+  );
+}
+
+// 최종 지목 단계: 누가 지목했는지만 보인다(누구를 지목했는지는 투표 단계 전까지 운영자도 못 읽음).
+// 지목을 안 하면 그 사람의 마니또가 은신 응모권 2장을 자동으로 받는다.
+function GuessStatus() {
+  const roster = useFullRoster() || [];
+  const [progress, setProgress] = useState({});
+  useEffect(() => onSnapshot(collection(db, "progress"), (s) => setProgress(Object.fromEntries(s.docs.map((d) => [d.id, d.data()])))), []);
+  const rows = [...roster].filter((r) => r.uid).sort((a, b) => (a.team || 0) - (b.team || 0) || a.name.localeCompare(b.name, "ko"));
+  const notYet = rows.filter((r) => !progress[r.pid]?.guessed);
+  return (
+    <Panel title={`최종 지목 중 (안 한 사람 ${notYet.length}명)`}>
+      <p className="small">누구를 지목했는지는 투표 단계부터 집계 화면에서 볼 수 있어요. 지목을 안 하면 그 사람의 마니또가 은신 응모권 2장을 받아요.</p>
+      {notYet.length > 0 && <p className="note">아직 안 한 사람: {notYet.map((r) => r.name).join(", ")}</p>}
+      <div className="table-wrap">
+        <table className="pk-table">
+          <thead><tr><th>팀</th><th>이름</th><th>지목</th></tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.pid} className={progress[r.pid]?.guessed ? "" : "warn"}>
+                <td>{r.team}</td><td>{r.name}</td><td>{progress[r.pid]?.guessed ? "O" : "-"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
   );
 }
 

@@ -44,8 +44,10 @@ export default function MyMission() {
   }, [assignment]);
 
   useEffect(() => {
-    if (assignment && progress.profileDone && !progress.cluesSynced) syncClues(myPid).catch(() => {});
-  }, [assignment, progress.profileDone, progress.cluesSynced, myPid]);
+    // 처음 배정됐거나 운영자가 다시 배정했으면(회차가 바뀜) 내 답을 지금 대상에게 단서로 다시 보낸다.
+    const ver = config.assignVer ?? 0;
+    if (assignment && progress.profileDone && progress.cluesVer !== ver) syncClues(myPid, ver).catch(() => {});
+  }, [assignment, progress.profileDone, progress.cluesVer, config.assignVer, myPid]);
 
   if (assignment === undefined) return <Loading />;
   if (!assignment) {

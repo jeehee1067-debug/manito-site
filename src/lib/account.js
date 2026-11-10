@@ -48,11 +48,19 @@ export async function claimWithInvite(inviteInput) {
   const inviteSnap = await getDoc(doc(db, "invites", code)).catch(() => null);
   if (!inviteSnap || !inviteSnap.exists()) throw new Error("초대 코드가 맞지 않아요. 운영진에게 받은 6자리를 다시 확인해 주세요.");
   const personId = inviteSnap.data().personId;
-  const rosterSnap = await getDoc(doc(db, "roster", personId));
-  const roster = rosterSnap.data();
-  if (roster.uid && roster.uid !== uid) throw new Error("이미 다른 계정에 연결된 초대 코드예요. 운영진에게 알려 주세요.");
-  if (!roster.uid) await updateDoc(doc(db, "roster", personId), { uid, inviteUsed: code });
-  await setDoc(doc(db, "users", uid), { personId, eliminated: [] });
+  // 연결 전 계정은 명단을 읽을 수 없다(외부인 차단). 그래서 확인하지 않고 바로 연결을 시도한다.
+  // 이미 내 계정에 연결돼 있으면 명단 수정은 거부되지만 아래 users 생성은 통과하고, 다른 계정이면 둘 다 거부된다.
+  try {
+    await updateDoc(doc(db, "roster", personId), { uid, inviteUsed: code });
+  } catch (err) {
+    if (err?.code !== "permission-denied") throw err;
+  }
+  try {
+    await setDoc(doc(db, "users", uid), { personId, eliminated: [] });
+  } catch (err) {
+    if (err?.code === "permission-denied") throw new Error("이미 다른 계정에 연결된 초대 코드예요. 운영진에게 알려 주세요.");
+    throw err;
+  }
   return personId;
 }
 

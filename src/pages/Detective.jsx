@@ -215,6 +215,8 @@ function Suspects({ myPid }) {
     if (!pick) return;
     try {
       await setDoc(doc(db, "guesses", myPid), { guessPid: pick, createdAt: serverTimestamp() });
+      // 운영자가 지목 안 한 사람을 알 수 있게 "지목함"만 표시한다(누구를 지목했는지는 남기지 않음).
+      await setDoc(doc(db, "progress", myPid), { guessed: true }, { merge: true });
       setGuess(pick);
       setMsg("지목했어요. 마감 전까지는 바꿀 수 있어요.");
     } catch {

@@ -10,6 +10,10 @@ service cloud.firestore {
     function phase() { return cfg().phase; }
     function isAdmin() { return signedIn() && request.auth.uid in cfg().admins; }
     function linked() { return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)); }
+    // 참여자(초대 코드로 명단에 연결된 계정) 또는 운영자. 가입만 한 외부 계정은 아무것도 못 읽게 한다.
+    function member() { return linked() || isAdmin(); }
+    // 배정 회차. 운영자가 다시 배정할 때마다 1씩 올라가고, 단서는 지금 회차 것만 읽고 쓸 수 있다.
+    function assignVer() { return cfg().get('assignVer', 0); }
     function myPid() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.personId; }
     function teamOf(pid) { return get(/databases/$(database)/documents/roster/$(pid)).data.team; }
     function myReceiver() { return get(/databases/$(database)/documents/assignments/$(myPid())).data.receiverPid; }
@@ -23,9 +27,9 @@ service cloud.firestore {
       allow update: if isAdmin() && request.resource.data.phase >= resource.data.phase;
     }
 
-    // 명단: 이름, 팀, 연결된 계정(uid)
+    // 명단: 이름, 팀, 연결된 계정(uid). 연결 전 계정은 읽을 수 없다(초대 코드 연결은 읽지 않고 바로 쓴다).
     match /roster/{pid} {
-      allow read: if signedIn();
+      allow read: if member();
       allow create, delete: if isAdmin() && phase() == 0;
       allow update: if isAdmin()
         || (signedIn()
@@ -37,7 +41,7 @@ service cloud.firestore {
 
     // 참여자 화면용 명단 요약(이름·팀·근무지). 운영 화면이 명단과 다르면 다시 쓴다. 읽기 수를 줄이려고 둔다.
     match /public/{docId} {
-      allow read: if signedIn();
+      allow read: if member();
       allow write: if isAdmin();
     }
 
@@ -55,9 +59,9 @@ service cloud.firestore {
         && request.resource.data.personId == resource.data.personId;
     }
 
-    // 캐릭터 선택: 누구나 볼 수 있고 본인만 바꾼다.
+    // 캐릭터 선택: 참여자는 모두 볼 수 있고 본인만 바꾼다.
     match /avatars/{pid} {
-      allow read: if signedIn();
+      allow read: if member();
       allow write: if linked() && myPid() == pid
         && request.resource.data.avatar is int
         && request.resource.data.avatar >= 0 && request.resource.data.avatar < 8;
@@ -86,9 +90,9 @@ service cloud.firestore {
       allow write: if isAdmin() && phase() == 0;
     }
 
-    // 받는 사람의 인증(코드 + 후기). 익명 피드에 공개된다.
+    // 받는 사람의 인증(코드 + 후기). 참여자에게 익명 피드로 공개된다.
     match /redemptions/{code} {
-      allow read: if signedIn();
+      allow read: if member();
       allow create: if linked() && phase() == 1
         && codeDoc(code).receiverPid == myPid()
         && request.resource.data.receiverPid == myPid()
@@ -103,7 +107,7 @@ service cloud.firestore {
 
     // 받는 사람 -> 마니또 익명 감사 답장
     match /thanks/{code} {
-      allow read: if signedIn();
+      allow read: if member();
       allow create: if linked()
         && codeDoc(code).receiverPid == myPid()
         && exists(/databases/$(database)/documents/redemptions/$(code))
@@ -161,11 +165,14 @@ service cloud.firestore {
     }
 
     // 단서: 문서 ID = 받는사람ID_순번. 공개된 개수만큼만 읽을 수 있다.
+    // 다시 배정하면 지난 회차 단서(예전 마니또의 답)는 읽을 수 없고, 새 마니또가 앱을 열 때 지금 회차로 다시 쓴다.
     match /clues/{id} {
       allow get: if linked()
         && resource.data.receiverPid == myPid()
-        && resource.data.idx < cfg().cluesReleased;
+        && resource.data.idx < cfg().cluesReleased
+        && resource.data.get('ver', -1) == assignVer();
       allow create, update: if linked()
+        && request.resource.data.ver == assignVer()
         && request.resource.data.receiverPid == myReceiver()
         && request.resource.data.idx is int
         && request.resource.data.idx >= 0 && request.resource.data.idx < 6
@@ -173,7 +180,7 @@ service cloud.firestore {
     }
 
     match /nudges/{receiverPid} {
-      allow read: if signedIn();
+      allow read: if member();
       allow write: if isAdmin();
     }
 
@@ -185,7 +192,7 @@ service cloud.firestore {
     }
 
     match /voteCards/{cardId} {
-      allow read: if signedIn() && phase() >= 3;
+      allow read: if member() && phase() >= 3;
       allow write: if isAdmin() && phase() == 3;
     }
     match /cardOwners/{cardId} {
@@ -208,7 +215,7 @@ service cloud.firestore {
     }
 
     match /results/{docId} {
-      allow read: if signedIn() && (phase() >= 5 || isAdmin());
+      allow read: if (linked() && phase() >= 5) || isAdmin();
       allow write: if isAdmin() && phase() >= 4;
     }
   }
