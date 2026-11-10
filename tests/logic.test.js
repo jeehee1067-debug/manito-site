@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { splitTeams, assignWithTeams, assignManito, assignmentMemo, generateCodes } from "../src/lib/assign.js";
 import { computeTickets, weightedDraw, pickMostTickets, rankBestManito } from "../src/lib/scoring.js";
 import { seededRandom } from "../src/lib/random.js";
+import { rosterSummary, summaryToList, sameSummary } from "../src/lib/roster.js";
 
 const pids = Array.from({ length: 56 }, (_, i) => `p${String(i + 1).padStart(3, "0")}`);
 
@@ -190,4 +191,19 @@ test("베스트 마니또: 가중치 반영 정렬, 실격자 제외", () => {
     disqualified: new Set(["C"]),
   });
   assert.deepEqual(ranked.map((r) => r.giverPid), ["A", "B"]);
+});
+
+test("명단 요약: 이름·팀·근무지만, pid 순서 고정, 가입 여부·수상 제외 변화는 같은 요약", () => {
+  const rows = [
+    { pid: "p002", name: "다라", team: 2, loc: "S1L", uid: null, disqualified: false, inviteUsed: "X" },
+    { pid: "p001", name: "가나", team: 1, loc: "SR3", uid: "u1", disqualified: false },
+  ];
+  const sum = rosterSummary(rows);
+  assert.deepEqual(Object.keys(sum), ["p001", "p002"]);
+  assert.deepEqual(sum.p002, { name: "다라", team: 2, loc: "S1L" });
+  assert.deepEqual(summaryToList(sum).map((r) => r.pid), ["p001", "p002"]);
+  const claimed = rows.map((r) => ({ ...r, uid: "u-" + r.pid, disqualified: true }));
+  assert.ok(sameSummary(sum, rosterSummary(claimed)), "가입·제외만 바뀌면 다시 쓰지 않는다");
+  assert.ok(!sameSummary(sum, rosterSummary(rows.map((r) => (r.pid === "p001" ? { ...r, team: 3 } : r)))), "팀이 바뀌면 다시 쓴다");
+  assert.ok(sameSummary({ p002: sum.p002, p001: sum.p001 }, sum), "키 순서가 달라도 같은 요약");
 });

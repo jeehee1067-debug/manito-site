@@ -7,7 +7,7 @@ import { syncClues } from "../lib/sync.js";
 import { Panel, avatarSrc } from "../ui.jsx";
 
 export default function Profile() {
-  const { myPid, nameOf, avatarOf, user } = useApp();
+  const { myPid, nameOf, avatarOf, user, loadAvatar, setAvatarLocal } = useApp();
   const [answers, setAnswers] = useState(PROFILE_QUESTIONS.map(() => ""));
   const [loaded, setLoaded] = useState(false);
   const [status, setStatus] = useState("");
@@ -19,7 +19,8 @@ export default function Profile() {
     });
   }, [myPid]);
 
-  const pickAvatar = (i) => setDoc(doc(db, "avatars", myPid), { avatar: i });
+  useEffect(() => loadAvatar(myPid), [myPid, loadAvatar]);
+  const pickAvatar = (i) => setDoc(doc(db, "avatars", myPid), { avatar: i }).then(() => setAvatarLocal(myPid, i));
 
   async function save(e) {
     e.preventDefault();

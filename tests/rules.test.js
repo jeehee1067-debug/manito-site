@@ -12,7 +12,7 @@ import {
   assertFails, assertSucceeds, initializeTestEnvironment,
 } from "@firebase/rules-unit-testing";
 import {
-  addDoc, arrayRemove, arrayUnion, collection, deleteDoc, deleteField, doc, getDoc, getDocs, query,
+  addDoc, arrayRemove, arrayUnion, collection, deleteDoc, deleteField, doc, documentId, getDoc, getDocs, limit, orderBy, query,
   serverTimestamp, setDoc, updateDoc, where, writeBatch,
 } from "firebase/firestore";
 
@@ -42,6 +42,7 @@ async function seed({ phase = 1, cluesReleased = 2, admins = [ADMIN], extra } = 
       b.set(doc(db, "roster", pid), { name: pid, loc: "SR3", team: TEAM[pid], uid: UID[pid] || null, disqualified: false });
     }
     b.set(doc(db, "invites", "INV005"), { personId: "p005" });
+    b.set(doc(db, "public", "roster"), { people: { p001: { name: "p001", team: 1, loc: "SR3" } } });
     for (const [pid, uid] of Object.entries(UID)) {
       b.set(doc(db, "users", uid), { personId: pid, eliminated: [] });
       b.set(doc(db, "assignments", pid), { receiverPid: RECEIVER[pid] });
@@ -447,12 +448,12 @@ describe("앱 흐름: 참여자 화면", () => {
     await assertFails(getDoc(doc(p("p003"), "clues", "p003_0"))); // 문서가 없을 때도 거부(화면은 catch로 처리)
   });
 
-  test("피드와 우리 팀 (Feed.jsx, Team.jsx)", async () => {
+  test("피드와 우리 팀, 명단 요약·캐릭터 (Feed.jsx, Team.jsx, App.jsx, ui.jsx Avatar)", async () => {
     const db = p("p001");
-    await assertSucceeds(getDocs(collection(db, "redemptions")));
-    await assertSucceeds(getDocs(collection(db, "thanks")));
-    await assertSucceeds(getDocs(collection(db, "roster")));
-    await assertSucceeds(getDocs(collection(db, "avatars")));
+    await assertSucceeds(getDocs(query(collection(db, "redemptions"), orderBy("createdAt", "desc"), limit(30))));
+    await assertSucceeds(getDocs(query(collection(db, "thanks"), where(documentId(), "in", ["A1A1", "B1B1"]))));
+    await assertSucceeds(getDoc(doc(db, "public", "roster")));
+    await assertSucceeds(getDoc(doc(db, "avatars", "p003")));
     await assertSucceeds(getDoc(doc(db, "config", "app")));
     await assertSucceeds(getDoc(doc(db, "users", "u1")));
     await assertSucceeds(getDoc(doc(db, "progress", "p003"))); // 같은 1팀
@@ -495,9 +496,11 @@ describe("앱 흐름: 참여자 화면", () => {
 });
 
 describe("앱 흐름: 운영 화면", () => {
-  test("준비 단계: 명단·초대 코드·근무지·팀·배정 (Admin.jsx Setup)", async () => {
+  test("준비 단계: 명단·초대 코드·근무지·팀·배정·명단 요약 (Admin.jsx Setup)", async () => {
     await seed({ phase: 0 });
     const db = admin();
+    await assertSucceeds(getDocs(collection(db, "roster")));
+    await assertSucceeds(setDoc(doc(db, "public", "roster"), { people: { p001: { name: "가", team: 1, loc: "SR3" } }, at: serverTimestamp() }));
     await assertSucceeds(getDocs(collection(db, "invites")));
     const add = writeBatch(db);
     add.set(doc(db, "roster", "p006"), { name: "새사람", loc: "S1L", team: null, uid: null, disqualified: false });
@@ -528,11 +531,13 @@ describe("앱 흐름: 운영 화면", () => {
     await assertFails(setDoc(doc(db, "roster", "p006"), { name: "x", loc: "SR3", team: 1, uid: null, disqualified: false }));
     await assertFails(deleteDoc(doc(db, "roster", "p005")));
     await assertSucceeds(updateDoc(doc(db, "roster", "p001"), { disqualified: true }));
+    await assertSucceeds(setDoc(doc(db, "public", "roster"), { people: {}, at: serverTimestamp() })); // 시작 후에도 요약 갱신 가능
   });
 
-  test("참여자는 명단·초대·알림·배정을 못 만진다", async () => {
+  test("참여자는 명단·명단 요약·초대·알림·배정을 못 만진다", async () => {
     await seed({ phase: 0 });
     const db = p("p001");
+    await assertFails(setDoc(doc(db, "public", "roster"), { people: {} }));
     await assertFails(setDoc(doc(db, "roster", "p009"), { name: "x", loc: "SR3", team: 1, uid: null, disqualified: false }));
     await assertFails(updateDoc(doc(db, "roster", "p002"), { team: 1 }));
     await assertFails(setDoc(doc(db, "invites", "XXXXXX"), { personId: "p001" }));

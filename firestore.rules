@@ -35,6 +35,12 @@ service cloud.firestore {
             && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteUsed)).data.personId == pid);
     }
 
+    // 참여자 화면용 명단 요약(이름·팀·근무지). 운영 화면이 명단과 다르면 다시 쓴다. 읽기 수를 줄이려고 둔다.
+    match /public/{docId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
     // 초대 코드 -> 명단 연결
     match /invites/{code} {
       allow get: if signedIn();

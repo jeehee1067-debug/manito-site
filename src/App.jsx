@@ -1,8 +1,9 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { collection, doc, onSnapshot } from "firebase/firestore";
+import { doc, getDoc, onSnapshot } from "firebase/firestore";
 import { auth, db, configured } from "./firebase.js";
 import { AVATARS, PHASE, PHASES } from "./lib/constants.js";
+import { summaryToList } from "./lib/roster.js";
 import Login from "./pages/Login.jsx";
 import Claim from "./pages/Claim.jsx";
 import Profile from "./pages/Profile.jsx";
@@ -101,11 +102,14 @@ export default function App() {
   return <Session key={user.uid} user={user} logout={logout} />;
 }
 
+const AVATAR_TTL = 10 * 60 * 1000;
+
 function Session({ user, logout }) {
   const [config, setConfig] = useState(undefined);
   const [me, setMe] = useState(undefined); // users/{uid}
-  const [roster, setRoster] = useState([]);
-  const [avatars, setAvatars] = useState({});
+  const [roster, setRoster] = useState(undefined); // public/roster 요약 → [{ pid, name, team, loc }]
+  const [avatars, setAvatars] = useState({}); // 화면에 나온 사람만 한 번씩 읽어 둔다 { pid: 번호 | null }
+  const asked = useRef(new Map()); // pid → 마지막으로 읽은 시각
   const [tab, setTab] = useHashTab("mission");
 
   useEffect(() => {
@@ -116,14 +120,31 @@ function Session({ user, logout }) {
       watch(doc(db, "users", user.uid), (s) => {
         if (!s.metadata.hasPendingWrites) setMe(s.exists() ? s.data() : null);
       }, () => setMe(null), 3, { includeMetadataChanges: true }),
-      watch(collection(db, "roster"), (s) => setRoster(s.docs.map((d) => ({ pid: d.id, ...d.data() }))), () => {}),
-      watch(collection(db, "avatars"), (s) => setAvatars(Object.fromEntries(s.docs.map((d) => [d.id, d.data().avatar]))), () => {}),
+      // 읽기 줄이기: 명단 56건 대신 요약 문서 1건 (운영 화면이 명단과 맞춰 둔다)
+      watch(doc(db, "public", "roster"), (s) => setRoster(summaryToList(s.exists() ? s.data().people : {})), () => setRoster([])),
     ];
     return () => offs.forEach((off) => off());
   }, [user]);
 
+  // 읽기 줄이기: 캐릭터 선택은 전원 것을 구독하지 않고, 화면에 나온 사람 것만 읽어 둔다.
+  // 읽어 둔 값은 AVATAR_TTL이 지나면 그 사람이 다시 화면에 나올 때 새로 읽는다
+  // (다른 사람이 캐릭터를 바꾸면 최대 그만큼 늦게 보인다. 캐릭터는 보통 처음에 한 번 고른다).
+  const loadAvatar = useCallback((pid) => {
+    const now = Date.now();
+    if (!pid || now - (asked.current.get(pid) ?? -Infinity) < AVATAR_TTL) return;
+    asked.current.set(pid, now);
+    getDoc(doc(db, "avatars", pid))
+      .then((s) => setAvatars((p) => ({ ...p, [pid]: s.exists() ? s.data().avatar : null })))
+      .catch(() => setAvatars((p) => ({ ...p, [pid]: null })));
+  }, []);
+  const setAvatarLocal = useCallback((pid, index) => {
+    asked.current.set(pid, Date.now());
+    setAvatars((p) => ({ ...p, [pid]: index }));
+  }, []);
+
   const ctx = useMemo(() => {
-    const byPid = Object.fromEntries(roster.map((r) => [r.pid, r]));
+    const list = roster || [];
+    const byPid = Object.fromEntries(list.map((r) => [r.pid, r]));
     const myPid = me?.personId || null;
     return {
       user,
@@ -131,15 +152,19 @@ function Session({ user, logout }) {
       me,
       myPid,
       myTeam: myPid ? byPid[myPid]?.team : null,
-      roster,
+      roster: list,
+      rosterReady: roster !== undefined,
       byPid,
       nameOf: (pid) => byPid[pid]?.name || "(알 수 없음)",
       avatarOf: (pid) => (avatars[pid] ?? defaultAvatar(pid)),
+      avatarReady: (pid) => pid in avatars,
+      loadAvatar,
+      setAvatarLocal,
       isAdmin: Boolean(user && config?.admins?.includes(user.uid)),
     };
-  }, [user, config, me, roster, avatars]);
+  }, [user, config, me, roster, avatars, loadAvatar, setAvatarLocal]);
 
-  if (config === undefined || me === undefined) return <Loading />;
+  if (config === undefined || me === undefined || roster === undefined) return <Loading />;
   if (config === null) return <Login bootstrap />;
 
   const phase = config.phase;
