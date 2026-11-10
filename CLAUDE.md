@@ -13,9 +13,13 @@ git merge origin/main
 ## 배포 전에 돌릴 것
 
 ```bash
-npm test        # 배정·코드·응모권·추첨 로직
+npm test            # 배정·코드·응모권·추첨 로직
+npm run test:rules  # firestore.rules (Firestore 에뮬레이터, Java 21 이상 필요)
 npm run build
 ```
+
+GitHub Actions도 같은 순서로 돌린다(main: 통과해야 배포, 다른 브랜치: 테스트만).
+화면 점검은 `npm run dev:emu` — 실제 프로젝트 대신 로컬 에뮬레이터(로그인 9099, Firestore 8080)에 붙는다.
 
 ## 가장 중요한 것: 보안 규칙과 코드가 어긋나지 않게
 
@@ -23,13 +27,10 @@ npm run build
 Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **반드시 `firestore.rules`의 같은 경로도 같이 고치고**, 규칙을 Firebase 콘솔에 다시 게시해야 한다.
 어긋나면 기록이 통째로 거부된다(방탈출에서 실제로 난 사고와 같은 종류).
 
-규칙은 아직 Firestore 에뮬레이터로 자동 테스트하지 못했다. **첫 작업으로 `@firebase/rules-unit-testing`으로 규칙 테스트를 만드는 것을 권장**한다. 최소 확인 항목:
+규칙 테스트는 `tests/rules.test.js`(`@firebase/rules-unit-testing`)에 있다.
 
-1. 참여자는 남의 `assignments`, `giverCodes`, `codes`, `clues`, `deliveries`를 읽을 수 없다
-2. 다른 사람에게 발급된 코드로 `redemptions`를 만들 수 없다
-3. 단계(`config.phase`)는 줄일 수 없다
-4. 운영자도 phase 3 전에는 `assignments`·`giverCodes`를 읽을 수 없다
-5. 완료한 미션 슬롯의 `choices` 난이도를 바꿀 수 없다
+- 1~5번 묶음: 막아야 하는 것 — 남의 `assignments`·`giverCodes`·`codes`·`clues`·`deliveries` 읽기, 남의 코드로 `redemptions` 생성, `config.phase` 역행, 운영자의 phase 3 전 짝 정보 열람, 완료했거나 코드가 인증된 슬롯의 `choices` 난이도 변경
+- "앱 흐름" 묶음: 각 화면이 실제로 보내는 값의 모양을 옮겨 적은 것. **화면 코드에서 Firestore에 쓰는 값을 바꾸면 규칙과 이 테스트를 같이 고친다.**
 
 ## 정해진 규칙 (바꾸려면 사용자에게 먼저 확인)
 
@@ -49,12 +50,14 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 | `src/lib/assign.js` | 팀 편성, 배정, 코드 생성 |
 | `src/lib/scoring.js` | 응모권 계산, 베스트 마니또 순위, 가중 추첨 |
 | `src/ui.jsx` | 패널·대사창·캐릭터 공통 컴포넌트 |
+| `src/firebase.js` | Firebase 연결. `npm run dev:emu`(`.env.emulator`)일 때만 에뮬레이터 연결 |
+| `src/xmas.jsx`, `src/xmas.css`, `src/assets/xmas/` | 연말·크리스마스 장식(시즌 한정). 빼는 방법은 README "연말 장식" |
+| `tests/rules.test.js` | 보안 규칙 테스트 |
 | `src/pages/*` | 화면 |
-| `src/styles.css` | 방탈출 `assets/css/style.css`의 색·테두리·버튼·대사창 값을 따름 |
+| `src/styles.css` | 방탈출 `assets/css/style.css`의 색·테두리·버튼·대사창 값을 따름. 시즌 장식은 여기 넣지 말고 `xmas.css`에 |
 | `public/char/p1~p4.png` | 방탈출 참가자 캐릭터 |
 
 ## 아직 안 된 것
 
-- Firestore 규칙 자동 테스트
 - 사내망에서 Firebase 로그인(`identitytoolkit.googleapis.com`)과 Firestore(`firestore.googleapis.com`) 접속 확인
-- 실제 Firebase 프로젝트에 연결한 상태의 화면 점검(지금까지는 로그인 화면과 스타일 미리보기만 확인)
+- 실제 Firebase 프로젝트에 연결한 상태의 화면 점검. 에뮬레이터로는 4명 기준 전체 흐름(운영자 설정 → 명단 → 배정 → 가입 → 미션 → 인증 → 단서 → 지목 → 투표 → 집계 → 추첨)을 화면으로 진행해 확인했다(콘솔 오류 0건). 실제 프로젝트·사내망은 아직.
