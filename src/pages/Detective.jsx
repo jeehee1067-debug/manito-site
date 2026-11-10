@@ -5,18 +5,29 @@ import {
 import { db } from "../firebase.js";
 import { useApp } from "../App.jsx";
 import { Avatar, Dialogue, Panel } from "../ui.jsx";
-import { PHASE, PROFILE_QUESTIONS, REVIEW_MIN, CLUE_COUNT } from "../lib/constants.js";
+import { PHASE, PROFILE_QUESTIONS, REVIEW_MIN, CLUE_COUNT, PART_HINT_IDX } from "../lib/constants.js";
 import { normalizeCode } from "../lib/random.js";
 
 export default function Detective() {
-  const { myPid } = useApp();
+  const { myPid, config, roster } = useApp();
+  // 파트 단서: 최종 지목 단계부터 읽을 수 있다(보안 규칙). undefined = 아직 안 읽음, null = 없음
+  const partsInUse = roster.some((r) => r.part);
+  const hintOpen = partsInUse && config.phase >= PHASE.GUESSING;
+  const [hintPart, setHintPart] = useState(undefined);
+  useEffect(() => {
+    if (!hintOpen) return;
+    getDoc(doc(db, "clues", `${myPid}_${PART_HINT_IDX}`))
+      .then((s) => setHintPart(s.exists() ? s.data().answer : null))
+      .catch(() => setHintPart(null));
+  }, [myPid, hintOpen, config.assignVer]);
+
   return (
     <>
       <Inbox myPid={myPid} />
       <CodeEntry myPid={myPid} />
       <MyRedemptions myPid={myPid} />
-      <Clues myPid={myPid} />
-      <Suspects myPid={myPid} />
+      <Clues myPid={myPid} partsInUse={partsInUse} hintOpen={hintOpen} hintPart={hintPart} />
+      <Suspects myPid={myPid} hintPart={hintOpen ? hintPart : null} />
     </>
   );
 }
@@ -156,7 +167,7 @@ function ThanksForm({ code }) {
   );
 }
 
-function Clues({ myPid }) {
+function Clues({ myPid, partsInUse, hintOpen, hintPart }) {
   const { config } = useApp();
   const released = Math.min(config.cluesReleased || 0, CLUE_COUNT);
   const [clues, setClues] = useState({});
@@ -170,20 +181,31 @@ function Clues({ myPid }) {
 
   return (
     <Panel title={`단서 ${released} / ${CLUE_COUNT}`}>
-      <p className="small">내 마니또의 프로필 답변이에요. 매주 금요일 2개씩 공개돼요.</p>
+      <p className="small">
+        내 마니또의 프로필 답변이에요. 매주 금요일 2개씩 공개돼요.
+        {partsInUse && " 최종 지목이 열리면 마지막 단서로 마니또의 파트가 공개돼요."}
+      </p>
       <ol className="clues">
-        {PROFILE_QUESTIONS.map((q, i) => (
+        {PROFILE_QUESTIONS.map(({ q }, i) => (
           <li key={i} className={i < released ? "open" : "closed"}>
             <span className="clue-q">{q}</span>
             <span className="clue-a">{i < released ? clues[i] ?? "아직 마니또가 프로필을 안 채웠어요" : "잠김"}</span>
           </li>
         ))}
+        {partsInUse && (
+          <li className={hintOpen ? "open part-hint" : "closed"}>
+            <span className="clue-q">마지막 단서 · 내 마니또의 파트는?</span>
+            <span className="clue-a">
+              {!hintOpen ? "잠김 (최종 지목이 열리면 공개)" : hintPart === undefined ? "불러오는 중" : hintPart ?? "파트 정보가 없어요"}
+            </span>
+          </li>
+        )}
       </ol>
     </Panel>
   );
 }
 
-function Suspects({ myPid }) {
+function Suspects({ myPid, hintPart }) {
   const { roster, byPid, me, user, config, myTeam } = useApp();
   const myLoc = byPid[myPid]?.loc;
   const bySite = Boolean(config.siteMatched && myLoc);
@@ -193,12 +215,13 @@ function Suspects({ myPid }) {
   const [msg, setMsg] = useState("");
   const eliminated = new Set(me?.eliminated || []);
   // 배정 조건(같은 근무지, 다른 팀)에 맞지 않는 사람은 처음부터 후보에서 뺀다.
+  // 파트 단서가 공개되면 그 파트 사람만 남긴다(단서는 배정 때 명단에서 만든 값이라 사실이다).
   const suspects = useMemo(
     () =>
       roster
-        .filter((r) => r.pid !== myPid && (!byTeam || r.team !== myTeam) && (!bySite || r.loc === myLoc))
+        .filter((r) => r.pid !== myPid && (!byTeam || r.team !== myTeam) && (!bySite || r.loc === myLoc) && (!hintPart || r.part === hintPart))
         .sort((a, b) => a.name.localeCompare(b.name, "ko")),
-    [roster, myPid, myTeam, myLoc, byTeam, bySite]
+    [roster, myPid, myTeam, myLoc, byTeam, bySite, hintPart]
   );
   const remaining = suspects.filter((s) => !eliminated.has(s.pid));
 
@@ -229,6 +252,7 @@ function Suspects({ myPid }) {
       <p className="small">
         {byTeam && bySite ? "우리 팀과 다른 근무지 사람은 " : byTeam ? "우리 팀은 " : bySite ? "다른 근무지 사람은 " : ""}
         {byTeam || bySite ? "내 마니또가 될 수 없어서 처음부터 빠져 있어요. " : ""}
+        {hintPart ? `마지막 단서에 따라 ${hintPart} 사람만 남겼어요. ` : ""}
         아닌 것 같은 사람을 눌러 지워 보세요.
       </p>
       <div className="suspect-grid">

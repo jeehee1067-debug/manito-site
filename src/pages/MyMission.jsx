@@ -1,19 +1,22 @@
 import { useEffect, useState } from "react";
-import { addDoc, collection, doc, getDoc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc, onSnapshot, query, serverTimestamp, setDoc, where } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp, Loading } from "../App.jsx";
-import { LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT } from "../lib/constants.js";
-import { seededRandom } from "../lib/random.js";
+import { LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT, SPEND_GUIDE_WON } from "../lib/constants.js";
+import { seededRandom, shuffle } from "../lib/random.js";
 import { syncClues } from "../lib/sync.js";
 import { Avatar, Dialogue, Panel } from "../ui.jsx";
+import { TICKET_RULES } from "../config/prizes.js";
 
-// 같은 사람에게는 항상 같은 3장이 나온다. 대상이 다른 근무지면 원격으로 할 수 있는 카드만.
-function cardOptions(pid, slot, remoteOnly) {
-  const rand = seededRandom(`${pid}:${slot}:${remoteOnly ? "r" : "a"}`);
-  return ["easy", "normal", "hard"].map((level) => {
-    const list = MISSION_CARDS[level].filter((c) => !remoteOnly || c.remote);
-    return { ...list[Math.floor(rand() * list.length)], level };
-  });
+const LEVELS = ["easy", "normal", "hard"];
+const ALL_CARDS = Object.values(MISSION_CARDS).flat();
+const isCostCard = (cardId) => Boolean(ALL_CARDS.find((c) => c.id === cardId)?.cost);
+
+// 난이도별 카드 순서(사람·주차마다 고정). 맨 앞 장이 먼저 보이고 "다른 카드 보기"를 누르면 다음 장으로 넘어간다.
+// 대상이 다른 근무지면 원격으로 할 수 있는 카드만. 돈이 드는 카드가 나와도 넘기면 무비용 카드가 나온다.
+function cardDeck(pid, slot, level, remoteOnly) {
+  const list = MISSION_CARDS[level].filter((c) => !remoteOnly || c.remote);
+  return shuffle(list, seededRandom(`${pid}:${slot}:${level}:${remoteOnly ? "r" : "a"}`)).map((c) => ({ ...c, level }));
 }
 
 export default function MyMission() {
@@ -23,6 +26,17 @@ export default function MyMission() {
   const [missions, setMissions] = useState({});
   const [progress, setProgress] = useState({});
   const [nudge, setNudge] = useState(false);
+  const [inboxSlots, setInboxSlots] = useState([]); // 내 마니또가 완료를 알린 주차
+  const [mine, setMine] = useState([]); // 내가 받는 사람으로서 입력한 인증
+
+  // 받는 사람으로서: 마니또가 보냈는데 아직 인증하지 않은 미션이 있으면 알려 준다(인증해야 둘 다 응모권을 받는다).
+  useEffect(() => {
+    const offs = [
+      onSnapshot(query(collection(db, "deliveries"), where("receiverPid", "==", myPid)), (s) => setInboxSlots(s.docs.map((d) => d.data().slot)), () => {}),
+      onSnapshot(query(collection(db, "redemptions"), where("receiverPid", "==", myPid)), (s) => setMine(s.docs.map((d) => d.data())), () => {}),
+    ];
+    return () => offs.forEach((o) => o());
+  }, [myPid]);
 
   useEffect(() => {
     getDoc(doc(db, "assignments", myPid))
@@ -63,6 +77,8 @@ export default function MyMission() {
   const myLoc = byPid[myPid]?.loc;
   const theirLoc = byPid[receiverPid]?.loc;
   const remote = Boolean(myLoc && theirLoc && myLoc !== theirLoc);
+  const pending = [...new Set(inboxSlots)].filter((slot) => !mine.some((r) => r.slot === slot));
+  const myEntries = Math.min(TICKET_RULES.maxReceiverEntries, mine.filter((r) => !r.voided).length);
 
   return (
     <>
@@ -76,6 +92,11 @@ export default function MyMission() {
         </div>
       </section>
 
+      {pending.length > 0 && running && (
+        <Dialogue speaker="알림" tone="gold">
+          내 마니또가 보낸 미션 {pending.length}건을 아직 인증하지 않았어요. <a href="#detective">추리 보드</a>에서 코드와 후기를 입력하면 나와 마니또 모두 응모권을 받아요.
+        </Dialogue>
+      )}
       {nudge && running && (
         <Dialogue speaker="운영진" tone="warn">{nameOf(receiverPid)}님이 아직 받은 미션이 없어요. 이번 주 미션을 먼저 해 주세요!</Dialogue>
       )}
@@ -100,7 +121,7 @@ export default function MyMission() {
         />
       ))}
 
-      <TicketSummary codes={codes} missions={missions} />
+      <TicketSummary codes={codes} missions={missions} entries={myEntries} />
     </>
   );
 }
@@ -112,6 +133,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, allD
   const [error, setError] = useState("");
   const [redeemed, setRedeemed] = useState(null);
   const [thanks, setThanks] = useState(null);
+  const [offset, setOffset] = useState({ easy: 0, normal: 0, hard: 0 }); // 난이도별로 몇 번째 카드를 보고 있는지
   const isPraise = slot === PRAISE_SLOT;
 
   useEffect(() => {
@@ -168,14 +190,35 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, allD
 
       {open && !done && !isPraise && !choice && (
         <>
-          <p className="small">세 장 중 하나를 골라 주세요. 도전 미션은 인증되면 응모권을 1장 더 받아요.</p>
+          <p className="small">
+            세 장 중 하나를 골라 주세요. 도전 미션은 인증되면 응모권을 1장 더 받아요.
+            마음에 안 들면 "다른 카드 보기"로 같은 난이도의 다른 카드를 볼 수 있어요.
+          </p>
+          <p className="small">
+            <span className="cost-tag">소액 비용</span> 표시는 간식·음료처럼 내 돈이 드는 카드예요. 건당 {SPEND_GUIDE_WON.toLocaleString()}원 이하를 권장하고,
+            돈이 안 드는 카드를 골라도 응모권은 똑같아요.
+          </p>
           <div className="cards">
-            {cardOptions(myPid, slot, remote).map((c) => (
-              <button key={c.id} className={`card level-${c.level}`} onClick={() => choose(c)}>
-                <span className="card-level">{LEVEL_LABEL[c.level]}</span>
-                <span className="card-text">{c.text}</span>
-              </button>
-            ))}
+            {LEVELS.map((level) => {
+              const deck = cardDeck(myPid, slot, level, remote);
+              const c = deck[offset[level] % deck.length];
+              return (
+                <div key={level} className="card-wrap">
+                  <button className={`card level-${c.level}`} onClick={() => choose(c)}>
+                    <span className="card-head">
+                      <span className="card-level">{LEVEL_LABEL[c.level]}</span>
+                      {c.cost && <span className="cost-tag">소액 비용</span>}
+                    </span>
+                    <span className="card-text">{c.text}</span>
+                  </button>
+                  {deck.length > 1 && (
+                    <button type="button" className="text-btn" onClick={() => setOffset((o) => ({ ...o, [level]: o[level] + 1 }))}>
+                      다른 {LEVEL_LABEL[level]} 카드 보기
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
           {error && <p className="error" role="alert">{error}</p>}
         </>
@@ -187,6 +230,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, allD
             <div className="chosen">
               <span className={`badge level-${choice.level}`}>{LEVEL_LABEL[choice.level]}</span>
               <span>{choice.text}</span>
+              {isCostCard(choice.cardId) && <span className="cost-tag">소액 비용 · {SPEND_GUIDE_WON.toLocaleString()}원 이하 권장</span>}
               {/* 코드가 이미 인증된 슬롯은 보안 규칙이 카드 변경을 막는다 */}
               {!redeemed && (
                 <button type="button" className="text-btn"
@@ -242,7 +286,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, allD
   );
 }
 
-function TicketSummary({ codes, missions }) {
+function TicketSummary({ codes, missions, entries }) {
   const [redeemedSlots, setRedeemedSlots] = useState({});
   useEffect(() => {
     if (!codes) return;
@@ -252,13 +296,22 @@ function TicketSummary({ codes, missions }) {
     return () => offs.forEach((o) => o());
   }, [codes]);
 
+  const R = TICKET_RULES;
   const mission = Object.values(redeemedSlots).filter(Boolean).length;
-  const hard = Math.min(2, Object.entries(redeemedSlots).filter(([slot, ok]) => ok && missions.choices?.[slot]?.level === "hard").length);
+  const hard = Math.min(R.maxHard, Object.entries(redeemedSlots).filter(([slot, ok]) => ok && missions.choices?.[slot]?.level === "hard").length);
 
   return (
-    <Panel title="내 응모권 (확정분)">
-      <p className="ticket-count"><strong>{mission + hard}</strong>장</p>
-      <p className="small">미션 {mission} + 도전 {hard}. 받는 사람으로서 입력한 인증, 끝까지 안 들킨 보너스, 정답 지목은 마지막에 더해져요.</p>
+    <Panel title="내 응모권 (지금까지)">
+      <p className="ticket-count"><strong>{mission + hard + entries}</strong>장</p>
+      <ul className="plain tickets">
+        <li>마니또로서: 인증된 미션 {mission} / {R.maxMissions} + 도전 {hard} / {R.maxHard}</li>
+        <li>받는 사람으로서: 인증 입력 {entries} / {R.maxReceiverEntries}</li>
+        <li className="muted">
+          마지막에 더해지는 것: 끝까지 안 들키면 +{R.hidden}
+          {mission >= R.hiddenMinMissions ? "" : ` (내 미션이 ${R.hiddenMinMissions}건 이상 인증돼야 받을 수 있어요)`}, 내 마니또를 맞히면 +{R.correctGuess}
+        </li>
+      </ul>
+      <p className="small">내 마니또가 미션을 안 보낸 주차는 마지막에 인증 입력 대신 1장씩 채워져요(내 미션이 {R.compMinMissions}건 이상 인증된 경우). <a href="#rules">규칙 전체 보기</a></p>
     </Panel>
   );
 }

@@ -49,7 +49,10 @@ export default function Reveal() {
             <p className="target-name">{myManito ? nameOf(myManito) : "-"}</p>
             {mine && (
               <p className="small">
-                내 응모권 {mine.total}장: 미션 {mine.mission} + 도전 {mine.hard} + 인증 입력 {mine.entries} + 은신 {mine.hidden} + 정답 지목 {mine.guess}
+                내 응모권 {mine.total}장: 미션 {mine.mission} + 도전 {mine.hard} + 인증 입력 {mine.entries}
+                {mine.comp > 0 && ` + 못 받은 주차 보상 ${mine.comp}`} + 은신 {mine.hidden} + 정답 지목 {mine.guess}
+                {mine.assumed > 0 && ` (대상 불참으로 인정된 미션 ${mine.assumed}건 포함)`}
+                {mine.total === 0 && mine.mission + mine.hard + mine.entries + mine.hidden + mine.guess + (mine.comp || 0) > 0 && " · 수상 제외 또는 중도 이탈로 0장 처리됐어요"}
               </p>
             )}
           </div>
