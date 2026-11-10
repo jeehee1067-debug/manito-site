@@ -120,11 +120,21 @@ function Session({ user, logout }) {
       watch(doc(db, "users", user.uid), (s) => {
         if (!s.metadata.hasPendingWrites) setMe(s.exists() ? s.data() : null);
       }, () => setMe(null), 3, { includeMetadataChanges: true }),
-      // 읽기 줄이기: 명단 56건 대신 요약 문서 1건 (운영 화면이 명단과 맞춰 둔다)
-      watch(doc(db, "public", "roster"), (s) => setRoster(summaryToList(s.exists() ? s.data().people : {})), () => setRoster([])),
     ];
     return () => offs.forEach((off) => off());
   }, [user]);
+
+  // 명단은 초대 코드로 연결된 참여자와 운영자만 읽을 수 있다(보안 규칙). 연결되면 그때 구독한다.
+  // 읽기 줄이기: 명단 56건 대신 요약 문서 1건 (운영 화면이 명단과 맞춰 둔다)
+  const member = Boolean(me?.personId) || Boolean(config?.admins?.includes(user.uid));
+  useEffect(() => {
+    if (!member) {
+      setRoster([]);
+      return undefined;
+    }
+    setRoster(undefined);
+    return watch(doc(db, "public", "roster"), (s) => setRoster(summaryToList(s.exists() ? s.data().people : {})), () => setRoster([]));
+  }, [member]);
 
   // 읽기 줄이기: 캐릭터 선택은 전원 것을 구독하지 않고, 화면에 나온 사람 것만 읽어 둔다.
   // 읽어 둔 값은 AVATAR_TTL이 지나면 그 사람이 다시 화면에 나올 때 새로 읽는다

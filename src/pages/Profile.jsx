@@ -7,7 +7,7 @@ import { syncClues } from "../lib/sync.js";
 import { Panel, avatarSrc } from "../ui.jsx";
 
 export default function Profile() {
-  const { myPid, nameOf, avatarOf, user, loadAvatar, setAvatarLocal } = useApp();
+  const { myPid, nameOf, avatarOf, user, loadAvatar, setAvatarLocal, config } = useApp();
   const [answers, setAnswers] = useState(PROFILE_QUESTIONS.map(() => ""));
   const [loaded, setLoaded] = useState(false);
   const [status, setStatus] = useState("");
@@ -30,8 +30,8 @@ export default function Profile() {
     }
     setStatus("저장하는 중");
     await setDoc(doc(db, "profiles", myPid), { answers: answers.map((a) => a.trim()), updatedAt: serverTimestamp() });
-    await setDoc(doc(db, "progress", myPid), { profileDone: true, cluesSynced: false }, { merge: true });
-    const synced = await syncClues(myPid);
+    await setDoc(doc(db, "progress", myPid), { profileDone: true }, { merge: true });
+    const synced = await syncClues(myPid, config.assignVer ?? 0);
     setStatus(synced ? "저장했어요. 내 대상에게 갈 단서도 준비됐어요." : "저장했어요. 마니또 배정이 끝나면 단서가 자동으로 준비돼요.");
   }
 
