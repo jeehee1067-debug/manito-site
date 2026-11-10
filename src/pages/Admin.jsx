@@ -37,6 +37,41 @@ function useFullRoster() {
   return rows;
 }
 
+// 초대 코드: { pid: 코드 }
+function useInvites() {
+  const [invites, setInvites] = useState({});
+  useEffect(() => onSnapshot(collection(db, "invites"), (s) => {
+    const m = {};
+    s.docs.forEach((d) => { m[d.data().personId] = d.id; });
+    setInvites(m);
+  }), []);
+  return invites;
+}
+
+// 연결된 계정의 메일: { uid: 메일 } (users 문서는 본인과 운영자만 읽는다)
+function useAccountEmails() {
+  const [emails, setEmails] = useState({});
+  useEffect(() => onSnapshot(collection(db, "users"), (s) =>
+    setEmails(Object.fromEntries(s.docs.map((d) => [d.id, d.data().email || ""])))), []);
+  return emails;
+}
+
+// 연결 해제: 명단의 연결을 풀고, 그 계정의 연결 문서를 지우고, 초대 코드를 새로 만든다.
+// 예전 계정은 "연결 전"으로 돌아가 아무것도 못 읽고, 예전 초대 코드도 더는 못 쓴다.
+// 그 사람의 프로필·미션·인증 기록은 명단 번호(pid)에 붙어 있어서, 새 코드로 다시 연결하면 그대로 이어진다.
+async function unlinkPerson(r, oldCode, email) {
+  if (!r.uid) return null;
+  if (!window.confirm(`${r.name}님의 계정 연결을 풀까요?\n연결된 메일: ${email || "(모름)"}\n\n이 계정은 더 이상 ${r.name}님으로 들어올 수 없고, 초대 코드가 새로 바뀌어요. 새 코드를 본인에게 전달하면 새 계정(또는 같은 계정)으로 다시 연결할 수 있어요. 기록(프로필·미션·인증)은 그대로 남아요.`)) return null;
+  const code = makeInviteCode();
+  const b = writeBatch(db);
+  b.update(doc(db, "roster", r.pid), { uid: null });
+  b.delete(doc(db, "users", r.uid));
+  if (oldCode) b.delete(doc(db, "invites", oldCode));
+  b.set(doc(db, "invites", code), { personId: r.pid });
+  await b.commit();
+  return code;
+}
+
 // 명단이 요약과 다르면 요약 문서를 다시 쓴다(명단 추가·삭제·근무지·팀 변경 후 자동).
 async function publishRoster(rows) {
   await setDoc(doc(db, "public", "roster"), { people: rosterSummary(rows), at: serverTimestamp() });
@@ -86,6 +121,7 @@ export default function Admin() {
       {phase >= PHASE.RUNNING && phase <= PHASE.SCORING && <Moderation />}
       {phase === PHASE.VOTING && <VotingAdmin />}
       {phase === PHASE.SCORING && <Scoring />}
+      {phase >= PHASE.RUNNING && <Accounts />}
       {phase === PHASE.REVEAL && <Panel title="공개"><p>결과 탭에서 추첨을 진행하세요.</p></Panel>}
     </>
   );
@@ -96,16 +132,12 @@ function Setup() {
   const roster = full || [];
   const loaded = full !== null; // 명단을 다 읽기 전에 추가하면 번호(p001…)가 겹칠 수 있다
   const [text, setText] = useState("");
-  const [invites, setInvites] = useState({});
+  const invites = useInvites();
+  const emails = useAccountEmails();
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [siteMode, setSiteMode] = useState("any");
 
-  useEffect(() => onSnapshot(collection(db, "invites"), (s) => {
-    const m = {};
-    s.docs.forEach((d) => { m[d.data().personId] = d.id; });
-    setInvites(m);
-  }), []);
 
   async function addPeople() {
     const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -134,7 +166,7 @@ function Setup() {
   }
 
   async function removePerson(r) {
-    if (r.uid) return window.alert("이미 가입한 사람은 지울 수 없어요.");
+    if (r.uid) return window.alert("이미 가입한 사람은 지울 수 없어요. 먼저 연결 해제하세요.");
     if (!window.confirm(`${r.name}님을 명단에서 지울까요?`)) return;
     await deleteDoc(doc(db, "roster", r.pid));
     if (invites[r.pid]) await deleteDoc(doc(db, "invites", invites[r.pid]));
@@ -227,7 +259,7 @@ function Setup() {
         <button className="pk-btn sm" onClick={() => navigator.clipboard.writeText(inviteText)}>이름과 초대 코드 복사</button>
         <div className="table-wrap">
           <table className="pk-table">
-            <thead><tr><th>이름</th><th>근무지</th><th>팀</th><th>초대 코드</th><th>가입</th><th></th></tr></thead>
+            <thead><tr><th>이름</th><th>근무지</th><th>팀</th><th>초대 코드</th><th>연결된 메일</th><th></th></tr></thead>
             <tbody>
               {sorted.map((r) => (
                 <tr key={r.pid}>
@@ -235,8 +267,12 @@ function Setup() {
                   <td><button className="text-btn" onClick={() => cycleLoc(r)} title="눌러서 근무지 바꾸기">{r.loc || "미정"}</button></td>
                   <td>{r.team || "-"}</td>
                   <td className="mono">{invites[r.pid] || "-"}</td>
-                  <td>{r.uid ? "완료" : "-"}</td>
-                  <td><button className="text-btn" onClick={() => removePerson(r)}>삭제</button></td>
+                  <td className="email">{r.uid ? emails[r.uid] || "연결됨" : "-"}</td>
+                  <td>
+                    {r.uid
+                      ? <button className="text-btn" onClick={async () => { const c = await unlinkPerson(r, invites[r.pid], emails[r.uid]); if (c) setMsg(`${r.name}님 연결을 풀었어요. 새 초대 코드: ${c}`); }}>연결 해제</button>
+                      : <button className="text-btn" onClick={() => removePerson(r)}>삭제</button>}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -314,6 +350,41 @@ function Running() {
         </div>
       </Panel>
     </>
+  );
+}
+
+// 계정 연결 관리(미션 시작 후). 엉뚱한 사람이 연결됐거나, 메일을 잘못 적었거나, 비밀번호를 못 찾을 때 연결을 푼다.
+function Accounts() {
+  const roster = useFullRoster() || [];
+  const invites = useInvites();
+  const emails = useAccountEmails();
+  const [msg, setMsg] = useState("");
+  const rows = [...roster].sort((a, b) => (a.team || 0) - (b.team || 0) || a.name.localeCompare(b.name, "ko"));
+  return (
+    <Panel title="계정 연결">
+      <p className="small">
+        이름마다 연결된 메일이 보여요. 다른 사람이 연결됐거나 메일·비밀번호 문제로 새 계정을 써야 하면 "연결 해제"를 누르고, 새로 나온 초대 코드를 본인에게 전달하세요. 기록은 그대로 이어져요.
+      </p>
+      {msg && <p className="note" role="status">{msg}</p>}
+      <div className="table-wrap">
+        <table className="pk-table">
+          <thead><tr><th>팀</th><th>이름</th><th>초대 코드</th><th>연결된 메일</th><th></th></tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.pid} className={r.uid ? "" : "warn"}>
+                <td>{r.team}</td>
+                <td>{r.name}</td>
+                <td className="mono">{invites[r.pid] || "-"}</td>
+                <td className="email">{r.uid ? emails[r.uid] || "연결됨" : "미연결"}</td>
+                <td>{r.uid && (
+                  <button className="text-btn" onClick={async () => { const c = await unlinkPerson(r, invites[r.pid], emails[r.uid]); if (c) setMsg(`${r.name}님 연결을 풀었어요. 새 초대 코드: ${c}`); }}>연결 해제</button>
+                )}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
   );
 }
 

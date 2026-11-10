@@ -37,7 +37,8 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 ## 로그인
 
 - 첫 운영자 설정 버튼은 주소에 `?setup`이 있을 때만 보인다(운영자 설정 완료 후 숨김).
-- 실제 메일 주소 + 비밀번호(Firebase Authentication). 비밀번호 찾기는 `sendPasswordResetEmail`. 메일 주소는 Firestore에 저장하지 않는다.
+- 실제 메일 주소 + 비밀번호(Firebase Authentication). 비밀번호 찾기는 `sendPasswordResetEmail`.
+- 메일 주소는 `users/{uid}.email`에만(본인·운영자만 읽음, 규칙이 `request.auth.token.email`과 같은지 확인). 운영 화면 "연결된 메일"과 "연결 해제"(명단 연결 풀기 + `users` 문서 삭제 + 초대 코드 새로 발급)에 쓴다.
 - `App`은 로그인 상태만 보고, 로그인한 사람의 구독·화면은 `Session`(key = uid)에 있다. 사람이 바뀌면 통째로 새로 만들어진다.
 - 내 `users` 문서는 서버 저장이 확인된 스냅샷만 반영한다(`hasPendingWrites` 무시). 가입 직후 로컬 스냅샷으로 화면을 열면 규칙이 아직 "연결 전"으로 보고 내 배정 읽기를 거부한다(실제로 재현된 버그).
 

@@ -292,6 +292,7 @@ textarea.pk-input { resize: vertical; line-height: 1.6; }
 .pk-table th { background: var(--blue); color: #fff; }
 .pk-table tbody tr:nth-child(even) { background: var(--paper-2); }
 .pk-table tr.warn td { color: var(--red); }
+.pk-table td.email { text-align: left; white-space: normal; word-break: break-all; font-size: 12px; min-width: 9em; }
 
 /* ---------- 결과 ---------- */
 .draws { list-style: none; display: flex; flex-direction: column; gap: 10px; }
