@@ -4,7 +4,7 @@
 
 - 프런트엔드: React 18 + Vite 5
 - 호스팅: GitHub Pages (방탈출과 같음, `main`에 올리면 자동 배포)
-- 백엔드: Firebase 무료 요금제(Spark) — Authentication(아이디/비밀번호), Firestore
+- 백엔드: Firebase 무료 요금제(Spark) — Authentication(메일 주소/비밀번호), Firestore
 - 서버 코드(Cloud Functions)는 쓰지 않는다. 비밀 유지는 전부 `firestore.rules`(보안 규칙)로 처리한다.
 
 ## 방탈출(office-escape)에서 가져온 것
@@ -26,10 +26,13 @@
 
 방탈출로 사내망에서 열리는 것이 확인된 곳: `github.io`, `cdn.jsdelivr.net`, `www.gstatic.com`, `*.firebasedatabase.app`.
 
-이 사이트는 여기에 더해 아래 두 곳을 쓴다. **사내 PC와 사내 와이파이 휴대폰에서 각각 가입 한 번 해 보고** 되는지 확인할 것.
+이 사이트는 여기에 더해 아래 곳을 쓴다. **사내 PC와 사내 와이파이 휴대폰에서 각각 가입 한 번 해 보고** 되는지 확인할 것.
 
 - `identitytoolkit.googleapis.com`, `securetoken.googleapis.com` (로그인)
 - `firestore.googleapis.com` (데이터)
+- `프로젝트ID.firebaseapp.com` (비밀번호 재설정 메일의 링크가 여는 페이지)
+
+비밀번호 찾기도 한 번 해 볼 것. 재설정 메일은 `noreply@프로젝트ID.firebaseapp.com`에서 오는데, 회사 메일이면 차단되거나 스팸함으로 갈 수 있다. 사내망에서 링크가 안 열리면 휴대폰 데이터로 열어도 된다.
 
 막혀 있으면 가입 화면에 "로그인 서버에 연결하지 못했어요"가 뜬다. 그 경우 데이터 쪽은 방탈출처럼 Realtime Database로 옮길 수 있지만, 로그인 없이는 짝 비밀을 지킬 수 없어서 설계를 다시 정해야 한다.
 
@@ -56,7 +59,7 @@ tests/rules.test.js   보안 규칙 테스트 (npm run test:rules, Firestore 에
 ## 처음 설정
 
 1. [Firebase 콘솔](https://console.firebase.google.com)에서 새 프로젝트를 만든다. 방탈출(`s1fa-escape`)과 데이터가 섞이지 않게 별도 프로젝트를 추천.
-2. Authentication → 로그인 방법 → **이메일/비밀번호** 사용 설정. (실제 메일은 보내지 않는다. 아이디를 `아이디@manito.example.com` 형식으로 바꿔서 쓴다.)
+2. Authentication → 로그인 방법 → **이메일/비밀번호** 사용 설정(아래 "이메일 링크"는 끈 채로). 참여자는 실제 메일 주소로 가입하고, 비밀번호를 잊으면 로그인 화면의 "비밀번호를 잊었어요"로 재설정 메일을 받는다. Authentication → 템플릿에서 템플릿 언어를 한국어로 해 두면 좋다(앱도 한국어로 요청한다).
 3. Authentication → 설정 → 승인된 도메인에 `계정명.github.io` 추가.
 4. Firestore Database 만들기 (프로덕션 모드, 서울 `asia-northeast3` 권장).
 5. 프로젝트 설정 → 내 앱 → 웹 앱 추가 → 설정값을 `src/firebase.config.js`에 붙여넣는다.
@@ -98,6 +101,13 @@ tests/rules.test.js   보안 규칙 테스트 (npm run test:rules, Firestore 에
 - 응모권: 미션 인증 1장(최대 3), 도전 미션 +1장(최대 2), 받는 사람 인증 입력 1장(최대 3), 끝까지 안 들킴 2장, 정답 지목 1장. 수상 제외자는 0장.
 - 베스트 마니또: 완수율 30% + 전체 투표 50% + 운영진 평가 20%. 투표 카드는 사람마다 다른 순서·번호로 보이고, 자기 팀 카드는 빠진다.
 - 추첨: 응모권 수에 비례. 2~4등끼리는 중복 당첨 없음, 대추첨은 전원 대상.
+
+## 로그인과 같은 기기 사용
+
+- 메일 주소 + 비밀번호로 로그인한다. 메일 주소는 Firebase Authentication에만 있고 Firestore에는 저장하지 않아 다른 참여자는 볼 수 없다(Firebase 콘솔의 Authentication 화면에서는 보인다). 내 프로필 화면에 로그인한 메일이 표시된다.
+- 같은 기기를 여러 사람이 쓸 수 있다. 헤더에 지금 로그인한 사람이 "○○님 로그아웃"으로 보이고, 로그아웃 후 다른 사람이 자기 계정으로 로그인하면 된다. 사람이 바뀌면 화면 상태를 통째로 새로 만들어 앞 사람의 이름·데이터가 남지 않는다.
+- 로그인 화면의 "이 기기에서 로그인 유지"를 해제하면 그 탭을 닫을 때 로그아웃된다(공용 기기용). 체크하면(기본) 로그아웃하기 전까지 유지된다.
+- 비밀번호를 잊으면 "비밀번호를 잊었어요" → 메일의 링크에서 새 비밀번호를 정한다. 가입 메일 주소를 틀리게 적었다면 운영자가 Firebase 콘솔 Firestore의 `roster/{pid}` 문서에서 `uid`를 비우고(null), 본인이 새 메일로 가입하면서 같은 초대 코드를 넣으면 다시 연결된다. 프로필·미션·인증 기록은 이어진다.
 
 ## 비밀 유지 범위와 한계
 

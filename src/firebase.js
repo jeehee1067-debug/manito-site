@@ -14,6 +14,8 @@ export const configured = Boolean(config.apiKey && config.projectId);
 export const app = configured ? initializeApp(config) : null;
 export const auth = configured ? getAuth(app) : null;
 export const db = configured ? getFirestore(app) : null;
+// 비밀번호 재설정 메일을 한국어 템플릿으로 보낸다.
+if (auth) auth.languageCode = "ko";
 
 if (emulator) {
   connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });

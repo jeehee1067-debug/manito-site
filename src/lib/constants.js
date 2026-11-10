@@ -1,8 +1,6 @@
 export const PHASES = ["준비", "미션 진행", "최종 지목", "투표", "집계", "공개"];
 export const PHASE = { SETUP: 0, RUNNING: 1, GUESSING: 2, VOTING: 3, SCORING: 4, REVEAL: 5 };
 
-// 실제 메일은 보내지 않는다. 아이디를 Firebase 로그인용 이메일 형식으로 바꾸는 데만 쓴다.
-export const LOGIN_DOMAIN = "manito.example.com";
 export const REVIEW_MIN = 20;
 export const TEAM_COUNT = 8;
 // 근무지: 방탈출과 같은 구분. 같은 근무지끼리만 마니또 짝을 지어 실물 미션이 가능하게 한다.

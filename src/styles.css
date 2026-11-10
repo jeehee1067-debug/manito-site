@@ -58,7 +58,7 @@ a { color: var(--blue-dark); }
 
 /* ---------- 상단 HUD ---------- */
 .hud { position: sticky; top: 0; z-index: 20; padding: 6px 0 10px; background: linear-gradient(#141821 70%, transparent); }
-.hud-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.hud-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-bottom: 8px; }
 .hud-logo {
   font-size: 22px; color: #fff; -webkit-text-stroke: 4px var(--ink); paint-order: stroke fill;
   text-shadow: 0 3px 0 rgba(0, 0, 0, 0.5); white-space: nowrap;
@@ -68,6 +68,7 @@ a { color: var(--blue-dark); }
   font-size: 13px; white-space: nowrap;
 }
 .hud-out { margin-left: auto; width: auto !important; margin-top: 0 !important; }
+.hud-who { font-weight: 700; color: var(--blue-dark); margin-right: 6px; }
 .tabs { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
 .tabs::-webkit-scrollbar { display: none; }
 
@@ -136,6 +137,7 @@ textarea.pk-input { resize: vertical; line-height: 1.6; }
 .note { color: var(--green); font-weight: 700; }
 .note.banner { background: var(--paper); border: 3px solid var(--ink); border-radius: 10px; padding: 10px 12px; margin-bottom: 16px; color: var(--ink); }
 .error { color: var(--red); font-weight: 700; }
+.login-links { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; margin-top: 12px; }
 .login-note { margin: 12px 0; text-align: center; font-size: 13px; color: #93a4c0; line-height: 1.7; }
 
 /* ---------- 대사창 ---------- */

@@ -32,6 +32,12 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 - 1~5번 묶음: 막아야 하는 것 — 남의 `assignments`·`giverCodes`·`codes`·`clues`·`deliveries` 읽기, 남의 코드로 `redemptions` 생성, `config.phase` 역행, 운영자의 phase 3 전 짝 정보 열람, 완료했거나 코드가 인증된 슬롯의 `choices` 난이도 변경
 - "앱 흐름" 묶음: 각 화면이 실제로 보내는 값의 모양을 옮겨 적은 것. **화면 코드에서 Firestore에 쓰는 값을 바꾸면 규칙과 이 테스트를 같이 고친다.**
 
+## 로그인
+
+- 실제 메일 주소 + 비밀번호(Firebase Authentication). 비밀번호 찾기는 `sendPasswordResetEmail`. 메일 주소는 Firestore에 저장하지 않는다.
+- `App`은 로그인 상태만 보고, 로그인한 사람의 구독·화면은 `Session`(key = uid)에 있다. 사람이 바뀌면 통째로 새로 만들어진다.
+- 내 `users` 문서는 서버 저장이 확인된 스냅샷만 반영한다(`hasPendingWrites` 무시). 가입 직후 로컬 스냅샷으로 화면을 열면 규칙이 아직 "연결 전"으로 보고 내 배정 읽기를 거부한다(실제로 재현된 버그).
+
 ## 정해진 규칙 (바꾸려면 사용자에게 먼저 확인)
 
 - 참여 56명. 미션 인증은 **받는 사람**이 코드 + 후기(20자 이상)로 한다. 회사 안 사진 촬영 불가라 사진 인증 없음.
@@ -59,5 +65,5 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 
 ## 아직 안 된 것
 
-- 사내망에서 Firebase 로그인(`identitytoolkit.googleapis.com`)과 Firestore(`firestore.googleapis.com`) 접속 확인
+- 사내망에서 Firebase 로그인(`identitytoolkit.googleapis.com`)과 Firestore(`firestore.googleapis.com`) 접속 확인, 비밀번호 재설정 메일 수신(회사 메일 차단 여부)과 링크(`프로젝트ID.firebaseapp.com`) 열림 확인
 - 실제 Firebase 프로젝트에 연결한 상태의 화면 점검. 에뮬레이터로는 4명 기준 전체 흐름(운영자 설정 → 명단 → 배정 → 가입 → 미션 → 인증 → 단서 → 지목 → 투표 → 집계 → 추첨)을 화면으로 진행해 확인했다(콘솔 오류 0건). 실제 프로젝트·사내망은 아직.
