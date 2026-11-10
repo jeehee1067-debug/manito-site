@@ -51,12 +51,23 @@ service cloud.firestore {
       allow list, write: if isAdmin();
     }
 
+    // 계정 ↔ 명단 연결. 본인과 운영자만 읽는다(운영 화면에 "연결된 메일"로 보임).
+    // email은 있으면 로그인한 계정의 메일과 같아야 한다(남의 메일로 꾸밀 수 없게). 없는 문서는 예전 가입분.
+    function emailOk() {
+      return request.resource.data.get('email', null) == null
+        || request.resource.data.email == request.auth.token.email;
+    }
     match /users/{uid} {
       allow read: if request.auth.uid == uid || isAdmin();
       allow create: if request.auth.uid == uid
-        && get(/databases/$(database)/documents/roster/$(request.resource.data.personId)).data.uid == uid;
+        && get(/databases/$(database)/documents/roster/$(request.resource.data.personId)).data.uid == uid
+        && emailOk();
       allow update: if request.auth.uid == uid
-        && request.resource.data.personId == resource.data.personId;
+        && request.resource.data.personId == resource.data.personId
+        && emailOk();
+      // 운영자 "연결 해제": 엉뚱한 사람이 연결됐거나 메일·비밀번호 문제로 새 계정으로 옮길 때.
+      // 지우면 그 계정은 다시 "연결 전"이 되어 아무것도 못 읽는다.
+      allow delete: if isAdmin();
     }
 
     // 캐릭터 선택: 참여자는 모두 볼 수 있고 본인만 바꾼다.

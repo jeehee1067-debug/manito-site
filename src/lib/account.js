@@ -56,7 +56,8 @@ export async function claimWithInvite(inviteInput) {
     if (err?.code !== "permission-denied") throw err;
   }
   try {
-    await setDoc(doc(db, "users", uid), { personId, eliminated: [] });
+    // email: 운영 화면 "연결된 메일"용(본인과 운영자만 읽음). 규칙이 로그인한 계정의 메일과 같은지 확인한다.
+    await setDoc(doc(db, "users", uid), { personId, eliminated: [], email: auth.currentUser.email });
   } catch (err) {
     if (err?.code === "permission-denied") throw new Error("이미 다른 계정에 연결된 초대 코드예요. 운영진에게 알려 주세요.");
     throw err;

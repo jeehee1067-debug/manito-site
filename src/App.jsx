@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { doc, getDoc, onSnapshot } from "firebase/firestore";
+import { doc, getDoc, onSnapshot, updateDoc } from "firebase/firestore";
 import { auth, db, configured } from "./firebase.js";
 import { AVATARS, PHASE, PHASES } from "./lib/constants.js";
 import { summaryToList } from "./lib/roster.js";
@@ -123,6 +123,11 @@ function Session({ user, logout }) {
     ];
     return () => offs.forEach((off) => off());
   }, [user]);
+
+  // 예전에 가입해서 users 문서에 메일이 없으면 채워 둔다(운영 화면 "연결된 메일"용).
+  useEffect(() => {
+    if (me && user.email && me.email !== user.email) updateDoc(doc(db, "users", user.uid), { email: user.email }).catch(() => {});
+  }, [me, user]);
 
   // 명단은 초대 코드로 연결된 참여자와 운영자만 읽을 수 있다(보안 규칙). 연결되면 그때 구독한다.
   // 읽기 줄이기: 명단 56건 대신 요약 문서 1건 (운영 화면이 명단과 맞춰 둔다)

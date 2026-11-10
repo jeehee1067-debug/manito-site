@@ -67,6 +67,7 @@ async function seed({ phase = 1, cluesReleased = 2, admins = [ADMIN], extra } = 
 }
 
 const as = (uid) => env.authenticatedContext(uid).firestore();
+const asMail = (uid, email) => env.authenticatedContext(uid, { email }).firestore();
 const p = (pid) => as(UID[pid]);
 const admin = () => as(ADMIN);
 
@@ -359,19 +360,28 @@ describe("5. 완료한 미션 슬롯의 choices 난이도를 바꿀 수 없다",
 describe("앱 흐름: 참여자 화면", () => {
   beforeEach(() => seed());
 
-  test("가입 후 초대 코드 연결 (account.js claimWithInvite): 명단을 읽지 않고 바로 연결", async () => {
-    const db = as("u5");
+  test("가입 후 초대 코드 연결 (account.js claimWithInvite): 명단을 읽지 않고 바로 연결, 로그인한 메일 저장", async () => {
+    const db = asMail("u5", "u5@example.com");
     const invite = await assertSucceeds(getDoc(doc(db, "invites", "INV005")));
     const personId = invite.data().personId;
     await assertSucceeds(updateDoc(doc(db, "roster", personId), { uid: "u5", inviteUsed: "INV005" }));
-    await assertSucceeds(setDoc(doc(db, "users", "u5"), { personId, eliminated: [] }));
+    await assertFails(setDoc(doc(db, "users", "u5"), { personId, eliminated: [], email: "someone@example.com" })); // 남의 메일로 꾸미기
+    await assertSucceeds(setDoc(doc(db, "users", "u5"), { personId, eliminated: [], email: "u5@example.com" }));
     // 같은 사람이 같은 초대 코드로 다시 연결: 명단 수정은 거부되지만 users는 통과
     await assertFails(updateDoc(doc(db, "roster", personId), { uid: "u5", inviteUsed: "INV005" }));
-    await assertSucceeds(setDoc(doc(db, "users", "u5"), { personId, eliminated: [] }));
+    await assertSucceeds(setDoc(doc(db, "users", "u5"), { personId, eliminated: [], email: "u5@example.com" }));
     // 다른 계정이 같은 초대 코드로: 둘 다 거부
-    const other = as("u6");
+    const other = asMail("u6", "u6@example.com");
     await assertFails(updateDoc(doc(other, "roster", personId), { uid: "u6", inviteUsed: "INV005" }));
-    await assertFails(setDoc(doc(other, "users", "u6"), { personId, eliminated: [] }));
+    await assertFails(setDoc(doc(other, "users", "u6"), { personId, eliminated: [], email: "u6@example.com" }));
+  });
+
+  test("예전 가입분(메일 없음)은 그대로 쓰이고, 로그인할 때 내 메일로만 채울 수 있다 (App.jsx)", async () => {
+    const db = asMail("u1", "u1@example.com");
+    await assertSucceeds(updateDoc(doc(db, "users", "u1"), { eliminated: arrayUnion("p003") })); // 메일 없는 문서
+    await assertFails(updateDoc(doc(db, "users", "u1"), { email: "other@example.com" }));
+    await assertSucceeds(updateDoc(doc(db, "users", "u1"), { email: "u1@example.com" }));
+    await assertSucceeds(updateDoc(doc(db, "users", "u1"), { eliminated: arrayUnion("p004") }));
   });
 
   test("초대 코드 연결: 남의 초대 코드로 다른 이름 연결·이미 연결된 이름 가로채기·남의 users 만들기는 거부", async () => {
@@ -641,6 +651,34 @@ describe("앱 흐름: 운영 화면", () => {
     await assertSucceeds(getDocs(collection(admin(), "progress")));
     await assertSucceeds(getDocs(collection(admin(), "roster")));
     await assertFails(getDocs(collection(admin(), "guesses")));
+  });
+
+  test("계정 연결 해제 (Admin.jsx unlinkPerson): 예전 계정은 못 읽고, 새 초대 코드로 다시 연결하면 기록이 이어진다", async () => {
+    await seed({ phase: 1 });
+    await put("invites/INV001", { personId: "p001" });
+    await put("users/u1", { personId: "p001", eliminated: [], email: "wrong@example.com" });
+    const db = admin();
+    await assertSucceeds(getDocs(collection(db, "users"))); // 운영 화면 "연결된 메일"
+    await assertFails(getDocs(collection(p("p002"), "users"))); // 참여자는 남의 메일 못 봄
+    await assertFails(deleteDoc(doc(p("p001"), "users", "u1"))); // 참여자는 연결 해제 못 함
+    const b = writeBatch(db);
+    b.update(doc(db, "roster", "p001"), { uid: null });
+    b.delete(doc(db, "users", "u1"));
+    b.delete(doc(db, "invites", "INV001"));
+    b.set(doc(db, "invites", "NEW001"), { personId: "p001" });
+    await assertSucceeds(b.commit());
+    // 예전 계정: 더 이상 p001로 못 읽음, 예전 초대 코드로 재연결 불가
+    const old = asMail("u1", "wrong@example.com");
+    await assertFails(getDoc(doc(old, "assignments", "p001")));
+    await assertFails(getDoc(doc(old, "profiles", "p001")));
+    await assertFails(updateDoc(doc(old, "roster", "p001"), { uid: "u1", inviteUsed: "INV001" }));
+    // 새 계정: 새 초대 코드로 연결 → p001의 배정·프로필이 그대로 보인다
+    const neu = asMail("u9", "right@example.com");
+    await assertSucceeds(getDoc(doc(neu, "invites", "NEW001")));
+    await assertSucceeds(updateDoc(doc(neu, "roster", "p001"), { uid: "u9", inviteUsed: "NEW001" }));
+    await assertSucceeds(setDoc(doc(neu, "users", "u9"), { personId: "p001", eliminated: [], email: "right@example.com" }));
+    await assertSucceeds(getDoc(doc(neu, "assignments", "p001")));
+    await assertSucceeds(getDoc(doc(neu, "profiles", "p001")));
   });
 
   test("집계 전(3단계)에는 결과를 쓸 수 없다", async () => {
