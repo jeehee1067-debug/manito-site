@@ -9,18 +9,28 @@ import { Panel, avatarSrc } from "../ui.jsx";
 export default function Profile() {
   const { myPid, nameOf, avatarOf, user, loadAvatar, setAvatarLocal, config } = useApp();
   const [answers, setAnswers] = useState(PROFILE_QUESTIONS.map(() => ""));
+  const [saved, setSaved] = useState(PROFILE_QUESTIONS.map(() => "")); // 저장돼 있는 답(잠금 판단용)
   const [loaded, setLoaded] = useState(false);
   const [status, setStatus] = useState("");
 
   useEffect(() => {
     getDoc(doc(db, "profiles", myPid)).then((s) => {
-      if (s.exists()) setAnswers(PROFILE_QUESTIONS.map((_, i) => s.data().answers?.[i] || ""));
+      if (s.exists()) {
+        const a = PROFILE_QUESTIONS.map((_, i) => s.data().answers?.[i] || "");
+        setAnswers(a);
+        setSaved(a);
+      }
       setLoaded(true);
     });
   }, [myPid]);
 
   useEffect(() => loadAvatar(myPid), [myPid, loadAvatar]);
   const pickAvatar = (i) => setDoc(doc(db, "avatars", myPid), { avatar: i }).then(() => setAvatarLocal(myPid, i));
+
+  // 이미 공개된 단서 칸은 바꿀 수 없다(대상이 본 단서가 나중에 바뀌지 않게). 비어 있던 칸은 늦게라도 쓸 수 있다.
+  // 보안 규칙도 같은 기준으로 막는다(공개된 칸은 같은 답으로만 다시 쓸 수 있음).
+  const released = config.cluesReleased || 0;
+  const locked = (i) => i < released && saved[i].trim() !== "";
 
   async function save(e) {
     e.preventDefault();
@@ -29,7 +39,9 @@ export default function Profile() {
       return;
     }
     setStatus("저장하는 중");
-    await setDoc(doc(db, "profiles", myPid), { answers: answers.map((a) => a.trim()), updatedAt: serverTimestamp() });
+    const next = answers.map((a, i) => (locked(i) ? saved[i] : a).trim());
+    await setDoc(doc(db, "profiles", myPid), { answers: next, updatedAt: serverTimestamp() });
+    setSaved(next);
     await setDoc(doc(db, "progress", myPid), { profileDone: true }, { merge: true });
     const synced = await syncClues(myPid, config.assignVer ?? 0);
     setStatus(synced ? "저장했어요. 내 대상에게 갈 단서도 준비됐어요." : "저장했어요. 마니또 배정이 끝나면 단서가 자동으로 준비돼요.");
@@ -59,12 +71,13 @@ export default function Profile() {
         <p className="small">
           여기 답한 내용은 내가 마니또로 맡은 사람에게 매주 금요일 2개씩 단서로 공개돼요. 그 사람이 나를 추리할 때 쓰는 단서예요.
           이름, 파트, 직급처럼 바로 알 수 있는 답은 피해 주세요.
+          {released > 0 && " 이미 공개된 단서는 바꿀 수 없어요."}
         </p>
         <form onSubmit={save} className="stack">
           {PROFILE_QUESTIONS.map((q, i) => (
             <label key={i}>
-              <span className="panel-label">{i + 1}. {q}</span>
-              <input className="pk-input" value={answers[i]} maxLength={60}
+              <span className="panel-label">{i + 1}. {q}{locked(i) && <span className="lock-tag">공개됨 · 수정 불가</span>}</span>
+              <input className="pk-input" value={answers[i]} maxLength={60} disabled={locked(i)}
                 onChange={(e) => setAnswers(answers.map((a, j) => (j === i ? e.target.value : a)))} />
             </label>
           ))}

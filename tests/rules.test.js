@@ -418,6 +418,32 @@ describe("앱 흐름: 참여자 화면", () => {
     await assertFails(setDoc(doc(db, "clues", "p002_0"), { receiverPid: "p002", idx: 0, answer: "x", ver: 1 })); // 다른 회차
   });
 
+  test("이미 공개된 단서는 답을 바꿀 수 없다 (같은 답 다시 쓰기·안 공개된 칸·비어 있던 칸은 됨)", async () => {
+    // 시드: cluesReleased = 2, p001(마니또)이 p002(대상)에게 쓴 단서 답0~답5
+    const db = p("p001");
+    const clue = (idx, answer) => ({ receiverPid: "p002", idx, answer, ver: 0 });
+    await assertFails(setDoc(doc(db, "clues", "p002_0"), clue(0, "다른답"))); // 공개된 칸 바꾸기
+    await assertFails(setDoc(doc(db, "clues", "p002_1"), clue(1, "다른답")));
+    await assertSucceeds(setDoc(doc(db, "clues", "p002_0"), clue(0, "답0"))); // 같은 답으로 다시 쓰기
+    await assertSucceeds(setDoc(doc(db, "clues", "p002_2"), clue(2, "새답2"))); // 아직 안 공개된 칸
+    // 프로필 저장(6칸 한꺼번에): 공개된 칸이 같으면 통과, 하나라도 바꾸면 통째로 거부
+    const ok = writeBatch(db);
+    [0, 1, 2, 3, 4, 5].forEach((i) => ok.set(doc(db, "clues", `p002_${i}`), clue(i, i < 2 ? `답${i}` : `고친답${i}`)));
+    await assertSucceeds(ok.commit());
+    const bad = writeBatch(db);
+    [0, 1, 2, 3, 4, 5].forEach((i) => bad.set(doc(db, "clues", `p002_${i}`), clue(i, `몰래바꾼답${i}`)));
+    await assertFails(bad.commit());
+    // 늦게 쓰는 경우: 공개된 칸이 비어 있었으면 새로 쓸 수 있다
+    await env.withSecurityRulesDisabled((ctx) => deleteDoc(doc(ctx.firestore(), "clues", "p002_1")));
+    await assertSucceeds(setDoc(doc(db, "clues", "p002_1"), clue(1, "늦은답")));
+    const snap = await assertSucceeds(getDoc(doc(p("p002"), "clues", "p002_1")));
+    if (snap.data().answer !== "늦은답") throw new Error("늦게 쓴 답이 안 보임");
+    // 다음 주 공개(2 → 4) 뒤에는 2·3번 칸도 잠긴다
+    await setPhase(1, { cluesReleased: 4 });
+    await assertFails(setDoc(doc(db, "clues", "p002_2"), clue(2, "또바꿈")));
+    await assertSucceeds(setDoc(doc(db, "clues", "p002_4"), clue(4, "아직됨")));
+  });
+
   test("다시 배정하면(회차 +1) 지난 회차 단서는 안 보이고, 새 마니또가 지금 회차로 다시 쓰면 보인다", async () => {
     // p002의 단서(회차 0)는 p001이 썼다. 운영자가 다시 배정해서 p002의 마니또가 p003이 됐다고 하자.
     await env.withSecurityRulesDisabled(async (ctx) => {
