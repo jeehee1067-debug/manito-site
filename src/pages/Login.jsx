@@ -67,7 +67,7 @@ export default function Login({ bootstrap = false }) {
     <main className="app narrow login">
       <Garland />
       <div className="logo-plate">
-        <div className="logo-sub">SAMSUNG · 분석기술팀</div>
+        <div className="logo-sub">분석기술팀</div>
         <h1 className="logo-title">S1FA 마니또</h1>
         <div className="logo-tag">4주 동안 몰래 챙기고, 송년회에서 정체를 밝혀라!</div>
         <div><span className="logo-xmas">MERRY CHRISTMAS &amp; HAPPY NEW YEAR</span></div>
