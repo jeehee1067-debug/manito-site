@@ -82,6 +82,8 @@ a { color: var(--blue-dark); }
 .chip.is-on { background: var(--blue); border-color: var(--blue-dark); color: #fff; }
 .chip.is-off { background: #d9d6ca; color: #8a8778; text-decoration: line-through; }
 .name-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.choice-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.choice-row .chip:disabled { opacity: 0.6; cursor: not-allowed; }
 
 /* ---------- 패널 ---------- */
 .panel {
@@ -224,6 +226,11 @@ textarea.pk-input { resize: vertical; line-height: 1.6; }
 .card:active { transform: translateY(4px); box-shadow: none; }
 .card-level { align-self: flex-start; color: #fff; font-size: 12px; border: 2px solid var(--ink); border-radius: 6px; padding: 0 8px; }
 .card-text { font-size: 14px; }
+.card-wrap { display: flex; flex-direction: column; gap: 6px; }
+.card-wrap .card { flex: 1; }
+.card-wrap .text-btn { align-self: flex-end; }
+.card-head { display: flex; align-items: center; gap: 6px; }
+.cost-tag { display: inline-block; font-size: 11px; color: var(--ink); background: #fff6d8; border: 2px solid var(--gold); border-radius: 6px; padding: 0 6px; white-space: nowrap; }
 .card.level-easy .card-level, .badge.level-easy { background: var(--green); }
 .card.level-normal .card-level, .badge.level-normal { background: var(--blue); }
 .card.level-hard .card-level, .badge.level-hard { background: var(--red); }
@@ -237,6 +244,14 @@ textarea.pk-input { resize: vertical; line-height: 1.6; }
 .code-tag strong { font-size: 26px; letter-spacing: 0.3em; }
 .ticket-count { font-size: 15px; }
 .ticket-count strong { font-size: 34px; color: var(--blue-dark); }
+.plain.tickets { gap: 2px; font-size: 14px; margin-bottom: 6px; }
+.notice-banner { background: #fff6d8; border: 3px solid var(--ink); border-radius: 10px; padding: 8px 12px; margin-bottom: 14px; white-space: pre-line; }
+.notice-banner b { margin-right: 6px; }
+.rules-table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 6px 0 10px; }
+.rules-table th, .rules-table td { border: 2px solid var(--ink); padding: 5px 8px; text-align: left; vertical-align: top; }
+.rules-table th { background: var(--paper-2); white-space: nowrap; }
+.rules-table td.num { text-align: center; white-space: nowrap; font-weight: 700; }
+.rules-list { padding-left: 1.2em; display: grid; gap: 4px; }
 
 /* ---------- 목록 ---------- */
 .plain { list-style: none; display: flex; flex-direction: column; gap: 10px; }
@@ -248,6 +263,7 @@ textarea.pk-input { resize: vertical; line-height: 1.6; }
 .clues { list-style: none; display: grid; gap: 8px; }
 .clues li { display: grid; border: 2px solid #c3bfae; border-radius: 8px; padding: 6px 10px; background: var(--paper-2); }
 .clues li.open { background: #fff; border-color: var(--ink); }
+.clues li.part-hint { background: #fff6d8; box-shadow: 0 0 0 2px var(--gold); }
 .clue-q { font-size: 12px; color: var(--ink-soft); }
 .clue-a { font-size: 16px; font-weight: 700; }
 .clues li.closed .clue-a { font-weight: 400; color: #9a978a; }

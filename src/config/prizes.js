@@ -16,7 +16,10 @@ export const TICKET_RULES = {
   perHardMission: 1, // 마니또: 도전 미션으로 인증되면 추가
   perReceiverEntry: 1, // 받는 사람: 인증 입력할 때마다
   hidden: 2, // 마니또: 끝까지 안 들킴
+  hiddenMinMissions: 1, // 은신 응모권은 내 미션이 이만큼 이상 인증된 마니또만 (아무것도 안 하고 받는 것 방지)
   correctGuess: 1, // 받는 사람: 정답 지목
+  compPerMissedWeek: 1, // 받는 사람: 내 마니또가 미션을 안 보낸 주차마다 대신 받는 응모권 (인증 입력과 합쳐 maxReceiverEntries까지)
+  compMinMissions: 1, // 위 보상은 내 미션이 이만큼 이상 인증된 사람만
   maxMissions: 3,
   maxHard: 2,
   maxReceiverEntries: 3,

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp } from "../App.jsx";
-import { AVATARS, PROFILE_QUESTIONS } from "../lib/constants.js";
+import { AVATARS, PROFILE_QUESTIONS, profileAnswerError } from "../lib/constants.js";
 import { syncClues } from "../lib/sync.js";
 import { Panel, avatarSrc } from "../ui.jsx";
 
@@ -34,17 +34,22 @@ export default function Profile() {
 
   async function save(e) {
     e.preventDefault();
-    if (answers.some((a) => !a.trim())) {
-      setStatus("6개 모두 답해 주세요. 짧아도 괜찮아요.");
+    const next = answers.map((a, i) => (locked(i) ? saved[i] : a).trim());
+    const bad = next.map((a, i) => (locked(i) ? null : profileAnswerError(i, a))).find(Boolean);
+    if (bad) {
+      setStatus(`6개 모두 답해 주세요. ${bad}`);
       return;
     }
     setStatus("저장하는 중");
-    const next = answers.map((a, i) => (locked(i) ? saved[i] : a).trim());
-    await setDoc(doc(db, "profiles", myPid), { answers: next, updatedAt: serverTimestamp() });
-    setSaved(next);
-    await setDoc(doc(db, "progress", myPid), { profileDone: true }, { merge: true });
-    const synced = await syncClues(myPid, config.assignVer ?? 0);
-    setStatus(synced ? "저장했어요. 내 대상에게 갈 단서도 준비됐어요." : "저장했어요. 마니또 배정이 끝나면 단서가 자동으로 준비돼요.");
+    try {
+      await setDoc(doc(db, "profiles", myPid), { answers: next, updatedAt: serverTimestamp() });
+      setSaved(next);
+      await setDoc(doc(db, "progress", myPid), { profileDone: true }, { merge: true });
+      const synced = await syncClues(myPid, config.assignVer ?? 0);
+      setStatus(synced ? "저장했어요. 내 대상에게 갈 단서도 준비됐어요." : "저장했어요. 마니또 배정이 끝나면 단서가 자동으로 준비돼요.");
+    } catch {
+      setStatus("저장하지 못했어요. 잠시 후 다시 눌러 주세요.");
+    }
   }
 
   if (!loaded) return null;
@@ -69,17 +74,30 @@ export default function Profile() {
 
       <Panel title={`${nameOf(myPid)}님의 프로필`}>
         <p className="small">
-          여기 답한 내용은 내가 마니또로 맡은 사람에게 매주 금요일 2개씩 단서로 공개돼요. 그 사람이 나를 추리할 때 쓰는 단서예요.
-          이름, 파트, 직급처럼 바로 알 수 있는 답은 피해 주세요.
+          여기 답한 내용은 내가 마니또로 맡은 사람에게 매주 금요일 2개씩(1·2번 → 3·4번 → 5·6번) 단서로 공개돼요. 그 사람이 나를 추리할 때 쓰는 단서예요.
+          사실대로 답해 주세요. 직접 쓰는 칸에는 이름·직급처럼 바로 알 수 있는 말은 피해 주세요.
           {released > 0 && " 이미 공개된 단서는 바꿀 수 없어요."}
         </p>
         <form onSubmit={save} className="stack">
-          {PROFILE_QUESTIONS.map((q, i) => (
-            <label key={i}>
-              <span className="panel-label">{i + 1}. {q}{locked(i) && <span className="lock-tag">공개됨 · 수정 불가</span>}</span>
-              <input className="pk-input" value={answers[i]} maxLength={60} disabled={locked(i)}
-                onChange={(e) => setAnswers(answers.map((a, j) => (j === i ? e.target.value : a)))} />
-            </label>
+          {PROFILE_QUESTIONS.map(({ q, options, min }, i) => (
+            <div key={i} className="profile-q">
+              <span className="panel-label" id={`pq-${i}`}>{i + 1}. {q}{locked(i) && <span className="lock-tag">공개됨 · 수정 불가</span>}</span>
+              {options ? (
+                <div className="choice-row" role="radiogroup" aria-labelledby={`pq-${i}`}>
+                  {options.map((o) => (
+                    <button key={o} type="button" role="radio" aria-checked={answers[i] === o} disabled={locked(i)}
+                      className={answers[i] === o ? "chip is-on" : "chip"}
+                      onClick={() => setAnswers(answers.map((a, j) => (j === i ? o : a)))}>
+                      {o}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <input className="pk-input" value={answers[i]} maxLength={60} disabled={locked(i)} aria-labelledby={`pq-${i}`}
+                  placeholder={`${min || 1}자 이상`}
+                  onChange={(e) => setAnswers(answers.map((a, j) => (j === i ? e.target.value : a)))} />
+              )}
+            </div>
           ))}
           {status && <p className="note" role="status">{status}</p>}
           <button className="pk-btn main">저장</button>

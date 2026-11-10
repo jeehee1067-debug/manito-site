@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { doc, getDoc, onSnapshot, updateDoc } from "firebase/firestore";
+import { doc, getDoc, onSnapshot, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import { auth, db, configured } from "./firebase.js";
 import { AVATARS, PHASE, PHASES } from "./lib/constants.js";
 import { summaryToList } from "./lib/roster.js";
@@ -14,6 +14,7 @@ import Team from "./pages/Team.jsx";
 import Vote from "./pages/Vote.jsx";
 import Reveal from "./pages/Reveal.jsx";
 import Admin from "./pages/Admin.jsx";
+import Rules from "./pages/Rules.jsx";
 import { Garland, XmasFooter } from "./xmas.jsx";
 
 const AppCtx = createContext(null);
@@ -129,6 +130,12 @@ function Session({ user, logout }) {
     if (me && user.email && me.email !== user.email) updateDoc(doc(db, "users", user.uid), { email: user.email }).catch(() => {});
   }, [me, user]);
 
+  // 최근 접속: 로그인(또는 새로고침)할 때 한 번 남긴다. 운영 화면에서 오래 안 들어온 사람을 챙기는 데 쓴다.
+  const myPidForSeen = me?.personId || null;
+  useEffect(() => {
+    if (myPidForSeen) setDoc(doc(db, "progress", myPidForSeen), { lastSeen: serverTimestamp() }, { merge: true }).catch(() => {});
+  }, [myPidForSeen]);
+
   // 명단은 초대 코드로 연결된 참여자와 운영자만 읽을 수 있다(보안 규칙). 연결되면 그때 구독한다.
   // 읽기 줄이기: 명단 56건 대신 요약 문서 1건 (운영 화면이 명단과 맞춰 둔다)
   const member = Boolean(me?.personId) || Boolean(config?.admins?.includes(user.uid));
@@ -189,6 +196,7 @@ function Session({ user, logout }) {
     if (phase >= PHASE.VOTING) tabs.push(["vote", "투표"]);
     tabs.push(["profile", "내 프로필"]);
   }
+  if (ctx.myPid || ctx.isAdmin) tabs.push(["rules", "규칙"]);
   if (phase >= PHASE.REVEAL || ctx.isAdmin) tabs.push(["reveal", "결과"]);
   if (ctx.isAdmin) tabs.push(["admin", "운영"]);
 
@@ -204,6 +212,7 @@ function Session({ user, logout }) {
   else if (current === "team") body = <Team />;
   else if (current === "vote") body = <Vote />;
   else if (current === "profile") body = <Profile />;
+  else if (current === "rules") body = <Rules />;
   else if (current === "reveal") body = <Reveal />;
   else if (current === "admin") body = <Admin />;
 
@@ -229,6 +238,7 @@ function Session({ user, logout }) {
             </nav>
           )}
         </header>
+        {config.notice && (ctx.myPid || ctx.isAdmin) && <p className="notice-banner" role="status"><b>공지</b>{config.notice}</p>}
         <main>{body}</main>
         <XmasFooter />
       </div>

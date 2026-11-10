@@ -1,16 +1,16 @@
 import { useEffect, useState } from "react";
 import {
-  collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, serverTimestamp, setDoc, updateDoc, writeBatch,
+  arrayRemove, arrayUnion, collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, serverTimestamp, setDoc, updateDoc, writeBatch,
 } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp } from "../App.jsx";
 import Claim from "./Claim.jsx";
 import { Panel } from "../ui.jsx";
-import { PHASE, PHASES, TEAM_COUNT, CLUE_COUNT, LOCS } from "../lib/constants.js";
+import { PHASE, PHASES, TEAM_COUNT, CLUE_COUNT, LOCS, PART_HINT_IDX } from "../lib/constants.js";
 import { assignManito, assignmentMemo, generateCodes, makeInviteCode, splitTeams } from "../lib/assign.js";
 import { computeTickets, pickMostTickets, rankBestManito } from "../lib/scoring.js";
 import { PRIZES } from "../config/prizes.js";
-import { rosterSummary, sameSummary } from "../lib/roster.js";
+import { parseRosterLine, rosterSummary, sameSummary } from "../lib/roster.js";
 
 // Firestore 배치는 500건 제한이라 나눠서 커밋한다.
 async function commitInChunks(ops) {
@@ -115,6 +115,8 @@ export default function Admin() {
         </>
       )}
 
+      <Notice />
+
       {phase === PHASE.SETUP && <Setup />}
       {phase === PHASE.RUNNING && <Running />}
       {phase === PHASE.GUESSING && <GuessStatus />}
@@ -122,12 +124,72 @@ export default function Admin() {
       {phase === PHASE.VOTING && <VotingAdmin />}
       {phase === PHASE.SCORING && <Scoring />}
       {phase >= PHASE.RUNNING && <Accounts />}
+      <CoAdmins />
       {phase === PHASE.REVEAL && <Panel title="공개"><p>결과 탭에서 추첨을 진행하세요.</p></Panel>}
     </>
   );
 }
 
+// 공지: 모든 참여자 화면 위쪽에 보인다. 마감 날짜, 이번 주 할 일 같은 안내에 쓴다.
+function Notice() {
+  const { config } = useApp();
+  const [text, setText] = useState(config.notice || "");
+  const [saved, setSaved] = useState(false);
+  useEffect(() => setText(config.notice || ""), [config.notice]);
+  const save = async (value) => {
+    await updateDoc(doc(db, "config", "app"), { notice: value.trim() });
+    setSaved(true);
+  };
+  return (
+    <Panel title="공지">
+      <p className="small">모든 참여자 화면 위쪽에 보여요. 예: "1주차 미션은 금요일까지! 받은 미션은 추리 보드에서 인증해 주세요."</p>
+      <textarea className="pk-input" rows={2} maxLength={200} value={text} onChange={(e) => { setText(e.target.value); setSaved(false); }} placeholder="공지 내용 (200자까지)" aria-label="공지 내용" />
+      <div className="inline">
+        <button className="pk-btn main sm" onClick={() => save(text)}>공지 올리기</button>
+        {config.notice && <button className="pk-btn sm" onClick={() => save("")}>공지 내리기</button>}
+        {saved && <span className="note small" role="status">{config.notice ? "올렸어요." : "내렸어요."}</span>}
+      </div>
+    </Panel>
+  );
+}
+
+// 공동 운영자: 운영자가 자리를 비워도 주차 올리기·단서 공개·단계 넘기기를 다른 사람이 할 수 있게 한다.
+// 공동 운영자는 운영자와 권한이 같다(투표 단계부터 짝 정보도 볼 수 있다).
+function CoAdmins() {
+  const { config, user } = useApp();
+  const roster = useFullRoster() || [];
+  const admins = config.admins || [];
+  const linked = roster.filter((r) => r.uid).sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  const others = admins.filter((uid) => !linked.some((r) => r.uid === uid)).length; // 참여하지 않는 운영자 계정 수
+
+  async function toggle(r) {
+    const isAdmin = admins.includes(r.uid);
+    if (isAdmin && r.uid === user.uid) return window.alert("내 운영자 권한은 여기서 뺄 수 없어요. 다른 운영자에게 부탁하세요.");
+    const ask = isAdmin
+      ? `${r.name}님의 운영자 권한을 뺄까요?`
+      : `${r.name}님을 공동 운영자로 지정할까요?\n\n운영 탭의 모든 기능(주차·단서 공개, 단계 넘기기, 인증 무효, 집계·추첨)을 쓸 수 있고, 투표 단계부터는 짝 정보도 볼 수 있어요.`;
+    if (!window.confirm(ask)) return;
+    await updateDoc(doc(db, "config", "app"), { admins: isAdmin ? arrayRemove(r.uid) : arrayUnion(r.uid) });
+  }
+
+  return (
+    <Panel title={`공동 운영자 (운영자 ${admins.length}명)`}>
+      <p className="small">
+        운영자가 자리를 비워도 진행이 멈추지 않게 한 명 이상 더 지정해 두는 것을 권해요. 가입한 사람만 지정할 수 있어요.
+        {others > 0 && ` 참여하지 않는 운영자 계정 ${others}개는 아래에 나오지 않아요.`}
+      </p>
+      <div className="name-chips">
+        {linked.map((r) => (
+          <button key={r.pid} className={admins.includes(r.uid) ? "chip is-on" : "chip"} aria-pressed={admins.includes(r.uid)} onClick={() => toggle(r)}>{r.name}</button>
+        ))}
+        {linked.length === 0 && <span className="muted small">아직 가입한 사람이 없어요.</span>}
+      </div>
+    </Panel>
+  );
+}
+
 function Setup() {
+  const { config } = useApp();
   const full = useFullRoster();
   const roster = full || [];
   const loaded = full !== null; // 명단을 다 읽기 전에 추가하면 번호(p001…)가 겹칠 수 있다
@@ -146,15 +208,12 @@ function Setup() {
     const ops = [];
     const bad = [];
     lines.forEach((line, i) => {
-      // "이름,근무지,팀" — 근무지·팀은 생략 가능, "이름,팀번호"도 받는다
-      const [name, second = "", third = ""] = line.split(/[,\t]/).map((x) => x.trim());
-      const isTeam = /^\d+$/.test(second);
-      const loc = isTeam ? null : (second.toUpperCase() || null);
-      const team = isTeam ? Number(second) : third ? Number(third) : null;
-      if (loc && !LOCS.includes(loc)) bad.push(`${name}(${second})`);
+      // "이름,근무지,파트" 또는 "이름,근무지,파트,팀번호" — 근무지·파트·팀은 생략 가능
+      const { name, loc, part, team, badLoc } = parseRosterLine(line, LOCS);
+      if (badLoc) bad.push(`${name}(${badLoc})`);
       const pid = `p${String(start + i + 1).padStart(3, "0")}`;
       const invite = makeInviteCode();
-      ops.push((b) => b.set(doc(db, "roster", pid), { name, loc, team, uid: null, disqualified: false }));
+      ops.push((b) => b.set(doc(db, "roster", pid), { name, loc, part, team, uid: null, disqualified: false }));
       ops.push((b) => b.set(doc(db, "invites", invite), { personId: pid }));
     });
     if (bad.length) return setMsg(`근무지는 ${LOCS.join(", ")} 중 하나로 적어 주세요: ${bad.join(", ")}`);
@@ -175,6 +234,13 @@ function Setup() {
   async function cycleLoc(r) {
     const next = LOCS[(LOCS.indexOf(r.loc) + 1) % LOCS.length];
     await updateDoc(doc(db, "roster", r.pid), { loc: next });
+  }
+
+  async function editPart(r) {
+    const next = window.prompt(`${r.name}님의 파트 (비우면 파트 없음)`, r.part || "");
+    if (next === null) return;
+    await updateDoc(doc(db, "roster", r.pid), { part: next.trim() || null });
+    if (config.assignVer) setMsg("파트를 바꿨어요. 이미 배정한 뒤라면 '배정하기'를 다시 눌러야 파트 단서에 반영돼요.");
   }
 
   async function autoTeams() {
@@ -211,13 +277,30 @@ function Setup() {
           ops.push((b) => b.set(doc(db, "codes", code), { receiverPid: receiverOf[giverPid], slot: Number(slot) }));
         }
       }
+      // 파트 단서: 받는 사람마다 "내 마니또의 파트"를 단서 7번째 칸에 써 둔다. 최종 지목 단계가 열리면 받는 사람에게만 공개된다
+      // (운영자는 단서를 읽을 수 없다). 본인이 쓰는 답이 아니라 거짓·대충이 없고, 마니또가 접속을 안 해도 나간다.
+      const newVer = (config.assignVer ?? 0) + 1;
+      const partOf = Object.fromEntries(roster.map((r) => [r.pid, (r.part || "").trim()]));
+      const hintOps = [];
+      for (const { giverPid, receiverPid } of pairs) {
+        if (!partOf[giverPid]) continue;
+        hintOps.push((b) => b.set(doc(db, "clues", `${receiverPid}_${PART_HINT_IDX}`), {
+          receiverPid, idx: PART_HINT_IDX, answer: partOf[giverPid], ver: newVer,
+        }));
+      }
       ops.push((b) => b.set(metaRef, { ...assignmentMemo(pairs, codes), at: serverTimestamp() }));
       await commitInChunks(ops);
+      // 파트 단서는 따로 저장한다. 콘솔에 게시된 보안 규칙이 예전 것이면 이 저장만 거부되는데, 그래도 배정 자체는 되게.
+      let hintFailed = false;
+      await commitInChunks(hintOps).catch(() => { hintFailed = true; });
       // 추리 보드가 후보를 줄일 때 쓰는 값 (짝 정보는 아님)
       // 배정 회차를 올린다(배정 문서를 다 쓴 뒤에). 지난 회차 단서는 보안 규칙이 읽지 못하게 하고,
       // 각 마니또가 앱을 열 때 새 대상에게 단서를 다시 보낸다.
-      await updateDoc(doc(db, "config", "app"), { siteMatched, teamExcluded, assignVer: increment(1) });
-      setMsg(`${pairs.length}명 배정 완료.` + (warnings.length ? " " + warnings.join(" ") : siteMatched ? " 같은 근무지·다른 팀으로, 맞마니또 없이 짝지었어요." : " 다른 팀끼리, 맞마니또 없이 짝지었어요. 근무지가 다른 짝은 원격 미션 카드가 나와요."));
+      await updateDoc(doc(db, "config", "app"), { siteMatched, teamExcluded, assignVer: newVer });
+      const noPart = roster.filter((r) => !partOf[r.pid]).length;
+      setMsg(`${pairs.length}명 배정 완료.`
+        + (hintFailed ? " ⚠ 파트 단서는 저장하지 못했어요. Firebase 콘솔에 최신 보안 규칙(firestore.rules)을 게시한 뒤 '배정하기'를 다시 눌러 주세요." : "")
+        + (noPart && noPart < roster.length ? ` 파트가 비어 있는 ${noPart}명이 마니또인 경우는 파트 단서가 나가지 않아요.` : "") + (warnings.length ? " " + warnings.join(" ") : siteMatched ? " 같은 근무지·다른 팀으로, 맞마니또 없이 짝지었어요." : " 다른 팀끼리, 맞마니또 없이 짝지었어요. 근무지가 다른 짝은 원격 미션 카드가 나와요."));
     } catch (err) {
       setMsg(err.message);
     } finally {
@@ -226,13 +309,19 @@ function Setup() {
   }
 
   const sorted = [...roster].sort((a, b) => a.pid.localeCompare(b.pid));
+  const partCount = {};
+  for (const r of roster) if (r.part) partCount[r.part] = (partCount[r.part] || 0) + 1;
+  const parts = Object.entries(partCount).sort((a, b) => b[1] - a[1]);
   const inviteText = sorted.map((r) => `${r.name}\t${invites[r.pid] || ""}`).join("\n");
 
   return (
     <>
       <Panel title="1. 명단">
-        <p className="small">한 줄에 한 명, "이름,근무지" 형식. 팀까지 직접 정하려면 "이름,근무지,팀번호".</p>
-        <textarea className="pk-input" rows={6} value={text} onChange={(e) => setText(e.target.value)} placeholder={"홍길동,SR3\n김철수,S1L,3"} />
+        <p className="small">
+          한 줄에 한 명, "이름,근무지,파트" 형식. 팀까지 직접 정하려면 "이름,근무지,파트,팀번호".
+          파트를 넣으면 최종 지목이 열릴 때 "내 마니또는 ○○ 소속" 단서가 자동으로 나가요.
+        </p>
+        <textarea className="pk-input" rows={6} value={text} onChange={(e) => setText(e.target.value)} placeholder={"홍길동,SR3,공정파트\n김철수,S1L,소자파트"} />
         <button className="pk-btn main" onClick={addPeople} disabled={busy || !loaded}>명단에 추가</button>
       </Panel>
 
@@ -250,6 +339,12 @@ function Setup() {
             ? "다른 근무지끼리도 짝이 될 수 있어요. 대상이 다른 근무지면 직접 가지 않아도 되는 미션 카드만 나와요."
             : "같은 근무지끼리만 짝을 지어요. 실물 미션을 모두 할 수 있고, 추리 보드에서 다른 근무지가 후보에서 빠져요."}
         </p>
+        <p className="small">
+          {parts.length
+            ? <>파트 단서: {parts.map(([name, n]) => `${name} ${n}명`).join(" · ")}{roster.length - parts.reduce((a, [, n]) => a + n, 0) > 0 && ` · 파트 없음 ${roster.length - parts.reduce((a, [, n]) => a + n, 0)}명`}.
+              {parts.some(([, n]) => n < 6) && " 인원이 적은 파트는 파트 단서만으로 마니또가 거의 드러나요."} 배정한 뒤 파트를 고쳤다면 다시 배정해야 반영돼요.</>
+            : "파트가 입력되지 않아 파트 단서는 나가지 않아요(명단 표의 파트 칸을 눌러 넣을 수 있어요)."}
+        </p>
         <button className="pk-btn main" onClick={assign} disabled={busy || roster.length < 3}>배정하기</button>
       </Panel>
 
@@ -259,12 +354,13 @@ function Setup() {
         <button className="pk-btn sm" onClick={() => navigator.clipboard.writeText(inviteText)}>이름과 초대 코드 복사</button>
         <div className="table-wrap">
           <table className="pk-table">
-            <thead><tr><th>이름</th><th>근무지</th><th>팀</th><th>초대 코드</th><th>연결된 메일</th><th></th></tr></thead>
+            <thead><tr><th>이름</th><th>근무지</th><th>파트</th><th>팀</th><th>초대 코드</th><th>연결된 메일</th><th></th></tr></thead>
             <tbody>
               {sorted.map((r) => (
                 <tr key={r.pid}>
                   <td>{r.name}</td>
                   <td><button className="text-btn" onClick={() => cycleLoc(r)} title="눌러서 근무지 바꾸기">{r.loc || "미정"}</button></td>
+                  <td><button className="text-btn" onClick={() => editPart(r)} title="눌러서 파트 바꾸기">{r.part || "미정"}</button></td>
                   <td>{r.team || "-"}</td>
                   <td className="mono">{invites[r.pid] || "-"}</td>
                   <td className="email">{r.uid ? emails[r.uid] || "연결됨" : "-"}</td>
@@ -281,6 +377,13 @@ function Setup() {
       </Panel>
     </>
   );
+}
+
+// 최근 접속 표시: 오늘이면 "오늘", 아니면 "n일 전"
+function seenText(ts) {
+  if (!ts?.toDate) return "-";
+  const days = Math.floor((Date.now() - ts.toDate().getTime()) / 86400000);
+  return days <= 0 ? "오늘" : `${days}일 전`;
 }
 
 function Running() {
@@ -329,16 +432,20 @@ function Running() {
       </Panel>
 
       <Panel title={`받은 인증이 0건인 사람 ${zero.length}명`}>
-        <p className="small">알림을 켜면 그 사람의 마니또 화면에 "대상이 기다리고 있어요"가 떠요. 누가 마니또인지는 여기서 보이지 않아요.</p>
+        <p className="small">
+          알림을 켜면 그 사람의 마니또 화면에 "대상이 기다리고 있어요"가 떠요. 누가 마니또인지는 여기서 보이지 않아요.
+          받은 인증이 0건인 이유는 마니또가 아직 안 했거나, 본인이 받은 미션을 인증하지 않은 것 둘 중 하나예요. 최근 접속이 오래된 사람은 따로 알려 주세요.
+        </p>
         <div className="table-wrap">
           <table className="pk-table">
-            <thead><tr><th>팀</th><th>이름</th><th>가입</th><th>프로필</th><th>한 미션</th><th>받은 인증</th><th>알림</th></tr></thead>
+            <thead><tr><th>팀</th><th>이름</th><th>가입</th><th>최근 접속</th><th>프로필</th><th>한 미션</th><th>받은 인증</th><th>알림</th></tr></thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.pid} className={!received[r.pid] ? "warn" : ""}>
                   <td>{r.team}</td>
                   <td>{r.name}</td>
                   <td>{r.uid ? "O" : "-"}</td>
+                  <td>{seenText(progress[r.pid]?.lastSeen)}</td>
                   <td>{progress[r.pid]?.profileDone ? "O" : "-"}</td>
                   <td>{progress[r.pid]?.doneCount || 0}</td>
                   <td>{received[r.pid] || 0}</td>
@@ -428,6 +535,10 @@ function Moderation() {
     if (!r.disqualified && !window.confirm(`${r.name}님을 응모권·수상에서 제외할까요?`)) return;
     return updateDoc(doc(db, "roster", r.pid), { disqualified: !r.disqualified });
   };
+  const toggleDropout = (r) => {
+    if (!r.dropout && !window.confirm(`${r.name}님을 중도 이탈로 표시할까요?\n\n· ${r.name}님은 응모권 0장(추첨 제외)\n· ${r.name}님의 마니또가 완료를 알린 미션은 인증된 것으로 인정\n· ${r.name}님이 맡은 사람은 못 받은 주차만큼 응모권 보상\n\n집계 전에는 언제든 되돌릴 수 있어요.`)) return;
+    return updateDoc(doc(db, "roster", r.pid), { dropout: !r.dropout });
+  };
 
   return (
     <>
@@ -443,10 +554,21 @@ function Moderation() {
         </ul>
       </Panel>
       <Panel title="수상 제외">
-        <p className="small">정체를 미리 알려준 사실이 확인된 경우에만 사용하세요.</p>
+        <p className="small">정체를 미리 알려준 사실 등 규칙 위반이 확인된 경우에만 사용하세요. 줄이 그어진 사람이 제외된 사람이에요.</p>
         <div className="name-chips">
           {[...roster].sort((a, b) => a.name.localeCompare(b.name, "ko")).map((r) => (
-            <button key={r.pid} className={r.disqualified ? "chip is-off" : "chip"} onClick={() => toggleDq(r)}>{r.name}</button>
+            <button key={r.pid} className={r.disqualified ? "chip is-off" : "chip"} aria-pressed={Boolean(r.disqualified)} onClick={() => toggleDq(r)}>{r.name}</button>
+          ))}
+        </div>
+      </Panel>
+      <Panel title="중도 이탈">
+        <p className="small">
+          휴직·이동 등으로 더 참여할 수 없게 된 사람을 표시하세요(줄이 그어진 사람). 본인은 추첨에서 빠지고,
+          그 사람의 마니또와 그 사람이 맡은 사람은 손해 보지 않게 집계돼요. 가입하지 않은 사람은 표시하지 않아도 같은 방식으로 처리돼요.
+        </p>
+        <div className="name-chips">
+          {[...roster].sort((a, b) => a.name.localeCompare(b.name, "ko")).map((r) => (
+            <button key={r.pid} className={r.dropout ? "chip is-off" : "chip"} aria-pressed={Boolean(r.dropout)} onClick={() => toggleDropout(r)}>{r.name}{!r.uid && " (미가입)"}</button>
           ))}
         </div>
       </Panel>
@@ -508,6 +630,62 @@ function VotingAdmin() {
   );
 }
 
+// 집계 전 확인: 마니또가 완료를 알렸는데 받는 사람이 인증하지 않은 미션.
+// 그대로 두면 그 마니또는 미션 응모권을 못 받고, 인증이 하나도 없으면 은신·보상 자격도 없다(상대방 때문에 생기는 손해).
+// 운영자가 본인에게 확인한 뒤 "마니또 미션 인정"을 누르면, 인증 기록이 없는 완료 알림을 인증된 것으로 쳐 준다.
+// 가입 안 한 사람과 중도 이탈로 표시한 사람은 누르지 않아도 인정된다. (쪽지·짝 정보는 집계 단계부터 운영자가 읽을 수 있다)
+function Unredeemed({ roster }) {
+  const [rows, setRows] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    Promise.all([readAll("deliveries"), readAll("redemptions")]).then(([deliveries, redemptions]) => {
+      const sent = {};
+      const got = {};
+      Object.values(deliveries).forEach((d) => (sent[d.receiverPid] ||= new Set()).add(d.slot));
+      Object.values(redemptions).forEach((r) => (got[r.receiverPid] ||= new Set()).add(r.slot));
+      const list = Object.entries(sent)
+        .map(([pid, slots]) => ({ pid, sent: slots.size, missing: [...slots].filter((slot) => !got[pid]?.has(slot)).length }))
+        .filter((x) => x.missing > 0);
+      if (alive) setRows(list);
+    }).catch(() => alive && setRows([]));
+    return () => { alive = false; };
+  }, []);
+
+  const byPid = Object.fromEntries(roster.map((r) => [r.pid, r]));
+  const toggle = (r) => updateDoc(doc(db, "roster", r.pid), { creditGiver: !r.creditGiver });
+  if (!rows) return null;
+
+  return (
+    <Panel title={`집계 전 확인: 받고도 인증하지 않은 사람 ${rows.length}명`}>
+      <p className="small">
+        마니또가 미션 완료를 알렸는데 인증하지 않은 사람이에요. 그대로 두면 그 사람의 마니또가 응모권을 못 받아요.
+        본인에게 실제로 받았는지 확인한 뒤 "마니또 미션 인정"을 누르면, 인증 안 된 완료 알림을 인증된 것으로 쳐요(본인의 인증 입력 응모권은 생기지 않아요).
+        가입 안 한 사람과 중도 이탈은 누르지 않아도 인정돼요.
+      </p>
+      {rows.length === 0 ? <p className="muted">해당하는 사람이 없어요.</p> : (
+        <div className="table-wrap">
+          <table className="pk-table">
+            <thead><tr><th>이름</th><th>받은 완료 알림</th><th>미인증</th><th>처리</th></tr></thead>
+            <tbody>
+              {rows.map((x) => {
+                const r = byPid[x.pid];
+                if (!r) return null;
+                const auto = !r.uid ? "미가입 (자동 인정)" : r.dropout ? "중도 이탈 (자동 인정)" : null;
+                return (
+                  <tr key={x.pid}>
+                    <td>{r.name}</td><td>{x.sent}건</td><td>{x.missing}건</td>
+                    <td>{auto || <button className="text-btn" aria-pressed={Boolean(r.creditGiver)} onClick={() => toggle(r)}>{r.creditGiver ? "인정함 (취소)" : "마니또 미션 인정"}</button>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 function Scoring() {
   const { nameOf } = useApp();
   const fullRoster = useFullRoster();
@@ -529,8 +707,11 @@ function Scoring() {
     const [assignments, giverCodes, redemptions, missions, guesses, votes, owners, evals, deliveries] = await Promise.all(
       ["assignments", "giverCodes", "redemptions", "giverMissions", "guesses", "votes", "cardOwners", "adminEval", "deliveries"].map(readAll)
     );
-    const people = roster.map((r) => ({ pid: r.pid, disqualified: Boolean(r.disqualified) }));
+    const people = roster.map((r) => ({
+      pid: r.pid, disqualified: Boolean(r.disqualified), joined: Boolean(r.uid), dropout: Boolean(r.dropout), creditGiver: Boolean(r.creditGiver),
+    }));
     const tickets = computeTickets({
+      deliveries: Object.values(deliveries).map((d) => ({ receiverPid: d.receiverPid, slot: d.slot })),
       people,
       assignments: Object.fromEntries(Object.entries(assignments).map(([g, a]) => [g, a.receiverPid])),
       giverCodes: Object.fromEntries(Object.entries(giverCodes).map(([g, c]) => [g, c.codes])),
@@ -538,7 +719,8 @@ function Scoring() {
       missions,
       guesses: Object.fromEntries(Object.entries(guesses).map(([r, g]) => [r, g.guessPid])),
     });
-    const disqualified = new Set(people.filter((p) => p.disqualified).map((p) => p.pid));
+    // 수상 제외·불참(가입 안 함, 중도 이탈)은 베스트 마니또에서도 뺀다
+    const disqualified = new Set(people.filter((p) => p.disqualified || !p.joined || p.dropout).map((p) => p.pid));
     const ranked = rankBestManito({
       cards: Object.entries(owners).map(([cardId, o]) => ({ cardId, giverPid: o.giverPid })),
       votes: Object.fromEntries(Object.entries(votes).map(([v, x]) => [v, x.cardIds || []])),
@@ -567,8 +749,12 @@ function Scoring() {
 
   return (
     <>
+      <Unredeemed roster={roster} />
       <Panel title="집계">
-        <p className="small">응모권, 베스트 마니또 순위, 최다 응모권상(동점 시 무작위), 칭찬 벽을 계산해요. 다시 누르면 다시 계산돼요(최다 응모권상 동점 추첨도 다시 해요).</p>
+        <p className="small">
+          응모권, 베스트 마니또 순위, 최다 응모권상, 칭찬 벽을 계산해요. 수상 제외·중도 이탈 표시를 먼저 끝내고 누르세요.
+          다시 누르면 다시 계산돼요(동점을 무작위로 가른 것도 다시 뽑아요).
+        </p>
         <button className="pk-btn main" onClick={compute} disabled={busy || !fullRoster}>{result ? "다시 집계" : "집계하기"}</button>
         {result && (
           <ul className="plain">

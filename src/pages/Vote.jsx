@@ -51,6 +51,7 @@ export default function Vote() {
         마니또별로 받은 사람들이 남긴 후기를 모았어요. 마음에 드는 카드를 최대 3장 고르세요.
         카드 번호는 사람마다 다르게 보여서 "몇 번 찍어줘"는 통하지 않아요.
       </p>
+      <p className="small">정체는 송년회에서 공개돼요. 투표가 끝날 때까지 누가 내 마니또였는지 밝히거나 표를 부탁하지 말아 주세요(확인되면 수상에서 제외될 수 있어요).</p>
       {cards.length === 0 && <p className="muted">운영진이 투표 카드를 만들면 여기에 보여요.</p>}
       <div className="vote-grid">
         {visible.map((c, i) => (

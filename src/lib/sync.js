@@ -1,4 +1,4 @@
-import { doc, getDoc, setDoc, writeBatch } from "firebase/firestore";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { CLUE_COUNT } from "./constants.js";
 
@@ -13,16 +13,19 @@ export async function syncClues(myPid, ver = 0) {
   if (!assignSnap?.exists() || !profileSnap.exists()) return false;
   const receiverPid = assignSnap.data().receiverPid;
   const answers = profileSnap.data().answers || [];
-  const batch = writeBatch(db);
-  for (let i = 0; i < CLUE_COUNT; i++) {
-    batch.set(doc(db, "clues", `${receiverPid}_${i}`), {
-      receiverPid,
-      idx: i,
-      answer: (answers[i] || "").trim() || "(답변 없음)",
-      ver,
-    });
-  }
-  await batch.commit();
+  // 한 칸씩 따로 쓴다. 이미 공개된 칸은 보안 규칙이 답 변경을 막는데(권한 없음), 그 칸 때문에 나머지 칸까지 막히지 않게.
+  const results = await Promise.allSettled(
+    Array.from({ length: CLUE_COUNT }, (_, i) =>
+      setDoc(doc(db, "clues", `${receiverPid}_${i}`), {
+        receiverPid,
+        idx: i,
+        answer: (answers[i] || "").trim() || "(답변 없음)",
+        ver,
+      })
+    )
+  );
+  const failed = results.filter((r) => r.status === "rejected" && r.reason?.code !== "permission-denied");
+  if (failed.length) throw failed[0].reason;
   await setDoc(doc(db, "progress", myPid), { cluesVer: ver }, { merge: true });
   return true;
 }
