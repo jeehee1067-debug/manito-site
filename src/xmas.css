@@ -1,0 +1,112 @@
+/* ============================================================
+   연말·크리스마스 장식 (시즌 한정)
+   styles.css(방탈출 값)의 색·테두리·버튼·대사창은 바꾸지 않고 장식만 얹는다.
+   빨강·초록·금색은 styles.css의 --red, --green, --gold를 그대로 쓴다.
+   ============================================================ */
+
+.px-art { image-rendering: pixelated; flex: none; }
+
+/* ---------- 눈 ---------- */
+/* #root 안에서 z-index -1: 배경 위, 패널·글자 아래 */
+.snow { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
+.snow i { position: absolute; left: 0; right: 0; background-repeat: repeat; image-rendering: pixelated; will-change: transform; }
+/* 타일 크기만큼 움직이고 처음으로 돌아가서 끊김 없이 이어진다 */
+.snow i:nth-child(1) {
+  top: -120px; bottom: 0; background-image: url("./assets/xmas/snow-a.svg"); background-size: 120px 120px;
+  animation: snow-a 10s linear infinite;
+}
+.snow i:nth-child(2) {
+  top: -180px; bottom: 0; right: -180px; background-image: url("./assets/xmas/snow-b.svg"); background-size: 180px 180px;
+  animation: snow-b 16s linear infinite;
+}
+@keyframes snow-a { to { transform: translateY(120px); } }
+@keyframes snow-b { to { transform: translate(-180px, 180px); } }
+#root { position: relative; z-index: 1; }
+
+/* ---------- 전구 줄 ---------- */
+.garland {
+  position: relative; height: 20px; margin: 0 -8px 4px;
+  background: url("./assets/xmas/lights-wire.svg") 0 0 / 96px 20px repeat-x; image-rendering: pixelated;
+}
+.garland::before, .garland::after {
+  content: ""; position: absolute; inset: 0; background-repeat: repeat-x; background-size: 96px 20px; image-rendering: pixelated;
+  animation: twinkle 1.6s steps(1) infinite;
+}
+.garland::before { background-image: url("./assets/xmas/lights-a.svg"); }
+.garland::after { background-image: url("./assets/xmas/lights-b.svg"); animation-delay: -0.8s; }
+@keyframes twinkle {
+  0% { filter: brightness(1.25) drop-shadow(0 0 3px rgba(255, 228, 140, 0.75)); }
+  50% { filter: brightness(0.7); }
+}
+.hud .garland { margin-top: -6px; }
+.login .garland { margin: -16px -8px 14px; }
+
+/* ---------- 패널 제목의 호랑가시 잎 ---------- */
+.panel-title { position: relative; padding-right: 50px; }
+.panel-title::after {
+  content: ""; position: absolute; right: 10px; top: 50%; width: 30px; height: 12px; transform: translateY(-50%);
+  background: url("./assets/xmas/holly.svg") center / contain no-repeat; image-rendering: pixelated;
+}
+
+/* ---------- 로고: 산타 모자, 인사 리본 ---------- */
+.logo-title { position: relative; display: inline-block; }
+.logo-title::before {
+  content: ""; position: absolute; left: -0.34em; top: -0.5em; width: 0.9em; height: 0.84em;
+  background: url("./assets/xmas/hat.svg") center / contain no-repeat; image-rendering: pixelated; transform: rotate(-22deg);
+}
+.hud-logo { position: relative; }
+.hud-logo::before {
+  content: ""; position: absolute; left: -8px; top: -13px; width: 22px; height: 21px;
+  background: url("./assets/xmas/hat.svg") center / contain no-repeat; image-rendering: pixelated; transform: rotate(-22deg);
+}
+.logo-xmas {
+  display: inline-block; margin-top: 8px; padding: 2px 18px; font-size: 12px; letter-spacing: 1px; color: #fff;
+  background: var(--red); border-top: 2px solid var(--ink); border-bottom: 2px solid var(--ink);
+  clip-path: polygon(0 0, 100% 0, calc(100% - 9px) 50%, 100% 100%, 0 100%, 9px 50%);
+}
+
+/* ---------- 로그인 캐릭터 줄: 트리·선물·눈밭 ---------- */
+.lineup { position: relative; padding-bottom: 12px; }
+.lineup::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 18px; z-index: 2;
+  background: url("./assets/xmas/snowbank.svg") 0 0 / 48px 18px repeat-x; image-rendering: pixelated;
+}
+.gifts { display: inline-flex; align-items: flex-end; gap: 2px; }
+.lineup .gifts { margin-left: 4px; }
+.lineup .px-art { filter: drop-shadow(0 4px 0 rgba(0, 0, 0, 0.45)); }
+
+/* ---------- 내 대상 / 내 마니또: 선물 포장 리본 ---------- */
+.panel.target { position: relative; overflow: hidden; padding-right: 54px; }
+.panel.target::before {
+  content: ""; position: absolute; top: 0; bottom: 0; right: 20px; width: 20px;
+  background: var(--red); border-left: 3px solid var(--ink); border-right: 3px solid var(--ink);
+}
+.panel.target::after {
+  content: ""; position: absolute; top: 4px; right: 11px; width: 44px; height: 36px;
+  background: url("./assets/xmas/bow.svg") center / contain no-repeat; image-rendering: pixelated;
+}
+
+/* ---------- 인증 코드: 선물 태그 구멍 ---------- */
+.code-tag { position: relative; padding-left: 30px; }
+.code-tag::before {
+  content: ""; position: absolute; left: 9px; top: 50%; width: 10px; height: 10px; transform: translateY(-50%);
+  border: 2px solid var(--ink); border-radius: 50%; background: var(--paper);
+}
+
+/* ---------- 결과: 시상대 위 눈 ---------- */
+.podium-step { position: relative; }
+.podium-step::before {
+  content: ""; position: absolute; left: -3px; right: -3px; top: -10px; height: 12px;
+  background: url("./assets/xmas/snowbank.svg") 0 0 / 32px 12px repeat-x; image-rendering: pixelated;
+}
+
+/* ---------- 바닥 인사 ---------- */
+.xmas-footer {
+  display: flex; align-items: flex-end; justify-content: center; gap: 12px; margin-top: 8px;
+  color: #9fb4d4; font-size: 12px; letter-spacing: 1px; line-height: 1.6; text-align: center;
+}
+.xmas-footer p { padding-bottom: 6px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .snow i, .garland::before, .garland::after { animation: none; }
+}

@@ -13,6 +13,7 @@ import Team from "./pages/Team.jsx";
 import Vote from "./pages/Vote.jsx";
 import Reveal from "./pages/Reveal.jsx";
 import Admin from "./pages/Admin.jsx";
+import { Garland, XmasFooter } from "./xmas.jsx";
 
 const AppCtx = createContext(null);
 export const useApp = () => useContext(AppCtx);
@@ -122,6 +123,7 @@ export default function App() {
     <AppCtx.Provider value={ctx}>
       <div className="app">
         <header className="hud">
+          <Garland />
           <div className="hud-row">
             <span className="hud-logo">S1FA 마니또</span>
             <span className="hud-chip">{PHASES[phase]}{phase === PHASE.RUNNING ? ` ${config.week}주차` : ""}</span>
@@ -138,6 +140,7 @@ export default function App() {
           )}
         </header>
         <main>{body}</main>
+        <XmasFooter />
       </div>
     </AppCtx.Provider>
   );
