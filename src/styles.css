@@ -160,7 +160,7 @@ textarea.pk-input { resize: vertical; line-height: 1.6; }
 .dialogue-speaker.static { position: static; display: inline-block; }
 
 /* ---------- 로그인 ---------- */
-.login { padding-top: 24px; }
+.login { padding-top: 24px; --lineup-h: clamp(120px, 38vw, 150px); }
 .logo-plate { text-align: center; margin-bottom: 10px; }
 .logo-sub { font-size: 13px; color: #9fb4d4; letter-spacing: 2px; margin-bottom: 4px; }
 .logo-title {
@@ -173,6 +173,25 @@ textarea.pk-input { resize: vertical; line-height: 1.6; }
 }
 .lineup { display: flex; justify-content: center; align-items: flex-end; gap: 4px; margin: 6px 0 14px; }
 .lineup img { height: 120px; image-rendering: pixelated; filter: drop-shadow(0 4px 0 rgba(0, 0, 0, 0.45)); }
+.lineup .leader { height: var(--lineup-h); flex: none; }
+
+/* 넓은 화면(PC)에서는 로그인 화면을 크게 */
+@media (min-width: 720px) {
+  .app.narrow.login { max-width: 680px; }
+  .login { padding-top: 40px; --lineup-h: 270px; }
+  .login .logo-sub { font-size: 16px; }
+  .login .logo-title { font-size: 76px; }
+  .login .logo-tag { font-size: 17px; padding: 4px 18px; margin-top: 12px; }
+  .login .lineup { gap: 10px; margin: 14px 0 22px; }
+  .login .panel { padding: 22px 28px; font-size: 17px; }
+  .login .panel-title { font-size: 19px; }
+  .login .panel-label { font-size: 16px; }
+  .login .pk-input { font-size: 18px; padding: 13px 15px; }
+  .login .chip { font-size: 17px; padding: 10px 14px; }
+  .login .pk-btn { font-size: 20px; padding: 14px; }
+  .login .text-btn, .login label.check, .login .small { font-size: 15px; }
+  .login-note { font-size: 15px; }
+}
 
 /* ---------- 캐릭터 ---------- */
 .avatar { width: auto; image-rendering: pixelated; flex: none; }
