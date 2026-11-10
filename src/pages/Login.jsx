@@ -2,9 +2,11 @@ import { useState } from "react";
 import { doc, setDoc } from "firebase/firestore";
 import { auth, db } from "../firebase.js";
 import { login, signup, claimWithInvite, resetPassword, validateEmail, authErrorMessage } from "../lib/account.js";
-import { AVATARS } from "../lib/constants.js";
-import { avatarSrc } from "../ui.jsx";
-import { Garland, Gifts, XmasTree } from "../xmas.jsx";
+import { Garland, Gifts, XMAS_LEADERS, XmasTree } from "../xmas.jsx";
+
+// 첫 운영자 설정 버튼은 주소 끝에 ?setup을 붙였을 때만 보인다(운영자 설정이 끝난 뒤에는 숨김).
+// 이미 운영자가 있으면 config 생성이 보안 규칙에 막혀서, 이 주소로 들어와도 운영자가 될 수 없다.
+const SHOW_SETUP = new URLSearchParams(window.location.search).has("setup");
 
 // mode: login 로그인 / signup 처음 가입 / reset 비밀번호 찾기 / bootstrap 첫 운영자 설정
 export default function Login({ bootstrap = false }) {
@@ -71,9 +73,9 @@ export default function Login({ bootstrap = false }) {
         <div><span className="logo-xmas">MERRY CHRISTMAS &amp; HAPPY NEW YEAR</span></div>
       </div>
       <div className="lineup" aria-hidden="true">
-        <XmasTree scale={5} />
-        {AVATARS.map((_, i) => <img key={i} src={avatarSrc(i)} alt="" />)}
-        <Gifts scale={3} />
+        <XmasTree />
+        {XMAS_LEADERS.map((src, i) => <img key={i} className="leader" src={src} alt="" />)}
+        <Gifts />
       </div>
 
       <section className="panel">
@@ -128,7 +130,7 @@ export default function Login({ bootstrap = false }) {
           )}
           {/* 로그인 전에는 config를 읽을 수 없어(보안 규칙) 첫 운영자인지 알 수 없다. 첫 운영자는 여기서 들어간다.
               이미 운영자가 있으면 config 생성이 규칙에 막히고, 만들어진 계정은 초대 코드 연결 화면으로 간다. */}
-          {!bootstrap && tabMode && (
+          {!bootstrap && tabMode && SHOW_SETUP && (
             <button type="button" className="text-btn" onClick={() => go("bootstrap")}>처음 설정하는 운영자인가요?</button>
           )}
           {!bootstrap && !tabMode && (

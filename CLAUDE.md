@@ -34,6 +34,7 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 
 ## 로그인
 
+- 첫 운영자 설정 버튼은 주소에 `?setup`이 있을 때만 보인다(운영자 설정 완료 후 숨김).
 - 실제 메일 주소 + 비밀번호(Firebase Authentication). 비밀번호 찾기는 `sendPasswordResetEmail`. 메일 주소는 Firestore에 저장하지 않는다.
 - `App`은 로그인 상태만 보고, 로그인한 사람의 구독·화면은 `Session`(key = uid)에 있다. 사람이 바뀌면 통째로 새로 만들어진다.
 - 내 `users` 문서는 서버 저장이 확인된 스냅샷만 반영한다(`hasPendingWrites` 무시). 가입 직후 로컬 스냅샷으로 화면을 열면 규칙이 아직 "연결 전"으로 보고 내 배정 읽기를 거부한다(실제로 재현된 버그).
@@ -68,6 +69,7 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 | `src/pages/*` | 화면 |
 | `src/styles.css` | 방탈출 `assets/css/style.css`의 색·테두리·버튼·대사창 값을 따름. 시즌 장식은 여기 넣지 말고 `xmas.css`에 |
 | `public/char/p1~p4.png` | 방탈출 참가자 캐릭터 |
+| `public/char/boss1~4.png` | 방탈출 파트장님·PL님(로그인 화면 주인공 원본). 연말에는 `src/assets/xmas/leader1~4.png`(소품 얹은 그림)를 쓴다 |
 
 ## 아직 안 된 것
 

@@ -72,6 +72,16 @@
   background: url("./assets/xmas/snowbank.svg") 0 0 / 48px 18px repeat-x; image-rendering: pixelated;
 }
 .gifts { display: inline-flex; align-items: flex-end; gap: 2px; }
+/* 픽셀 그림은 정수 배로: 트리 22px·선물 12px 기준 */
+.lineup .px-tree { height: 110px; }   /* 5배 */
+.lineup .px-gift-a { height: 36px; }  /* 3배 */
+.lineup .px-gift-b { height: 24px; }  /* 2배 */
+@media (min-width: 720px) {
+  .lineup .px-tree { height: 176px; }  /* 8배 */
+  .lineup .px-gift-a { height: 60px; } /* 5배 */
+  .lineup .px-gift-b { height: 48px; } /* 4배 */
+  .logo-xmas { font-size: 15px; padding: 3px 26px; margin-top: 12px; }
+}
 .lineup .gifts { margin-left: 4px; }
 .lineup .px-art { filter: drop-shadow(0 4px 0 rgba(0, 0, 0, 0.45)); }
 
