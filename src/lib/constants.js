@@ -2,8 +2,7 @@ export const PHASES = ["준비", "미션 진행", "최종 지목", "투표", "�
 export const PHASE = { SETUP: 0, RUNNING: 1, GUESSING: 2, VOTING: 3, SCORING: 4, REVEAL: 5 };
 
 export const REVIEW_MIN = 20;
-export const TEAM_COUNT = 8;
-// 근무지: 방탈출과 같은 구분. 같은 근무지끼리만 마니또 짝을 지어 실물 미션이 가능하게 한다.
+// 근무지: 방탈출과 같은 구분. 옵션으로 같은 근무지끼리만 마니또 짝을 지을 수 있다(실물 미션이 가능하게).
 export const LOCS = ["SR3", "S1L"];
 export const MISSION_SLOTS = [1, 2, 3]; // 1·2주차 미션 카드, 3주차 칭찬 카드
 export const PRAISE_SLOT = 3;

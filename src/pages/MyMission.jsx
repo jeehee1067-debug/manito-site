@@ -47,7 +47,8 @@ export default function MyMission() {
       .catch(() => setCodes(null));
     const offs = [
       onSnapshot(doc(db, "giverMissions", myPid), (s) => setMissions(s.exists() ? s.data() : {})),
-      onSnapshot(doc(db, "progress", myPid), (s) => setProgress(s.exists() ? s.data() : {})),
+      // 내 진행 문서를 못 읽는 경우(콘솔에 게시된 보안 규칙이 예전 것일 때 생긴다)에도 화면과 단서 보내기가 멈추지 않게 "모름"으로 둔다.
+      onSnapshot(doc(db, "progress", myPid), (s) => setProgress(s.exists() ? s.data() : {}), () => setProgress({ unknown: true })),
     ];
     return () => offs.forEach((o) => o());
   }, [myPid]);
@@ -60,8 +61,9 @@ export default function MyMission() {
   useEffect(() => {
     // 처음 배정됐거나 운영자가 다시 배정했으면(회차가 바뀜) 내 답을 지금 대상에게 단서로 다시 보낸다.
     const ver = config.assignVer ?? 0;
-    if (assignment && progress.profileDone && progress.cluesVer !== ver) syncClues(myPid, ver).catch(() => {});
-  }, [assignment, progress.profileDone, progress.cluesVer, config.assignVer, myPid]);
+    // 진행 문서를 못 읽었으면 보냈는지 알 수 없으니 한 번 보낸다(같은 답을 다시 쓰는 것이라 해가 없다. 프로필이 없으면 아무것도 안 한다).
+    if (assignment && (progress.unknown || (progress.profileDone && progress.cluesVer !== ver))) syncClues(myPid, ver).catch(() => {});
+  }, [assignment, progress.unknown, progress.profileDone, progress.cluesVer, config.assignVer, myPid]);
 
   if (assignment === undefined) return <Loading />;
   if (!assignment) {
@@ -100,7 +102,7 @@ export default function MyMission() {
       {nudge && running && (
         <Dialogue speaker="운영진" tone="warn">{nameOf(receiverPid)}님이 아직 받은 미션이 없어요. 이번 주 미션을 먼저 해 주세요!</Dialogue>
       )}
-      {!progress.profileDone && (
+      {!progress.unknown && !progress.profileDone && (
         <Dialogue speaker="운영진" tone="warn">내 프로필이 비어 있어요. 대상에게 갈 단서가 프로필에서 나오니 <a href="#profile">지금 채워 주세요</a>.</Dialogue>
       )}
 
@@ -287,6 +289,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, allD
 }
 
 function TicketSummary({ codes, missions, entries }) {
+  const { myPart } = useApp();
   const [redeemedSlots, setRedeemedSlots] = useState({});
   useEffect(() => {
     if (!codes) return;
@@ -309,6 +312,7 @@ function TicketSummary({ codes, missions, entries }) {
         <li className="muted">
           마지막에 더해지는 것: 끝까지 안 들키면 +{R.hidden}
           {mission >= R.hiddenMinMissions ? "" : ` (내 미션이 ${R.hiddenMinMissions}건 이상 인증돼야 받을 수 있어요)`}, 내 마니또를 맞히면 +{R.correctGuess}
+          {myPart ? `, 우리 파트가 완수율 1위면 +${R.partBonus}` : ""}
         </li>
       </ul>
       <p className="small">내 마니또가 미션을 안 보낸 주차는 마지막에 인증 입력 대신 1장씩 채워져요(내 미션이 {R.compMinMissions}건 이상 인증된 경우). <a href="#rules">규칙 전체 보기</a></p>

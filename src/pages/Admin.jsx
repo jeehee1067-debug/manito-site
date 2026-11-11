@@ -6,9 +6,9 @@ import { db } from "../firebase.js";
 import { useApp } from "../App.jsx";
 import Claim from "./Claim.jsx";
 import { Panel } from "../ui.jsx";
-import { PHASE, PHASES, TEAM_COUNT, CLUE_COUNT, LOCS, PART_HINT_IDX } from "../lib/constants.js";
-import { assignManito, assignmentMemo, generateCodes, makeInviteCode, splitTeams } from "../lib/assign.js";
-import { computeTickets, pickMostTickets, rankBestManito } from "../lib/scoring.js";
+import { PHASE, PHASES, CLUE_COUNT, LOCS, PART_HINT_IDX } from "../lib/constants.js";
+import { assignManito, assignmentMemo, generateCodes, makeInviteCode } from "../lib/assign.js";
+import { computeTickets, partStandings, pickMostTickets, rankBestManito, weeklyPartBoard } from "../lib/scoring.js";
 import { PRIZES } from "../config/prizes.js";
 import { parseRosterLine, rosterSummary, sameSummary } from "../lib/roster.js";
 
@@ -23,7 +23,7 @@ async function commitInChunks(ops) {
 
 const NEXT_PHASE_NOTE = {
   0: "미션 진행을 시작합니다. 시작 후에는 명단 수정과 재배정을 할 수 없어요.",
-  1: "미션 진행을 마감하고 최종 지목을 받습니다. 이후 인증·미션 완료는 막혀요.",
+  1: "미션 진행을 마감하고 최종 지목을 받습니다. 이후 인증·미션 완료는 막혀요. 파트 순위도 지금 숫자로 마지막 발표를 해요.",
   2: "지목을 마감하고 투표를 엽니다. 이 단계부터 운영자 화면에서 짝 정보를 읽을 수 있어요.",
   3: "투표를 마감하고 집계 단계로 넘어갑니다.",
   4: "결과를 전원에게 공개합니다.",
@@ -72,7 +72,19 @@ async function unlinkPerson(r, oldCode, email) {
   return code;
 }
 
-// 명단이 요약과 다르면 요약 문서를 다시 쓴다(명단 추가·삭제·근무지·팀 변경 후 자동).
+// 명단이 요약과 다르면 요약 문서를 다시 쓴다(명단 추가·삭제·근무지·파트 변경 후 자동).
+// 파트 순위 발표(public/board). 실시간으로 올리지 않고 운영자가 누를 때만 쓴다
+// (실시간이면 미션을 받은 직후 어느 파트 숫자가 올랐는지로 마니또의 파트가 드러난다).
+// roster: 명단 전체, progress: { pid: { doneCount } }, week: 열린 주차. 반환: 순위에 든 파트 수
+async function publishPartBoard(roster, progress, week) {
+  const w = Math.min(3, Math.max(1, week || 1));
+  const people = roster.map((r) => ({ pid: r.pid, part: (r.part || "").trim() || null, joined: Boolean(r.uid), dropout: Boolean(r.dropout) }));
+  const doneCounts = Object.fromEntries(Object.entries(progress).map(([pid, p]) => [pid, p.doneCount || 0]));
+  const parts = weeklyPartBoard(people, doneCounts, w).map(({ part, members, done, max }) => ({ part, members, done, max }));
+  await setDoc(doc(db, "public", "board"), { week: w, at: serverTimestamp(), parts });
+  return parts.length;
+}
+
 async function publishRoster(rows) {
   await setDoc(doc(db, "public", "roster"), { people: rosterSummary(rows), at: serverTimestamp() });
 }
@@ -96,6 +108,8 @@ export default function Admin() {
       : "";
     if (!window.confirm(`${PHASES[phase]} → ${PHASES[phase + 1]}\n\n${NEXT_PHASE_NOTE[phase]}${warn}\n\n되돌릴 수 없어요. 진행할까요?`)) return;
     if (phase === PHASE.SETUP && fullRoster) await publishRoster(fullRoster);
+    // 미션을 마감할 때 파트 순위를 마지막으로 한 번 더 발표한다(마감 뒤에는 숫자가 더 바뀌지 않는다). 실패해도 단계는 넘긴다.
+    if (phase === PHASE.RUNNING && fullRoster) await readAll("progress").then((pr) => publishPartBoard(fullRoster, pr, config.week)).catch(() => {});
     await updateDoc(doc(db, "config", "app"), { phase: phase + 1 });
   }
 
@@ -110,7 +124,7 @@ export default function Admin() {
 
       {!myPid && (
         <>
-          <p className="login-note">운영자도 참여하려면 명단을 만든 뒤 내 이름의 초대 코드로 연결하세요.</p>
+          <p className="login-note">운영자가 참여자이기도 하면 명단을 만든 뒤 내 이름의 초대 코드로 연결하세요. 참여하지 않으면 비워 두면 돼요.</p>
           <Claim />
         </>
       )}
@@ -208,12 +222,12 @@ function Setup() {
     const ops = [];
     const bad = [];
     lines.forEach((line, i) => {
-      // "이름,근무지,파트" 또는 "이름,근무지,파트,팀번호" — 근무지·파트·팀은 생략 가능
-      const { name, loc, part, team, badLoc } = parseRosterLine(line, LOCS);
+      // "이름,근무지,파트" — 근무지·파트는 생략 가능
+      const { name, loc, part, badLoc } = parseRosterLine(line, LOCS);
       if (badLoc) bad.push(`${name}(${badLoc})`);
       const pid = `p${String(start + i + 1).padStart(3, "0")}`;
       const invite = makeInviteCode();
-      ops.push((b) => b.set(doc(db, "roster", pid), { name, loc, part, team, uid: null, disqualified: false }));
+      ops.push((b) => b.set(doc(db, "roster", pid), { name, loc, part, uid: null, disqualified: false }));
       ops.push((b) => b.set(doc(db, "invites", invite), { personId: pid }));
     });
     if (bad.length) return setMsg(`근무지는 ${LOCS.join(", ")} 중 하나로 적어 주세요: ${bad.join(", ")}`);
@@ -240,19 +254,15 @@ function Setup() {
     const next = window.prompt(`${r.name}님의 파트 (비우면 파트 없음)`, r.part || "");
     if (next === null) return;
     await updateDoc(doc(db, "roster", r.pid), { part: next.trim() || null });
-    if (config.assignVer) setMsg("파트를 바꿨어요. 이미 배정한 뒤라면 '배정하기'를 다시 눌러야 파트 단서에 반영돼요.");
-  }
-
-  async function autoTeams() {
-    if (!window.confirm(`전원을 ${TEAM_COUNT}팀으로 무작위 편성할까요? 기존 팀은 덮어써요.`)) return;
-    const teams = splitTeams(roster.map((r) => r.pid), TEAM_COUNT);
-    await commitInChunks(Object.entries(teams).map(([pid, team]) => (b) => b.update(doc(db, "roster", pid), { team })));
-    setMsg("팀을 편성했어요.");
+    if (config.assignVer) setMsg("파트를 바꿨어요. 이미 배정한 뒤라면 '배정하기'를 다시 눌러야 배정(같은 파트 피하기)과 파트 단서에 반영돼요.");
   }
 
   async function assign() {
-    if (roster.some((r) => !r.team)) return setMsg("팀이 없는 사람이 있어요. 팀을 먼저 정해 주세요.");
-    if (!window.confirm("마니또를 배정할까요? 다시 배정하면 이전 배정과 코드는 모두 없어져요.\n\n운영자도 참여한다면 배정 직후 브라우저 개발자 도구를 열지 마세요.")) return;
+    const blank = roster.filter((r) => !(r.part || "").trim()).length;
+    const partWarn = blank === roster.length
+      ? "\n\n⚠ 파트가 하나도 입력되지 않았어요. 같은 파트끼리 피하는 배정, 파트 단서, 파트 순위가 모두 빠져요."
+      : blank ? `\n\n⚠ 파트가 비어 있는 사람이 ${blank}명 있어요. 이 사람들은 누구와도 짝이 될 수 있고 파트 순위에서 빠져요.` : "";
+    if (!window.confirm(`마니또를 배정할까요? 다시 배정하면 이전 배정과 코드는 모두 없어져요.${partWarn}\n\n배정 직후에는 브라우저 개발자 도구를 열지 마세요(짝이 보일 수 있어요).`)) return;
     setBusy(true);
     try {
       const metaRef = doc(db, "meta", "assignment");
@@ -266,8 +276,8 @@ function Setup() {
           ops.push((b) => b.delete(doc(db, "giverCodes", p)));
         });
       }
-      const people = roster.map((r) => ({ pid: r.pid, team: r.team, loc: r.loc || null }));
-      const { pairs, siteMatched, teamExcluded, warnings } = assignManito(people, { siteMode });
+      const people = roster.map((r) => ({ pid: r.pid, part: (r.part || "").trim() || null, loc: r.loc || null }));
+      const { pairs, siteMatched, partExcluded, warnings } = assignManito(people, { siteMode });
       const codes = generateCodes(pairs.map((p) => p.giverPid));
       const receiverOf = Object.fromEntries(pairs.map((p) => [p.giverPid, p.receiverPid]));
       for (const { giverPid, receiverPid } of pairs) {
@@ -296,11 +306,14 @@ function Setup() {
       // 추리 보드가 후보를 줄일 때 쓰는 값 (짝 정보는 아님)
       // 배정 회차를 올린다(배정 문서를 다 쓴 뒤에). 지난 회차 단서는 보안 규칙이 읽지 못하게 하고,
       // 각 마니또가 앱을 열 때 새 대상에게 단서를 다시 보낸다.
-      await updateDoc(doc(db, "config", "app"), { siteMatched, teamExcluded, assignVer: newVer });
+      await updateDoc(doc(db, "config", "app"), { siteMatched, partExcluded, assignVer: newVer });
       const noPart = roster.filter((r) => !partOf[r.pid]).length;
       setMsg(`${pairs.length}명 배정 완료.`
         + (hintFailed ? " ⚠ 파트 단서는 저장하지 못했어요. Firebase 콘솔에 최신 보안 규칙(firestore.rules)을 게시한 뒤 '배정하기'를 다시 눌러 주세요." : "")
-        + (noPart && noPart < roster.length ? ` 파트가 비어 있는 ${noPart}명이 마니또인 경우는 파트 단서가 나가지 않아요.` : "") + (warnings.length ? " " + warnings.join(" ") : siteMatched ? " 같은 근무지·다른 팀으로, 맞마니또 없이 짝지었어요." : " 다른 팀끼리, 맞마니또 없이 짝지었어요. 근무지가 다른 짝은 원격 미션 카드가 나와요."));
+        + (noPart && noPart < roster.length ? ` 파트가 비어 있는 ${noPart}명이 마니또인 경우는 파트 단서가 나가지 않아요.` : "")
+        + (warnings.length ? " " + warnings.join(" ") : "")
+        + ` ${siteMatched ? "같은 근무지끼리, " : ""}${partExcluded && noPart < roster.length ? "다른 파트끼리, " : ""}맞마니또 없이 짝지었어요.`
+        + (siteMatched ? "" : " 근무지가 다른 짝은 원격 미션 카드가 나와요."));
     } catch (err) {
       setMsg(err.message);
     } finally {
@@ -318,18 +331,14 @@ function Setup() {
     <>
       <Panel title="1. 명단">
         <p className="small">
-          한 줄에 한 명, "이름,근무지,파트" 형식. 팀까지 직접 정하려면 "이름,근무지,파트,팀번호".
-          파트를 넣으면 최종 지목이 열릴 때 "내 마니또는 ○○ 소속" 단서가 자동으로 나가요.
+          한 줄에 한 명, "이름,근무지,파트" 형식. 같은 파트끼리는 마니또가 되지 않게 배정하고,
+          최종 지목이 열릴 때 "내 마니또는 ○○ 소속" 단서가 자동으로 나가요. 파트 순위도 이 파트로 매겨요.
         </p>
         <textarea className="pk-input" rows={6} value={text} onChange={(e) => setText(e.target.value)} placeholder={"홍길동,SR3,공정파트\n김철수,S1L,소자파트"} />
         <button className="pk-btn main" onClick={addPeople} disabled={busy || !loaded}>명단에 추가</button>
       </Panel>
 
-      <Panel title={`2. 팀 (${TEAM_COUNT}팀)`}>
-        <button className="pk-btn" onClick={autoTeams} disabled={!roster.length}>무작위로 팀 편성</button>
-      </Panel>
-
-      <Panel title="3. 마니또 배정">
+      <Panel title="2. 마니또 배정">
         <div className="chip-row">
           <button className={siteMode === "any" ? "chip is-on" : "chip"} onClick={() => setSiteMode("any")}>근무지 상관없이</button>
           <button className={siteMode === "same" ? "chip is-on" : "chip"} onClick={() => setSiteMode("same")}>같은 근무지끼리만</button>
@@ -341,9 +350,11 @@ function Setup() {
         </p>
         <p className="small">
           {parts.length
-            ? <>파트 단서: {parts.map(([name, n]) => `${name} ${n}명`).join(" · ")}{roster.length - parts.reduce((a, [, n]) => a + n, 0) > 0 && ` · 파트 없음 ${roster.length - parts.reduce((a, [, n]) => a + n, 0)}명`}.
+            ? <>파트: {parts.map(([name, n]) => `${name} ${n}명`).join(" · ")}{roster.length - parts.reduce((a, [, n]) => a + n, 0) > 0 && ` · 파트 없음 ${roster.length - parts.reduce((a, [, n]) => a + n, 0)}명`}.
+              {parts[0][1] > Math.floor(roster.length / 2) && ` ${parts[0][0]}가 전체의 절반을 넘어서 같은 파트끼리도 일부 짝이 돼요.`}
+              {parts.length === 2 && roster.length === parts[0][1] + parts[1][1] && " 파트가 둘뿐이라 마지막 파트 단서는 새 정보가 되지 않아요(처음부터 다른 파트로 정해져 있어요)."}
               {parts.some(([, n]) => n < 6) && " 인원이 적은 파트는 파트 단서만으로 마니또가 거의 드러나요."} 배정한 뒤 파트를 고쳤다면 다시 배정해야 반영돼요.</>
-            : "파트가 입력되지 않아 파트 단서는 나가지 않아요(명단 표의 파트 칸을 눌러 넣을 수 있어요)."}
+            : "파트가 입력되지 않았어요. 같은 파트 피하기·파트 단서·파트 순위가 빠져요(명단 표의 파트 칸을 눌러 넣을 수 있어요)."}
         </p>
         <button className="pk-btn main" onClick={assign} disabled={busy || roster.length < 3}>배정하기</button>
       </Panel>
@@ -354,14 +365,13 @@ function Setup() {
         <button className="pk-btn sm" onClick={() => navigator.clipboard.writeText(inviteText)}>이름과 초대 코드 복사</button>
         <div className="table-wrap">
           <table className="pk-table">
-            <thead><tr><th>이름</th><th>근무지</th><th>파트</th><th>팀</th><th>초대 코드</th><th>연결된 메일</th><th></th></tr></thead>
+            <thead><tr><th>이름</th><th>근무지</th><th>파트</th><th>초대 코드</th><th>연결된 메일</th><th></th></tr></thead>
             <tbody>
               {sorted.map((r) => (
                 <tr key={r.pid}>
                   <td>{r.name}</td>
                   <td><button className="text-btn" onClick={() => cycleLoc(r)} title="눌러서 근무지 바꾸기">{r.loc || "미정"}</button></td>
                   <td><button className="text-btn" onClick={() => editPart(r)} title="눌러서 파트 바꾸기">{r.part || "미정"}</button></td>
-                  <td>{r.team || "-"}</td>
                   <td className="mono">{invites[r.pid] || "-"}</td>
                   <td className="email">{r.uid ? emails[r.uid] || "연결됨" : "-"}</td>
                   <td>
@@ -378,6 +388,8 @@ function Setup() {
     </>
   );
 }
+
+const byPartThenName = (a, b) => (a.part || "").localeCompare(b.part || "", "ko") || a.name.localeCompare(b.name, "ko");
 
 // 최근 접속 표시: 오늘이면 "오늘", 아니면 "n일 전"
 function seenText(ts) {
@@ -406,15 +418,37 @@ function Running() {
     return () => offs.forEach((o) => o());
   }, []);
 
+  const [boardMsg, setBoardMsg] = useState("");
+  const [board, setBoard] = useState(undefined); // 지금 발표돼 있는 파트 순위(public/board)
+  useEffect(() => onSnapshot(doc(db, "public", "board"), (s) => setBoard(s.exists() ? s.data() : null)), []);
+
   const setWeek = (week) => updateDoc(doc(db, "config", "app"), { week });
-  const releaseClues = () => updateDoc(doc(db, "config", "app"), { cluesReleased: Math.min(CLUE_COUNT, (config.cluesReleased || 0) + 2) });
+
+  const publishBoard = () => publishPartBoard(roster, progress, config.week);
+  async function releaseClues() {
+    await updateDoc(doc(db, "config", "app"), { cluesReleased: Math.min(CLUE_COUNT, (config.cluesReleased || 0) + 2) });
+    try {
+      const n = await publishBoard();
+      setBoardMsg(n ? "단서를 공개하고 파트 순위도 새로 발표했어요." : "단서를 공개했어요. 파트가 입력되지 않아 파트 순위는 비어 있어요.");
+    } catch {
+      setBoardMsg("단서는 공개했지만 파트 순위는 발표하지 못했어요. 아래 '파트 순위만 다시 발표'를 눌러 주세요.");
+    }
+  }
+  async function republishBoard() {
+    try {
+      const n = await publishBoard();
+      setBoardMsg(n ? "파트 순위를 새로 발표했어요." : "파트가 입력된 참여자가 없어서 파트 순위가 비어 있어요.");
+    } catch {
+      setBoardMsg("파트 순위를 발표하지 못했어요. 잠시 뒤 다시 눌러 주세요.");
+    }
+  }
 
   async function toggleNudge(pid) {
     if (nudges.has(pid)) await deleteDoc(doc(db, "nudges", pid));
     else await setDoc(doc(db, "nudges", pid), { at: serverTimestamp() });
   }
 
-  const rows = [...roster].sort((a, b) => (a.team || 0) - (b.team || 0) || a.name.localeCompare(b.name, "ko"));
+  const rows = [...roster].sort(byPartThenName);
   const zero = rows.filter((r) => !received[r.pid]);
 
   return (
@@ -428,7 +462,22 @@ function Running() {
 
       <Panel title={`단서 공개 (${config.cluesReleased || 0} / ${CLUE_COUNT})`}>
         <button className="pk-btn gold" onClick={releaseClues} disabled={(config.cluesReleased || 0) >= CLUE_COUNT}>이번 주 단서 2개 공개</button>
-        <p className="small">매주 금요일에 한 번 눌러 주세요. 전원에게 동시에 공개돼요.</p>
+        <p className="small">매주 금요일에 한 번 눌러 주세요. 전원에게 동시에 공개돼요. 누르면 파트 순위도 같이 새로 발표돼요.</p>
+      </Panel>
+
+      <Panel title="파트 순위 발표">
+        <p className="small">
+          참여자의 "파트 순위" 탭에 보이는 표예요. 파트별로 완료를 알린 미션 수 ÷ (가입한 인원 × 열린 주차)로 매겨요.
+          실시간이 아니라 발표할 때의 숫자로 멈춰 있어요(실시간이면 미션을 받은 직후 어느 파트 숫자가 올랐는지로 마니또의 파트가 드러나요).
+        </p>
+        {board === undefined ? null : board && board.parts?.length ? (
+          <ul className="plain">
+            {board.parts.map((x) => <li key={x.part}>{x.part}: {x.done} / {x.max} ({x.members}명)</li>)}
+            <li className="small muted">{board.week}주차 기준{board.at?.toDate ? `, ${board.at.toDate().toLocaleString("ko-KR")} 발표` : ""}</li>
+          </ul>
+        ) : <p className="muted small">아직 발표한 순위가 없어요.</p>}
+        <button className="pk-btn" onClick={republishBoard} disabled={!roster.length}>파트 순위만 다시 발표</button>
+        {boardMsg && <p className="note" role="status">{boardMsg}</p>}
       </Panel>
 
       <Panel title={`받은 인증이 0건인 사람 ${zero.length}명`}>
@@ -438,11 +487,11 @@ function Running() {
         </p>
         <div className="table-wrap">
           <table className="pk-table">
-            <thead><tr><th>팀</th><th>이름</th><th>가입</th><th>최근 접속</th><th>프로필</th><th>한 미션</th><th>받은 인증</th><th>알림</th></tr></thead>
+            <thead><tr><th>파트</th><th>이름</th><th>가입</th><th>최근 접속</th><th>프로필</th><th>한 미션</th><th>받은 인증</th><th>알림</th></tr></thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.pid} className={!received[r.pid] ? "warn" : ""}>
-                  <td>{r.team}</td>
+                  <td>{r.part || "-"}</td>
                   <td>{r.name}</td>
                   <td>{r.uid ? "O" : "-"}</td>
                   <td>{seenText(progress[r.pid]?.lastSeen)}</td>
@@ -466,7 +515,7 @@ function Accounts() {
   const invites = useInvites();
   const emails = useAccountEmails();
   const [msg, setMsg] = useState("");
-  const rows = [...roster].sort((a, b) => (a.team || 0) - (b.team || 0) || a.name.localeCompare(b.name, "ko"));
+  const rows = [...roster].sort(byPartThenName);
   return (
     <Panel title="계정 연결">
       <p className="small">
@@ -475,11 +524,11 @@ function Accounts() {
       {msg && <p className="note" role="status">{msg}</p>}
       <div className="table-wrap">
         <table className="pk-table">
-          <thead><tr><th>팀</th><th>이름</th><th>초대 코드</th><th>연결된 메일</th><th></th></tr></thead>
+          <thead><tr><th>파트</th><th>이름</th><th>초대 코드</th><th>연결된 메일</th><th></th></tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.pid} className={r.uid ? "" : "warn"}>
-                <td>{r.team}</td>
+                <td>{r.part || "-"}</td>
                 <td>{r.name}</td>
                 <td className="mono">{invites[r.pid] || "-"}</td>
                 <td className="email">{r.uid ? emails[r.uid] || "연결됨" : "미연결"}</td>
@@ -501,7 +550,7 @@ function GuessStatus() {
   const roster = useFullRoster() || [];
   const [progress, setProgress] = useState({});
   useEffect(() => onSnapshot(collection(db, "progress"), (s) => setProgress(Object.fromEntries(s.docs.map((d) => [d.id, d.data()])))), []);
-  const rows = [...roster].filter((r) => r.uid).sort((a, b) => (a.team || 0) - (b.team || 0) || a.name.localeCompare(b.name, "ko"));
+  const rows = [...roster].filter((r) => r.uid).sort(byPartThenName);
   const notYet = rows.filter((r) => !progress[r.pid]?.guessed);
   return (
     <Panel title={`최종 지목 중 (안 한 사람 ${notYet.length}명)`}>
@@ -509,11 +558,11 @@ function GuessStatus() {
       {notYet.length > 0 && <p className="note">아직 안 한 사람: {notYet.map((r) => r.name).join(", ")}</p>}
       <div className="table-wrap">
         <table className="pk-table">
-          <thead><tr><th>팀</th><th>이름</th><th>지목</th></tr></thead>
+          <thead><tr><th>파트</th><th>이름</th><th>지목</th></tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.pid} className={progress[r.pid]?.guessed ? "" : "warn"}>
-                <td>{r.team}</td><td>{r.name}</td><td>{progress[r.pid]?.guessed ? "O" : "-"}</td>
+                <td>{r.part || "-"}</td><td>{r.name}</td><td>{progress[r.pid]?.guessed ? "O" : "-"}</td>
               </tr>
             ))}
           </tbody>
@@ -603,7 +652,7 @@ function VotingAdmin() {
     for (const [giverPid, { codes }] of Object.entries(giverCodes)) {
       const reviews = Object.values(codes).map((c) => redemptions[c]).filter((r) => r && !r.voided).map((r) => r.review);
       const cardId = doc(collection(db, "voteCards")).id;
-      ops.push((b) => b.set(doc(db, "voteCards", cardId), { reviews, team: byPid[giverPid]?.team ?? null }));
+      ops.push((b) => b.set(doc(db, "voteCards", cardId), { reviews, part: byPid[giverPid]?.part ?? null }));
       ops.push((b) => b.set(doc(db, "cardOwners", cardId), { giverPid }));
     }
     await commitInChunks(ops);
@@ -708,7 +757,8 @@ function Scoring() {
       ["assignments", "giverCodes", "redemptions", "giverMissions", "guesses", "votes", "cardOwners", "adminEval", "deliveries"].map(readAll)
     );
     const people = roster.map((r) => ({
-      pid: r.pid, disqualified: Boolean(r.disqualified), joined: Boolean(r.uid), dropout: Boolean(r.dropout), creditGiver: Boolean(r.creditGiver),
+      pid: r.pid, part: (r.part || "").trim() || null,
+      disqualified: Boolean(r.disqualified), joined: Boolean(r.uid), dropout: Boolean(r.dropout), creditGiver: Boolean(r.creditGiver),
     }));
     const tickets = computeTickets({
       deliveries: Object.values(deliveries).map((d) => ({ receiverPid: d.receiverPid, slot: d.slot })),
@@ -727,6 +777,7 @@ function Scoring() {
       adminEval: Object.fromEntries(Object.entries(evals).map(([c, e]) => [c, e.score])),
       tickets,
       disqualified,
+      partOf: Object.fromEntries(people.map((p) => [p.pid, p.part])), // 내 파트 카드는 못 보므로 파트 인원 차이를 보정한다
     });
     const most = pickMostTickets(tickets);
     const praises = Object.values(deliveries).filter((d) => d.kind === "praise").map((d) => ({ receiverPid: d.receiverPid, message: d.message }));
@@ -735,6 +786,7 @@ function Scoring() {
       pairs: Object.entries(assignments).map(([giverPid, a]) => ({ giverPid, receiverPid: a.receiverPid })),
       tickets: Object.fromEntries(Object.entries(tickets).map(([pid, t]) => [pid, t.total])),
       ticketDetail: tickets,
+      partBoard: partStandings(people, tickets).map(({ part, members, done, max, winner }) => ({ part, members, done, max, winner })),
       bestManito: ranked.slice(0, PRIZES.bestManito.count).map((r) => ({ pid: r.giverPid, score: Math.round(r.score * 1000) / 1000, votes: r.votes })),
       mostTickets: most,
       bestReview: result?.bestReview || null,
@@ -760,6 +812,9 @@ function Scoring() {
           <ul className="plain">
             <li>베스트 마니또: {result.bestManito.map((b, i) => `${i + 1}위 ${nameOf(b.pid)}(${b.score})`).join(", ")}</li>
             <li>최다 응모권상: {result.mostTickets ? `${nameOf(result.mostTickets.pid)} ${result.mostTickets.total}장 (동점 ${result.mostTickets.tiedCount}명 중)` : "-"}</li>
+            <li>파트 대항전: {(result.partBoard || []).length
+              ? result.partBoard.map((x) => `${x.part} ${x.done}/${x.max}${x.winner ? " (우승)" : ""}`).join(", ")
+              : "파트가 입력되지 않아 없음"}</li>
           </ul>
         )}
       </Panel>

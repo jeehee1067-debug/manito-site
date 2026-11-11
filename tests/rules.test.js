@@ -18,11 +18,11 @@ import {
 
 let env;
 
-// 4명 원형 배정: p001 → p002 → p003 → p004 → p001 (맞마니또 없음, 같은 팀 없음)
-// 팀: p001·p003 = 1팀, p002·p004 = 2팀. p005는 아직 가입 전(초대 코드 INV005).
+// 4명 원형 배정: p001 → p002 → p003 → p004 → p001 (맞마니또 없음, 같은 파트 없음)
+// 파트: p001·p003 = 가파트, p002·p004 = 나파트. p005는 아직 가입 전(초대 코드 INV005).
 const RECEIVER = { p001: "p002", p002: "p003", p003: "p004", p004: "p001" };
 const UID = { p001: "u1", p002: "u2", p003: "u3", p004: "u4" };
-const TEAM = { p001: 1, p002: 2, p003: 1, p004: 2, p005: 1 };
+const PART = { p001: "가파트", p002: "나파트", p003: "가파트", p004: "나파트", p005: "가파트" };
 const CODES = {
   p001: { 1: "A1A1", 2: "A2A2", 3: "A3A3" },
   p002: { 1: "B1B1", 2: "B2B2", 3: "B3B3" },
@@ -37,12 +37,13 @@ async function seed({ phase = 1, cluesReleased = 2, admins = [ADMIN], extra } = 
   await env.withSecurityRulesDisabled(async (ctx) => {
     const db = ctx.firestore();
     const b = writeBatch(db);
-    b.set(doc(db, "config", "app"), { admins, phase, week: 1, cluesReleased, siteMatched: false, teamExcluded: true });
+    b.set(doc(db, "config", "app"), { admins, phase, week: 1, cluesReleased, siteMatched: false, partExcluded: true });
     for (const pid of ["p001", "p002", "p003", "p004", "p005"]) {
-      b.set(doc(db, "roster", pid), { name: pid, loc: "SR3", team: TEAM[pid], uid: UID[pid] || null, disqualified: false });
+      b.set(doc(db, "roster", pid), { name: pid, loc: "SR3", part: PART[pid], uid: UID[pid] || null, disqualified: false });
     }
     b.set(doc(db, "invites", "INV005"), { personId: "p005" });
-    b.set(doc(db, "public", "roster"), { people: { p001: { name: "p001", team: 1, loc: "SR3" } } });
+    b.set(doc(db, "public", "roster"), { people: { p001: { name: "p001", loc: "SR3", part: "가파트" } } });
+    b.set(doc(db, "public", "board"), { week: 1, parts: [{ part: "가파트", members: 2, done: 1, max: 2 }] });
     for (const [pid, uid] of Object.entries(UID)) {
       b.set(doc(db, "users", uid), { personId: pid, eliminated: [] });
       b.set(doc(db, "assignments", pid), { receiverPid: RECEIVER[pid] });
@@ -56,7 +57,7 @@ async function seed({ phase = 1, cluesReleased = 2, admins = [ADMIN], extra } = 
     // p001(마니또)이 p002(받는 사람)에게 남긴 단서와 쪽지
     for (let i = 0; i < 6; i++) b.set(doc(db, "clues", `p002_${i}`), { receiverPid: "p002", idx: i, answer: `답${i}`, ver: 0 });
     b.set(doc(db, "clues", "p002_6"), { receiverPid: "p002", idx: 6, answer: "가파트", ver: 0 }); // 파트 단서(배정 때 운영자 브라우저가 씀)
-    b.set(doc(db, "voteCards", "c0"), { reviews: [], team: 1 });
+    b.set(doc(db, "voteCards", "c0"), { reviews: [], part: "가파트" });
     b.set(doc(db, "results", "public"), { pairs: [] });
     b.set(doc(db, "thanks", "B1B1"), { text: "고마워요" });
     b.set(doc(db, "nudges", "p002"), { at: 1 });
@@ -389,7 +390,7 @@ describe("앱 흐름: 참여자 화면", () => {
     const db = as("u5");
     await assertFails(updateDoc(doc(db, "roster", "p004"), { uid: "u5", inviteUsed: "INV005" })); // 초대 코드와 다른 이름
     await assertFails(updateDoc(doc(db, "roster", "p001"), { uid: "u5", inviteUsed: "INV005" })); // 이미 가입한 이름
-    await assertFails(updateDoc(doc(db, "roster", "p005"), { uid: "u5", inviteUsed: "INV005", team: 2 })); // 다른 필드까지
+    await assertFails(updateDoc(doc(db, "roster", "p005"), { uid: "u5", inviteUsed: "INV005", part: "나파트" })); // 다른 필드까지
     await assertFails(setDoc(doc(db, "users", "u5"), { personId: "p001", eliminated: [] })); // 남의 이름으로 users
     await assertFails(getDocs(collection(db, "invites"))); // 초대 코드 목록
     await assertFails(updateDoc(doc(p("p001"), "users", "u1"), { personId: "p002" })); // 연결 후 이름 바꾸기
@@ -563,7 +564,7 @@ describe("앱 흐름: 참여자 화면", () => {
     await assertFails(getDoc(doc(p("p003"), "clues", "p003_0"))); // 문서가 없을 때도 거부(화면은 catch로 처리)
   });
 
-  test("피드와 우리 팀, 명단 요약·캐릭터 (Feed.jsx, Team.jsx, App.jsx, ui.jsx Avatar)", async () => {
+  test("피드와 파트 순위, 명단 요약·캐릭터 (Feed.jsx, PartBoard.jsx, App.jsx, ui.jsx Avatar)", async () => {
     const db = p("p001");
     await assertSucceeds(getDocs(query(collection(db, "redemptions"), orderBy("createdAt", "desc"), limit(30))));
     await assertSucceeds(getDocs(query(collection(db, "thanks"), where(documentId(), "in", ["A1A1", "B1B1"]))));
@@ -571,8 +572,12 @@ describe("앱 흐름: 참여자 화면", () => {
     await assertSucceeds(getDoc(doc(db, "avatars", "p003")));
     await assertSucceeds(getDoc(doc(db, "config", "app")));
     await assertSucceeds(getDoc(doc(db, "users", "u1")));
-    await assertSucceeds(getDoc(doc(db, "progress", "p003"))); // 같은 1팀
-    await assertFails(getDoc(doc(db, "progress", "p002"))); // 다른 팀
+    await assertSucceeds(getDoc(doc(db, "public", "board"))); // 주 1회 발표되는 파트 순위
+    await assertFails(setDoc(doc(db, "public", "board"), { week: 3, parts: [] })); // 참여자는 순위를 고칠 수 없다
+    // 진행 상황은 본인 것만: 남의 것을 실시간으로 보면 미션을 받은 순간 누구 숫자가 올랐는지로 마니또가 드러난다
+    await assertSucceeds(getDoc(doc(db, "progress", "p001")));
+    await assertFails(getDoc(doc(db, "progress", "p003"))); // 같은 파트 사람
+    await assertFails(getDoc(doc(db, "progress", "p004"))); // 내 마니또
     await assertFails(getDocs(collection(db, "progress")));
   });
 
@@ -588,7 +593,7 @@ describe("앱 흐름: 참여자 화면", () => {
   });
 
   test("투표 (Vote.jsx): 3단계에만, 3장까지", async () => {
-    await put("voteCards/c1", { reviews: [review20], team: 2 });
+    await put("voteCards/c1", { reviews: [review20], part: "나파트" });
     const db = p("p001");
     await assertFails(getDocs(collection(db, "voteCards")));
     await setPhase(3);
@@ -612,18 +617,18 @@ describe("앱 흐름: 참여자 화면", () => {
 });
 
 describe("앱 흐름: 운영 화면", () => {
-  test("준비 단계: 명단·초대 코드·근무지·팀·배정·명단 요약 (Admin.jsx Setup)", async () => {
+  test("준비 단계: 명단·초대 코드·근무지·파트·배정·명단 요약 (Admin.jsx Setup)", async () => {
     await seed({ phase: 0 });
     const db = admin();
     await assertSucceeds(getDocs(collection(db, "roster")));
-    await assertSucceeds(setDoc(doc(db, "public", "roster"), { people: { p001: { name: "가", team: 1, loc: "SR3" } }, at: serverTimestamp() }));
+    await assertSucceeds(setDoc(doc(db, "public", "roster"), { people: { p001: { name: "가", loc: "SR3", part: "가파트" } }, at: serverTimestamp() }));
     await assertSucceeds(getDocs(collection(db, "invites")));
     const add = writeBatch(db);
-    add.set(doc(db, "roster", "p006"), { name: "새사람", loc: "S1L", part: "가파트", team: null, uid: null, disqualified: false });
+    add.set(doc(db, "roster", "p006"), { name: "새사람", loc: "S1L", part: "가파트", uid: null, disqualified: false });
     add.set(doc(db, "invites", "INV006"), { personId: "p006" });
     await assertSucceeds(add.commit());
     await assertSucceeds(updateDoc(doc(db, "roster", "p006"), { loc: "SR3" }));
-    await assertSucceeds(updateDoc(doc(db, "roster", "p006"), { team: 2 }));
+    await assertSucceeds(updateDoc(doc(db, "roster", "p006"), { part: "나파트" }));
     await assertSucceeds(deleteDoc(doc(db, "roster", "p006")));
     await assertSucceeds(deleteDoc(doc(db, "invites", "INV006")));
 
@@ -638,7 +643,7 @@ describe("앱 흐름: 운영 화면", () => {
     b.set(doc(db, "clues", "p003_6"), { receiverPid: "p003", idx: 6, answer: "가파트", ver: 1 }); // 파트 단서
     b.set(doc(db, "meta", "assignment"), { codes: ["N1N1"], pids: ["p001"], at: serverTimestamp() });
     await assertSucceeds(b.commit());
-    await assertSucceeds(updateDoc(doc(db, "config", "app"), { siteMatched: false, teamExcluded: true, assignVer: 1 }));
+    await assertSucceeds(updateDoc(doc(db, "config", "app"), { siteMatched: false, partExcluded: true, assignVer: 1 }));
     await assertSucceeds(updateDoc(doc(db, "roster", "p001"), { part: "나파트" })); // 파트 고치기
     // 운영자는 파트 단서(6번) 말고는 단서를 쓸 수 없고, 형식이 틀리면 거부
     await assertFails(setDoc(doc(db, "clues", "p003_0"), { receiverPid: "p003", idx: 0, answer: "x", ver: 1 }));
@@ -650,7 +655,7 @@ describe("앱 흐름: 운영 화면", () => {
   test("준비 단계 외에는 명단을 추가·삭제할 수 없다 (수정은 가능: 수상 제외 표시)", async () => {
     await seed({ phase: 1 });
     const db = admin();
-    await assertFails(setDoc(doc(db, "roster", "p006"), { name: "x", loc: "SR3", team: 1, uid: null, disqualified: false }));
+    await assertFails(setDoc(doc(db, "roster", "p006"), { name: "x", loc: "SR3", part: "가파트", uid: null, disqualified: false }));
     await assertFails(deleteDoc(doc(db, "roster", "p005")));
     await assertSucceeds(updateDoc(doc(db, "roster", "p001"), { disqualified: true }));
     await assertSucceeds(setDoc(doc(db, "public", "roster"), { people: {}, at: serverTimestamp() })); // 시작 후에도 요약 갱신 가능
@@ -660,8 +665,8 @@ describe("앱 흐름: 운영 화면", () => {
     await seed({ phase: 0 });
     const db = p("p001");
     await assertFails(setDoc(doc(db, "public", "roster"), { people: {} }));
-    await assertFails(setDoc(doc(db, "roster", "p009"), { name: "x", loc: "SR3", team: 1, uid: null, disqualified: false }));
-    await assertFails(updateDoc(doc(db, "roster", "p002"), { team: 1 }));
+    await assertFails(setDoc(doc(db, "roster", "p009"), { name: "x", loc: "SR3", part: "가파트", uid: null, disqualified: false }));
+    await assertFails(updateDoc(doc(db, "roster", "p002"), { part: "가파트" }));
     await assertFails(setDoc(doc(db, "invites", "XXXXXX"), { personId: "p001" }));
     await assertFails(setDoc(doc(db, "nudges", "p002"), { at: serverTimestamp() }));
     await assertFails(setDoc(doc(db, "assignments", "p001"), { receiverPid: "p003" }));
@@ -679,6 +684,7 @@ describe("앱 흐름: 운영 화면", () => {
     await assertSucceeds(deleteDoc(doc(db, "nudges", "p002")));
     await assertSucceeds(updateDoc(doc(db, "config", "app"), { week: 2 }));
     await assertSucceeds(updateDoc(doc(db, "config", "app"), { cluesReleased: 4 }));
+    await assertSucceeds(setDoc(doc(db, "public", "board"), { week: 2, at: serverTimestamp(), parts: [{ part: "가파트", members: 2, done: 3, max: 4 }] })); // 파트 주간 순위 발표
     await assertSucceeds(updateDoc(doc(db, "redemptions", "A1A1"), { voided: true }));
     await assertSucceeds(updateDoc(doc(db, "redemptions", "A1A1"), { voided: false }));
     await assertSucceeds(updateDoc(doc(db, "roster", "p001"), { disqualified: true }));
@@ -692,7 +698,7 @@ describe("앱 흐름: 운영 화면", () => {
     await assertSucceeds(getDocs(collection(db, "voteCards")));
     await assertSucceeds(getDocs(collection(db, "adminEval")));
     const b = writeBatch(db);
-    b.set(doc(db, "voteCards", "c1"), { reviews: [review20], team: 1 });
+    b.set(doc(db, "voteCards", "c1"), { reviews: [review20], part: "가파트" });
     b.set(doc(db, "cardOwners", "c1"), { giverPid: "p001" });
     await assertSucceeds(b.commit());
     const del = writeBatch(db);

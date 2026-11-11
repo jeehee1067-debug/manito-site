@@ -8,7 +8,8 @@ import { PROFILE_QUESTIONS, REVIEW_MIN, SPEND_GUIDE_WON } from "../lib/constants
 export default function Rules() {
   const { roster } = useApp();
   const partsInUse = roster.some((r) => r.part);
-  const max = R.maxMissions * R.perRedeemedMission + R.maxHard * R.perHardMission + R.hidden + R.maxReceiverEntries * R.perReceiverEntry + R.correctGuess;
+  const max = R.maxMissions * R.perRedeemedMission + R.maxHard * R.perHardMission + R.hidden + R.maxReceiverEntries * R.perReceiverEntry + R.correctGuess
+    + (partsInUse ? R.partBonus : 0);
   const pct = (x) => `${Math.round(x * 100)}%`;
 
   return (
@@ -30,6 +31,9 @@ export default function Rules() {
             <tr><td>끝까지 안 들키면(대상이 나를 지목하지 못함). 내 미션이 {R.hiddenMinMissions}건 이상 인증된 경우만</td><td className="num">{R.hidden}장</td></tr>
             <tr><th rowSpan={2}>받는 사람으로서</th><td>받은 미션을 인증할 때마다(코드 + 후기 {REVIEW_MIN}자 이상)</td><td className="num">{R.perReceiverEntry}장 (최대 {R.maxReceiverEntries})</td></tr>
             <tr><td>내 마니또를 맞히면</td><td className="num">{R.correctGuess}장</td></tr>
+            {partsInUse && (
+              <tr><th>우리 파트가</th><td>마지막 집계에서 미션 완수율 1위(동률이면 모두). 내 미션이 {R.partBonusMinMissions}건 이상 인증된 파트원만</td><td className="num">{R.partBonus}장</td></tr>
+            )}
           </tbody>
         </table>
         <p><b>상대방 때문에 손해 보지 않아요.</b></p>
@@ -40,6 +44,17 @@ export default function Rules() {
         </ul>
         <p className="small">응모권이 0장이면 추첨 대상이 아니에요. 가입하지 않은 사람, 중도 이탈, 수상 제외도 0장이에요.</p>
       </Panel>
+
+      {partsInUse && (
+        <Panel title="파트 대항전">
+          <ul className="rules-list">
+            <li>같은 파트끼리는 마니또가 되지 않아요. 내 마니또는 다른 파트 사람이에요.</li>
+            <li>파트별 <b>미션 완수율</b>(파트의 미션 수 ÷ (가입한 파트 인원 × 주차 수))로 순위를 매겨요. 인원이 달라도 비율로 비교해요.</li>
+            <li>"파트 순위" 탭에 매주 금요일 단서 공개 때 중간 순위가 발표돼요(완료를 알린 미션 기준, 실시간이 아니에요). 파트 합계만 보이고 누가 몇 개 했는지는 본인과 운영자만 봐요.</li>
+            <li>마지막 순위는 <b>받는 사람이 인증한 미션</b>으로 매겨요. 1위 파트는 파트원 모두 응모권 +{R.partBonus}장(내 미션이 {R.partBonusMinMissions}건 이상 인증된 사람만). 수상 제외·중도 이탈은 받지 못해요.</li>
+          </ul>
+        </Panel>
+      )}
 
       <Panel title="상품과 추첨">
         <table className="rules-table">
@@ -56,7 +71,9 @@ export default function Rules() {
           <li>{PRIZES.tiers.map((t) => t.label.replace("응모권 추첨 ", "")).join("·")}끼리는 중복 당첨이 없고, {PRIZES.grand.label}은 앞에서 당첨된 사람도 대상이에요.</li>
           <li>
             {PRIZES.bestManito.label}: 미션 완수율 {pct(W.completion)} + 전체 투표 {pct(W.vote)} + 운영진 평가 {pct(W.admin)}.
-            투표는 받은 사람들이 남긴 후기를 익명 카드로 보고 해요(자기 팀 카드는 안 보여요). 동점이면 인증된 미션이 많은 쪽, 득표가 많은 쪽, 운영진 평가가 높은 쪽 순이고 그래도 같으면 무작위예요.
+            투표는 받은 사람들이 남긴 후기를 익명 카드로 보고 해요{partsInUse ? "(자기 파트 카드는 안 보여요)" : ""}.
+            {partsInUse && " 파트 인원이 다르면 카드마다 볼 수 있는 사람 수가 달라서, 득표는 표 수 그대로가 아니라 \"볼 수 있었던 사람들이 고르게 찍었을 때 받을 표 수\"와 비교한 비율로 계산해요."}
+            {" "}동점이면 인증된 미션이 많은 쪽, 투표 점수가 높은 쪽, 운영진 평가가 높은 쪽 순이고 그래도 같으면 무작위예요.
           </li>
         </ul>
       </Panel>
@@ -91,7 +108,7 @@ export default function Rules() {
 
       <Panel title="누가 무엇을 볼 수 있나요">
         <ul className="rules-list">
-          <li><b>다른 참여자</b>: 이름·팀·근무지{partsInUse ? "·파트" : ""}, 익명 피드의 후기만 봐요. 내 짝, 인증 코드, 단서, 쪽지, 프로필 답, 메일 주소는 볼 수 없어요.</li>
+          <li><b>다른 참여자</b>: 이름·근무지{partsInUse ? "·파트" : ""}, 익명 피드의 후기{partsInUse ? ", 파트별 미션 합계" : ""}만 봐요. 내가 미션을 몇 개 했는지도 다른 참여자는 볼 수 없어요. 내 짝, 인증 코드, 단서, 쪽지, 프로필 답, 메일 주소는 볼 수 없어요.</li>
           <li><b>운영자</b>: 진행 현황(누가 미션을 몇 개 했는지, 최근 접속), 후기, 가입한 메일을 봐요. 누가 누구의 마니또인지는 투표 단계부터, 쪽지 내용은 집계 단계부터 볼 수 있어요. 프로필 답과 단서는 볼 수 없어요.</li>
           <li><b>사이트 관리 계정</b>(Firebase 콘솔): 저장된 데이터를 기술적으로 직접 열어 볼 수 있어요(서버 없이 운영하는 방식의 한계예요).</li>
         </ul>

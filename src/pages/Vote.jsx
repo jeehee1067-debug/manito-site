@@ -7,7 +7,7 @@ import { seededRandom, shuffle } from "../lib/random.js";
 import { Panel } from "../ui.jsx";
 
 export default function Vote() {
-  const { myPid, myTeam, config } = useApp();
+  const { myPid, myPart, config } = useApp();
   const [cards, setCards] = useState([]);
   const [picked, setPicked] = useState([]);
   const [saved, setSaved] = useState(null);
@@ -23,10 +23,11 @@ export default function Vote() {
     }).catch(() => {});
   }, [myPid]);
 
-  // 내 팀 마니또의 카드(내 카드 포함)는 빼고, 사람마다 다른 순서·번호로 보여준다.
+  // 내 파트 마니또의 카드(내 카드 포함)는 빼고, 사람마다 다른 순서·번호로 보여준다.
+  // 이 조건은 집계(scoring.js tallyVotes)의 "볼 수 있는 카드"와 같아야 한다. 파트가 없는 사람은 전부 본다.
   const visible = useMemo(
-    () => shuffle(cards.filter((c) => c.team !== myTeam), seededRandom(`vote:${myPid}`)),
-    [cards, myTeam, myPid]
+    () => shuffle(cards.filter((c) => !myPart || c.part !== myPart), seededRandom(`vote:${myPid}`)),
+    [cards, myPart, myPid]
   );
   const open = config.phase === PHASE.VOTING;
 
@@ -49,6 +50,7 @@ export default function Vote() {
     <Panel title={`베스트 마니또 투표 (${picked.length} / 3)`}>
       <p className="small">
         마니또별로 받은 사람들이 남긴 후기를 모았어요. 마음에 드는 카드를 최대 3장 고르세요.
+        {myPart ? " 우리 파트 마니또의 카드는 보이지 않아요." : ""}{" "}
         카드 번호는 사람마다 다르게 보여서 "몇 번 찍어줘"는 통하지 않아요.
       </p>
       <p className="small">정체는 송년회에서 공개돼요. 투표가 끝날 때까지 누가 내 마니또였는지 밝히거나 표를 부탁하지 말아 주세요(확인되면 수상에서 제외될 수 있어요).</p>

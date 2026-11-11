@@ -206,22 +206,23 @@ function Clues({ myPid, partsInUse, hintOpen, hintPart }) {
 }
 
 function Suspects({ myPid, hintPart }) {
-  const { roster, byPid, me, user, config, myTeam } = useApp();
+  const { roster, byPid, me, user, config, myPart } = useApp();
   const myLoc = byPid[myPid]?.loc;
   const bySite = Boolean(config.siteMatched && myLoc);
-  const byTeam = config.teamExcluded !== false && myTeam != null;
+  // 같은 파트끼리 짝이 하나도 없게 배정됐을 때만 내 파트를 뺀다(예전 배정이나 한 파트가 절반을 넘는 경우는 빼지 않는다).
+  const byPart = config.partExcluded === true && Boolean(myPart);
   const [guess, setGuess] = useState(null);
   const [pick, setPick] = useState("");
   const [msg, setMsg] = useState("");
   const eliminated = new Set(me?.eliminated || []);
-  // 배정 조건(같은 근무지, 다른 팀)에 맞지 않는 사람은 처음부터 후보에서 뺀다.
+  // 배정 조건(같은 근무지, 다른 파트)에 맞지 않는 사람은 처음부터 후보에서 뺀다.
   // 파트 단서가 공개되면 그 파트 사람만 남긴다(단서는 배정 때 명단에서 만든 값이라 사실이다).
   const suspects = useMemo(
     () =>
       roster
-        .filter((r) => r.pid !== myPid && (!byTeam || r.team !== myTeam) && (!bySite || r.loc === myLoc) && (!hintPart || r.part === hintPart))
+        .filter((r) => r.pid !== myPid && (!byPart || r.part !== myPart) && (!bySite || r.loc === myLoc) && (!hintPart || r.part === hintPart))
         .sort((a, b) => a.name.localeCompare(b.name, "ko")),
-    [roster, myPid, myTeam, myLoc, byTeam, bySite, hintPart]
+    [roster, myPid, myPart, myLoc, byPart, bySite, hintPart]
   );
   const remaining = suspects.filter((s) => !eliminated.has(s.pid));
 
@@ -250,8 +251,8 @@ function Suspects({ myPid, hintPart }) {
   return (
     <Panel title={`용의자 보드 (남은 후보 ${remaining.length}명)`}>
       <p className="small">
-        {byTeam && bySite ? "우리 팀과 다른 근무지 사람은 " : byTeam ? "우리 팀은 " : bySite ? "다른 근무지 사람은 " : ""}
-        {byTeam || bySite ? "내 마니또가 될 수 없어서 처음부터 빠져 있어요. " : ""}
+        {byPart && bySite ? "우리 파트와 다른 근무지 사람은 " : byPart ? "우리 파트 사람은 " : bySite ? "다른 근무지 사람은 " : ""}
+        {byPart || bySite ? "내 마니또가 될 수 없어서 처음부터 빠져 있어요. " : ""}
         {hintPart ? `마지막 단서에 따라 ${hintPart} 사람만 남겼어요. ` : ""}
         아닌 것 같은 사람을 눌러 지워 보세요.
       </p>
