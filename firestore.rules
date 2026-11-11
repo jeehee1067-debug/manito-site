@@ -15,7 +15,6 @@ service cloud.firestore {
     // 배정 회차. 운영자가 다시 배정할 때마다 1씩 올라가고, 단서는 지금 회차 것만 읽고 쓸 수 있다.
     function assignVer() { return cfg().get('assignVer', 0); }
     function myPid() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.personId; }
-    function teamOf(pid) { return get(/databases/$(database)/documents/roster/$(pid)).data.team; }
     function myReceiver() { return get(/databases/$(database)/documents/assignments/$(myPid())).data.receiverPid; }
     function codeDoc(code) { return get(/databases/$(database)/documents/codes/$(code)).data; }
 
@@ -27,7 +26,7 @@ service cloud.firestore {
       allow update: if isAdmin() && request.resource.data.phase >= resource.data.phase;
     }
 
-    // 명단: 이름, 팀, 연결된 계정(uid). 연결 전 계정은 읽을 수 없다(초대 코드 연결은 읽지 않고 바로 쓴다).
+    // 명단: 이름, 근무지, 파트, 연결된 계정(uid). 연결 전 계정은 읽을 수 없다(초대 코드 연결은 읽지 않고 바로 쓴다).
     match /roster/{pid} {
       allow read: if member();
       allow create, delete: if isAdmin() && phase() == 0;
@@ -39,7 +38,8 @@ service cloud.firestore {
             && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteUsed)).data.personId == pid);
     }
 
-    // 참여자 화면용 명단 요약(이름·팀·근무지). 운영 화면이 명단과 다르면 다시 쓴다. 읽기 수를 줄이려고 둔다.
+    // public/roster: 참여자 화면용 명단 요약(이름·근무지·파트). 운영 화면이 명단과 다르면 다시 쓴다. 읽기 수를 줄이려고 둔다.
+    // public/board:  파트 대항전 주간 순위. 운영자가 단서 공개 때 발표한다.
     match /public/{docId} {
       allow read: if member();
       allow write: if isAdmin();
@@ -167,9 +167,11 @@ service cloud.firestore {
       allow update: if linked() && myPid() == pid && missionsOk(pid, resource.data);
     }
 
-    // 팀 현황판용 진행 상황
+    // 진행 상황(완료 알린 미션 수, 프로필 작성, 최근 접속 등): 본인과 운영자만 읽는다.
+    // 다른 참여자에게 실시간으로 보이면, 내가 미션을 받은 순간 누구 숫자가 올랐는지로 마니또가 드러난다.
+    // 파트별 순위는 운영자가 주 1회 public/board에 발표한 것만 본다.
     match /progress/{pid} {
-      allow read: if linked() && (teamOf(pid) == teamOf(myPid()) || isAdmin());
+      allow read: if linked() && myPid() == pid;
       allow read: if isAdmin();
       allow write: if linked() && myPid() == pid
         && request.resource.data.get('doneCount', 0) <= 3;

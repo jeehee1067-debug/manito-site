@@ -20,6 +20,8 @@ export const TICKET_RULES = {
   correctGuess: 1, // 받는 사람: 정답 지목
   compPerMissedWeek: 1, // 받는 사람: 내 마니또가 미션을 안 보낸 주차마다 대신 받는 응모권 (인증 입력과 합쳐 maxReceiverEntries까지)
   compMinMissions: 1, // 위 보상은 내 미션이 이만큼 이상 인증된 사람만
+  partBonus: 1, // 파트 대항전: 마지막 집계에서 미션 완수율 1위 파트원에게 (동률이면 모두)
+  partBonusMinMissions: 1, // 위 응모권은 내 미션이 이만큼 이상 인증된 사람만 (아무것도 안 하고 받는 것 방지)
   maxMissions: 3,
   maxHard: 2,
   maxReceiverEntries: 3,

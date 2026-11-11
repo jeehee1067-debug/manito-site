@@ -10,7 +10,7 @@ import Profile from "./pages/Profile.jsx";
 import MyMission from "./pages/MyMission.jsx";
 import Detective from "./pages/Detective.jsx";
 import Feed from "./pages/Feed.jsx";
-import Team from "./pages/Team.jsx";
+import PartBoard from "./pages/PartBoard.jsx";
 import Vote from "./pages/Vote.jsx";
 import Reveal from "./pages/Reveal.jsx";
 import Admin from "./pages/Admin.jsx";
@@ -108,7 +108,7 @@ const AVATAR_TTL = 10 * 60 * 1000;
 function Session({ user, logout }) {
   const [config, setConfig] = useState(undefined);
   const [me, setMe] = useState(undefined); // users/{uid}
-  const [roster, setRoster] = useState(undefined); // public/roster 요약 → [{ pid, name, team, loc }]
+  const [roster, setRoster] = useState(undefined); // public/roster 요약 → [{ pid, name, loc, part }]
   const [avatars, setAvatars] = useState({}); // 화면에 나온 사람만 한 번씩 읽어 둔다 { pid: 번호 | null }
   const asked = useRef(new Map()); // pid → 마지막으로 읽은 시각
   const [tab, setTab] = useHashTab("mission");
@@ -137,7 +137,7 @@ function Session({ user, logout }) {
   }, [myPidForSeen]);
 
   // 명단은 초대 코드로 연결된 참여자와 운영자만 읽을 수 있다(보안 규칙). 연결되면 그때 구독한다.
-  // 읽기 줄이기: 명단 56건 대신 요약 문서 1건 (운영 화면이 명단과 맞춰 둔다)
+  // 읽기 줄이기: 명단 54건 대신 요약 문서 1건 (운영 화면이 명단과 맞춰 둔다)
   const member = Boolean(me?.personId) || Boolean(config?.admins?.includes(user.uid));
   useEffect(() => {
     if (!member) {
@@ -173,7 +173,7 @@ function Session({ user, logout }) {
       config,
       me,
       myPid,
-      myTeam: myPid ? byPid[myPid]?.team : null,
+      myPart: (myPid && byPid[myPid]?.part) || null,
       roster: list,
       rosterReady: roster !== undefined,
       byPid,
@@ -192,7 +192,7 @@ function Session({ user, logout }) {
   const phase = config.phase;
   const tabs = [];
   if (ctx.myPid) {
-    tabs.push(["mission", "내 미션"], ["detective", "추리 보드"], ["feed", "피드"], ["team", "우리 팀"]);
+    tabs.push(["mission", "내 미션"], ["detective", "추리 보드"], ["feed", "피드"], ["board", "파트 순위"]);
     if (phase >= PHASE.VOTING) tabs.push(["vote", "투표"]);
     tabs.push(["profile", "내 프로필"]);
   }
@@ -209,7 +209,7 @@ function Session({ user, logout }) {
   else if (current === "mission") body = <MyMission />;
   else if (current === "detective") body = <Detective />;
   else if (current === "feed") body = <Feed />;
-  else if (current === "team") body = <Team />;
+  else if (current === "board") body = <PartBoard />;
   else if (current === "vote") body = <Vote />;
   else if (current === "profile") body = <Profile />;
   else if (current === "rules") body = <Rules />;
