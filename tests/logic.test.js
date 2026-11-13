@@ -5,6 +5,7 @@ import { computeTickets, weightedDraw, pickMostTickets, rankBestManito, tallyVot
 import { seededRandom } from "../src/lib/random.js";
 import { parseRosterLine, rosterSummary, summaryToList, sameSummary } from "../src/lib/roster.js";
 import { MISSION_CARDS, PROFILE_QUESTIONS, CLUE_COUNT, profileAnswerError } from "../src/lib/constants.js";
+import { pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../src/lib/pairs.js";
 
 // 참여자 54명(부서 56명 중 운영자·PL님 제외). 파트 크기를 주면 { pid, part } 목록을 만든다.
 const pids = Array.from({ length: 54 }, (_, i) => `p${String(i + 1).padStart(3, "0")}`);
@@ -248,8 +249,8 @@ test("불참(가입 안 함·중도 이탈)은 0장, 그 사람의 마니또는 
   for (const flag of [{ joined: false }, { joined: true, dropout: true }]) {
     const people = [{ pid: "A", joined: true }, { pid: "B", joined: true }, { pid: "C", ...flag }];
     const t = computeTickets({ ...base, people, guesses: { C: "B" } }); // 불참자의 지목은 세지 않는다
-    // B: 인정 2건 → 미션 2 + 도전 1 + 은신 2 + 보상 3(A가 3주 모두 안 보냄) = 8
-    assert.deepEqual([t.B.mission, t.B.hard, t.B.assumed, t.B.hidden, t.B.comp, t.B.total], [2, 1, 2, 2, 3, 8]);
+    // B: 인정 2건 → 미션 2 + 은신 2 + 보상 3(A가 3주 모두 안 보냄) = 7. 인정된 미션에는 도전 추가분이 없다(1주차가 도전 카드여도 0)
+    assert.deepEqual([t.B.mission, t.B.hard, t.B.assumed, t.B.hidden, t.B.comp, t.B.total], [2, 0, 2, 2, 3, 7]);
     assert.equal(t.C.total, 0);
     assert.equal(t.A.total, 0); // 아무것도 안 함
   }
@@ -259,22 +260,74 @@ test("불참(가입 안 함·중도 이탈)은 0장, 그 사람의 마니또는 
   assert.deepEqual([t.B.mission, t.B.hard, t.B.assumed, t.B.hidden], [0, 0, 0, 0]);
 });
 
-test("받고도 인증하지 않은 사람: 운영자가 표시하면 그 마니또의 미션을 인정하고, 본인 응모권은 그대로", () => {
+test("운영자 확인 '받았음': 인증이 없는 완료 알림을 그 마니또의 미션으로 인정하고, 받는 사람 응모권은 그대로", () => {
   const giverCodes = { A: { 1: "A1", 2: "A2", 3: "A3" }, B: { 1: "B1", 2: "B2", 3: "B3" }, C: { 1: "C1", 2: "C2", 3: "C3" } };
   const base = {
     assignments: { A: "B", B: "C", C: "A" }, giverCodes, missions: {}, guesses: {},
+    people: ["A", "B", "C"].map((pid) => ({ pid })),
     // B → C: 3건 완료 알림. C는 1주차만 인증했고 2주차 인증은 운영자가 무효 처리, 3주차는 인증 안 함.  C → A: 1건(A 인증)
     deliveries: [{ receiverPid: "C", slot: 1 }, { receiverPid: "C", slot: 2 }, { receiverPid: "C", slot: 3 }, { receiverPid: "A", slot: 1 }],
     redemptions: { B1: { receiverPid: "C", slot: 1, voided: false }, B2: { receiverPid: "C", slot: 2, voided: true }, C1: { receiverPid: "A", slot: 1, voided: false } },
   };
-  const plain = computeTickets({ ...base, people: ["A", "B", "C"].map((pid) => ({ pid })) });
-  assert.deepEqual([plain.B.mission, plain.B.assumed], [1, 0]);
-  const marked = computeTickets({ ...base, people: [{ pid: "A" }, { pid: "B" }, { pid: "C", creditGiver: true }] });
-  // B: 1주차(인증) + 3주차(인정) = 2. 2주차는 무효 처리된 인증이 있어 인정하지 않는다
+  const plain = computeTickets(base);
+  assert.deepEqual([plain.B.mission, plain.B.assumed], [1, 0], "확인이 없으면 인정되지 않는다");
+  // 2주차(무효 처리된 인증이 있음)와 3주차를 모두 '받았음'으로 확인해도 3주차만 인정된다
+  const marked = computeTickets({ ...base, verdicts: { C_2: "received", C_3: "received" } });
   assert.deepEqual([marked.B.mission, marked.B.assumed, marked.B.hidden], [2, 1, 2]);
-  // C 본인: 미션 1 + 은신 2 + 인증 입력 1(무효 제외) 그대로. 0장이 되지 않는다
-  assert.deepEqual([marked.C.mission, marked.C.entries, marked.C.total], [1, 1, plain.C.total]);
+  // C 본인: 미션 1 + 은신 2 + 인증 입력 1(무효 제외) 그대로. 받았다고 확인된 주차는 보상도 없다
+  assert.deepEqual([marked.C.mission, marked.C.entries, marked.C.comp, marked.C.total], [1, 1, 0, plain.C.total]);
   assert.ok(marked.C.total > 0);
+  // 확인은 주차별이다: 다른 주차·다른 사람의 확인은 영향이 없다
+  const other = computeTickets({ ...base, verdicts: { C_1: "received", A_3: "received", B_3: "received" } });
+  assert.deepEqual([other.B.mission, other.B.assumed], [1, 0]);
+});
+
+test("운영자 확인 '못 받음': 그 주차는 마니또가 안 보낸 것으로 보고 받는 사람에게 보상한다", () => {
+  const giverCodes = { A: { 1: "A1", 2: "A2", 3: "A3" }, B: { 1: "B1", 2: "B2", 3: "B3" }, C: { 1: "C1", 2: "C2", 3: "C3" } };
+  const base = {
+    assignments: { A: "B", B: "C", C: "A" }, giverCodes, missions: {}, guesses: {},
+    people: ["A", "B", "C"].map((pid) => ({ pid })),
+    // A → B: 1·2·3주차 모두 완료 알림. B는 1주차만 인증하고 2주차는 "받은 게 없어요"로 신고.  B → C: 1주차(C 인증)
+    deliveries: [{ receiverPid: "B", slot: 1 }, { receiverPid: "B", slot: 2 }, { receiverPid: "B", slot: 3 }, { receiverPid: "C", slot: 1 }],
+    redemptions: { A1: { receiverPid: "B", slot: 1, voided: false }, B1: { receiverPid: "C", slot: 1, voided: false } },
+  };
+  const plain = computeTickets(base);
+  // 확인 전: A는 1건만, B는 받았는데 인증 안 한 것으로 보여 2·3주차 보상이 없다
+  assert.deepEqual([plain.A.mission, plain.B.entries, plain.B.comp], [1, 1, 0]);
+  const t = computeTickets({ ...base, verdicts: { B_2: "missing", B_3: "received" } });
+  // A: 1주차(인증) + 3주차(받았음 확인) = 2. 2주차는 못 받음이라 인정되지 않는다
+  assert.deepEqual([t.A.mission, t.A.assumed], [2, 1]);
+  // B: 인증 입력 1 + 보상 1(2주차 못 받음). 3주차는 받았다고 확인됐으니 보상이 없다
+  assert.deepEqual([t.B.entries, t.B.comp, t.B.total - plain.B.total], [1, 1, 1]);
+  // 보상은 인증 입력과 합쳐 3장까지, 내 미션이 0건이면 없다
+  const all = computeTickets({ ...base, verdicts: { B_2: "missing", B_3: "missing" } });
+  assert.deepEqual([all.B.entries, all.B.comp], [1, 2]);
+  const lazy = computeTickets({ ...base, redemptions: { A1: base.redemptions.A1 }, verdicts: { B_2: "missing" } }); // B의 미션(B1)이 인증되지 않은 경우
+  assert.deepEqual([lazy.B.mission, lazy.B.comp], [0, 0]);
+  // 받는 사람이 나중에 직접 인증했으면 확인 결과는 쓰지 않는다(인증이 먼저)
+  const later = computeTickets({ ...base, redemptions: { ...base.redemptions, A2: { receiverPid: "B", slot: 2, voided: false } }, verdicts: { B_2: "missing" } });
+  assert.deepEqual([later.A.mission, later.A.assumed, later.B.entries, later.B.comp], [2, 0, 2, 0]);
+  // 불참자에게 보낸 미션은 자동으로 인정되지만, 운영자가 '못 받음'으로 확인했으면 인정하지 않는다
+  const people = [{ pid: "A" }, { pid: "B", dropout: true }, { pid: "C" }];
+  assert.equal(computeTickets({ ...base, people }).A.mission, 3);
+  assert.deepEqual([computeTickets({ ...base, people, verdicts: { B_2: "missing" } }).A.mission], [2]);
+});
+
+test("도전 추가분은 받는 사람이 직접 인증한 미션만: 불참·운영자 확인으로 인정된 미션에는 없다", () => {
+  const giverCodes = { A: { 1: "A1", 2: "A2", 3: "A3" }, B: { 1: "B1", 2: "B2", 3: "B3" }, C: { 1: "C1", 2: "C2", 3: "C3" } };
+  const base = {
+    assignments: { A: "B", B: "C", C: "A" }, giverCodes, guesses: {},
+    people: ["A", "B", "C"].map((pid) => ({ pid })),
+    missions: { A: { choices: { 1: { level: "hard" }, 2: { level: "hard" } } } }, // A는 1·2주차 모두 도전 카드
+    deliveries: [{ receiverPid: "B", slot: 1 }, { receiverPid: "B", slot: 2 }],
+    redemptions: { A1: { receiverPid: "B", slot: 1, voided: false } }, // 1주차만 직접 인증
+  };
+  const confirmed = computeTickets({ ...base, verdicts: { B_2: "received" } });
+  assert.deepEqual([confirmed.A.mission, confirmed.A.hard, confirmed.A.assumed], [2, 1, 1], "확인으로 인정된 2주차에는 도전 추가분이 없다");
+  const both = computeTickets({ ...base, redemptions: { ...base.redemptions, A2: { receiverPid: "B", slot: 2, voided: false } } });
+  assert.deepEqual([both.A.mission, both.A.hard, both.A.assumed], [2, 2, 0], "둘 다 직접 인증되면 2장");
+  const absent = computeTickets({ ...base, redemptions: {}, people: [{ pid: "A" }, { pid: "B", joined: false }, { pid: "C" }] });
+  assert.deepEqual([absent.A.mission, absent.A.hard, absent.A.assumed], [2, 0, 2], "대상 불참으로 인정된 미션에도 없다");
 });
 
 test("가중 추첨: 중복 없이 지정 인원, 제외 대상 빠짐, 0장은 제외", () => {
@@ -315,21 +368,40 @@ test("베스트 마니또: 가중치 반영 정렬, 실격자 제외", () => {
 
 test("베스트 마니또 동점: 인증된 미션 → 투표 점수 → 운영진 평가 → 무작위 순", () => {
   const cards = [{ cardId: "x", giverPid: "A" }, { cardId: "y", giverPid: "B" }, { cardId: "z", giverPid: "C" }];
-  // A: 완수 1(0.3). B: 완수 0 + 득표 1표(최다 5표의 1/5 → 0.1) + 평가 10(0.2) = 0.3 → 점수 동점, 완수율이 높은 A가 위
+  // C: 득표 5표(최다) → 0.5.  A: 완수 1(0.3).  B: 완수 0 + 득표 1표(최다의 1/5 → 0.1) + 평가 10(0.2) = 0.3
+  // A와 B는 점수가 같고, 완수율이 높은 A가 위
   const votes = { v1: ["y", "z"], v2: ["z"], v3: ["z"], v4: ["z"], v5: ["z"] };
-  const byCompletion = rankBestManito({
-    cards, votes, adminEval: { y: 10 }, disqualified: new Set(["C"]),
+  const ranked = rankBestManito({
+    cards, votes, adminEval: { y: 10 },
     tickets: { A: { completion: 1 }, B: { completion: 0 }, C: { completion: 0 } },
   });
-  assert.deepEqual(byCompletion.map((r) => r.giverPid), ["A", "B"]);
-  assert.ok(Math.abs(byCompletion[0].score - byCompletion[1].score) < 1e-9, "점수는 같다");
-  assert.equal(byCompletion[1].votes, 1);
+  assert.deepEqual(ranked.map((r) => r.giverPid), ["C", "A", "B"]);
+  assert.ok(Math.abs(ranked[1].score - ranked[2].score) < 1e-9, "A와 B의 점수는 같다");
+  assert.equal(ranked[2].votes, 1);
   // 완전히 같으면 무작위(주어진 난수 순서대로 결정)
   const two = cards.slice(0, 2);
   const same = { tickets: { A: { completion: 1 }, B: { completion: 1 } }, votes: {}, adminEval: {} };
   const seq = (...xs) => () => xs.shift();
   assert.deepEqual(rankBestManito({ cards: two, ...same, rand: seq(0.9, 0.1) }).map((r) => r.giverPid), ["A", "B"]);
   assert.deepEqual(rankBestManito({ cards: two, ...same, rand: seq(0.1, 0.9) }).map((r) => r.giverPid), ["B", "A"]);
+});
+
+test("수상 대상이 아닌 마니또의 카드는 없는 것으로 집계: 그 카드가 표를 많이 받아도 다른 사람의 투표 점수가 낮아지지 않는다", () => {
+  const cards = [{ cardId: "x", giverPid: "A" }, { cardId: "y", giverPid: "B" }, { cardId: "z", giverPid: "C" }];
+  const tickets = { A: { completion: 1 }, B: { completion: 1 }, C: { completion: 1 } };
+  // z(C)가 5표로 최다, x는 2표, y는 1표
+  const votes = { v1: ["x", "z"], v2: ["x", "z"], v3: ["y", "z"], v4: ["z"], v5: ["z"] };
+  const withC = rankBestManito({ cards, votes, adminEval: {}, tickets });
+  assert.ok(withC.find((r) => r.giverPid === "A").vote < 1, "C가 수상 대상이면 A의 투표 점수는 C(최다)보다 낮다");
+  const ranked = rankBestManito({ cards, votes, adminEval: {}, tickets, disqualified: new Set(["C"]) });
+  assert.deepEqual(ranked.map((r) => r.giverPid), ["A", "B"]);
+  // C가 빠지면 남은 카드 중 최다인 A가 1, B는 그 절반(2표 대 1표, 기대 득표가 같음)
+  assert.ok(Math.abs(ranked[0].vote - 1) < 1e-9);
+  assert.ok(Math.abs(ranked[1].vote - 0.5) < 1e-9);
+  assert.deepEqual(ranked.map((r) => r.votes), [2, 1], "C 카드에 간 표는 세지 않는다");
+  // C에게만 표를 준 사람(v4, v5)이 있어도 A·B의 점수는 그 사람들이 투표하지 않은 것과 같다
+  const without = rankBestManito({ cards: cards.slice(0, 2), votes: { v1: ["x"], v2: ["x"], v3: ["y"] }, adminEval: {}, tickets });
+  assert.deepEqual(ranked.map((r) => [r.giverPid, r.vote]), without.map((r) => [r.giverPid, r.vote]));
 });
 
 test("투표 집계: 파트 인원이 달라도 고르게 찍으면 투표 점수가 같다(내 파트 카드는 못 보므로 표 수는 달라진다)", () => {
@@ -416,6 +488,15 @@ test("미션 카드: 난이도마다 돈이 안 드는 카드가 2장 이상(다
   assert.ok(MISSION_CARDS.easy.every((c) => !c.cost && c.remote));
 });
 
+test("미션 카드: 삼행시 쪽지는 보통 카드, 3일 연속 쪽지는 도전 카드", () => {
+  const find = (re) => Object.entries(MISSION_CARDS).flatMap(([level, list]) => list.filter((c) => re.test(c.text)).map((c) => ({ level, ...c })));
+  const poem = find(/삼행시 쪽지/);
+  assert.deepEqual(poem.map((c) => [c.level, c.remote, Boolean(c.cost)]), [["normal", true, false]]);
+  assert.deepEqual(find(/3일 연속/).map((c) => c.level), ["hard"]);
+  const ids = Object.values(MISSION_CARDS).flat().map((c) => c.id);
+  assert.equal(new Set(ids).size, ids.length, "카드 번호 중복 없음");
+});
+
 test("파트 대항전: 완수율 1위 파트원에게 +1, 내 미션이 0건이면 없음, 불참자는 인원에서 빼고 0장", () => {
   // 원: A1 → B1 → A2 → B2 → A1.  가파트 = A1, A2, A3(가입 안 함)  나파트 = B1, B2
   const people = [
@@ -460,4 +541,47 @@ test("파트 주간 순위: 완료 알린 수 / (참여 인원 × 열린 주차)
   const board = weeklyPartBoard(people, { a: 2, b: 1, c: 2, d: 3, e: 0, f: 2 }, 2);
   // 가파트: (2 + 1) / (2명 × 2주) = 75%.  나파트: d는 2주차까지라 2로 셈 → 2 / 4 = 50%
   assert.deepEqual(board.map((x) => [x.part, x.members, x.done, x.max, x.winner]), [["가파트", 2, 3, 4, true], ["나파트", 2, 2, 4, false]]);
+});
+
+test("짝 현황: 마니또별 주차 상태(카드 고름·인증 대기·신고·확인·인증·무효)와 대상의 지목", () => {
+  const data = {
+    assignments: { A: { receiverPid: "B" }, B: { receiverPid: "C" }, C: { receiverPid: "A" } },
+    giverCodes: { A: { codes: { 1: "A1", 2: "A2", 3: "A3" } }, B: { codes: { 1: "B1", 2: "B2", 3: "B3" } }, C: { codes: { 1: "C1", 2: "C2", 3: "C3" } } },
+    missions: {
+      A: { choices: { 1: { level: "hard", text: "퀴즈" }, 2: { level: "easy", text: "쪽지" }, 3: { level: "praise", text: "칭찬" } }, done: { 1: true, 2: true, 3: true }, notes: { 1: 2 } },
+      B: { choices: { 1: { level: "normal", text: "간식" }, 2: { level: "easy", text: "쪽지" } }, done: { 1: true, 2: true } },
+      C: { choices: { 1: { level: "easy", text: "쪽지" } } },
+    },
+    redemptions: { A1: { voided: false }, A3: { voided: true }, C2: { voided: false } }, // C2: 완료 알림 전에 실물 코드로 먼저 인증
+    reports: { B_2: {}, C_1: {} },
+    verdicts: { C_1: { verdict: "missing" }, C_2: { verdict: "received" } },
+    guesses: { B: { guessPid: "A" }, C: { guessPid: "A" } },
+  };
+  const rows = Object.fromEntries(pairRows(data).map((r) => [r.giverPid, r]));
+  assert.deepEqual([1, 2, 3].map((s) => rows.A.slots[s].status), ["redeemed", "reported", "voided"]);
+  assert.deepEqual([rows.A.slots[1].level, rows.A.slots[1].notes, rows.A.slots[1].code], ["hard", 2, "A1"]);
+  assert.deepEqual([1, 2, 3].map((s) => rows.B.slots[s].status), ["missing", "confirmed", "none"]);
+  assert.deepEqual([1, 2, 3].map((s) => rows.C.slots[s].status), ["chosen", "redeemed", "none"]);
+  // 지목: 받는 사람의 지목이 그 줄의 마니또와 같으면 정답
+  assert.deepEqual([rows.A.guessPid, rows.A.correct], ["A", true]); // B가 A를 지목(정답)
+  assert.deepEqual([rows.B.guessPid, rows.B.correct], ["A", false]); // C가 A를 지목(실제 마니또는 B)
+  assert.deepEqual([rows.C.guessPid, rows.C.correct], [null, false]); // A는 지목 안 함
+
+  // 운영자가 확인할 주차: 완료를 알렸는데 인증이 없는 것(인증됐거나 무효 처리된 것은 빠진다)
+  const key = (x) => `${x.giverPid}>${x.receiverPid}:${x.slot}:${x.reported ? "신고" : "-"}:${x.verdict || "-"}`;
+  assert.deepEqual(unresolvedSlots(pairRows(data)).map(key).sort(), ["A>B:2:신고:-", "B>C:1:신고:missing", "B>C:2:-:received"]);
+  // 미션 진행 중에는 신고됐거나 이미 확인한 것만 본다
+  const quiet = { ...data, reports: {}, verdicts: {} };
+  assert.equal(unresolvedSlots(pairRows(quiet)).length, 3);
+  assert.equal(unresolvedSlots(pairRows(quiet), { onlyReported: true }).length, 0);
+  assert.equal(unresolvedSlots(pairRows(data), { onlyReported: true }).length, 3);
+});
+
+test("받는 사람 기준 코드: 마니또의 코드를 그 대상 앞으로 뒤집는다(피드 글 확인용)", () => {
+  const assignments = { A: { receiverPid: "B" }, B: { receiverPid: "C" }, C: { receiverPid: "A" } };
+  const giverCodes = { A: { codes: { 1: "A1", 2: "A2", 3: "A3" } }, B: { codes: { 1: "B1", 2: "B2", 3: "B3" } } };
+  assert.deepEqual(receiverCodesOf(assignments, giverCodes), { B: { 1: "A1", 2: "A2", 3: "A3" }, C: { 1: "B1", 2: "B2", 3: "B3" } });
+  assert.ok(sameCodes({ 1: "A1", 2: "A2", 3: "A3" }, { 3: "A3", 2: "A2", 1: "A1" }));
+  assert.ok(!sameCodes({ 1: "A1", 2: "A2" }, { 1: "A1", 2: "A2", 3: "A3" }));
+  assert.ok(!sameCodes(undefined, { 1: "A1", 2: "A2", 3: "A3" }));
 });

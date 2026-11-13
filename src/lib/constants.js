@@ -29,7 +29,7 @@ export function profileAnswerError(i, value) {
   return v.length >= min ? null : `${i + 1}번은 ${min}자 이상 적어 주세요.`;
 }
 
-// 파트 단서: 단서 문서의 7번째 칸(idx 6). 마니또의 파트를 배정할 때 운영자 브라우저가 써 두고(운영자는 읽지 못함),
+// 파트 단서: 단서 문서의 7번째 칸(idx 6). 마니또의 파트를 배정할 때 운영자 브라우저가 써 두고,
 // 최종 지목 단계가 열리면 받는 사람에게 공개된다. 본인이 쓰는 답이 아니라서 거짓이나 대충이 없다.
 export const PART_HINT_IDX = 6;
 
@@ -37,6 +37,14 @@ export const LEVEL_LABEL = { easy: "쉬움", normal: "보통", hard: "도전" };
 
 // 돈이 드는 미션의 권장 상한(건당, 원). 안내 문구에 쓴다.
 export const SPEND_GUIDE_WON = 5000;
+
+// 완료한 주차에 "쪽지 더 보내기"로 보낼 수 있는 추가 쪽지 수(주차마다). 3일 연속 쪽지 카드를 할 수 있게 둔 것이라 넉넉히 잡았다.
+// 화면에서만 세는 값이다(보안 규칙은 쪽지 개수를 세지 못한다).
+export const EXTRA_NOTES_MAX = 5;
+
+// 게시돼 있어야 하는 보안 규칙 버전. firestore.rules의 rulesVersion과 같아야 한다.
+// 규칙에서 화면이 쓰는 경로·값의 모양을 바꿀 때 양쪽을 같이 올린다. 운영 화면이 이 값으로 "콘솔의 규칙이 예전 것"인지 확인해 알려 준다.
+export const RULES_VERSION = "20261113";
 
 // remote: 다른 근무지에 있는 대상에게도 할 수 있는 미션인지.
 // 대상이 다른 근무지면 remote 카드만 제시한다. 쉬움 카드는 모두 사이트 쪽지로 하는 무비용 미션.
@@ -60,16 +68,16 @@ export const MISSION_CARDS = {
     { id: "n6", remote: true, text: "대상만을 위한 노래 3곡 플레이리스트 쪽지 보내기" },
     { id: "n7", remote: true, text: "대상의 하루를 응원하는 짧은 시 쪽지 보내기" },
     { id: "n8", cost: true, remote: true, text: "대상 근무지에 갈 일이 생기면 몰래 간식 두기 (못 가게 되면 다른 카드로 바꾸기)" },
+    { id: "n9", remote: true, text: "대상 이름 삼행시 쪽지 보내기" },
   ],
   hard: [
     { id: "h1", remote: false, text: "대상 이름으로 삼행시를 지어 손편지로 전달하기" },
     { id: "h2", remote: false, text: "대상에 대한 퀴즈 카드를 만들어 전달하기" },
     { id: "h3", remote: false, text: "종이접기 등 직접 만든 소품 전달하기" },
     { id: "h4", cost: true, remote: false, text: "대상에게 필요할 것 같은 물건을 추측해서 선물하기" },
-    { id: "h5", remote: true, text: "3일 연속 매일 다른 응원 쪽지 보내기" },
+    { id: "h5", remote: true, text: "3일 연속 매일 다른 응원 쪽지 보내기 (첫날 완료를 알린 뒤 '쪽지 더 보내기'로 이어서)" },
     { id: "h6", cost: true, remote: true, text: "대상 근무지 동료를 공범으로 섭외해 간식 전달하기 (공범에게도 비밀 유지 부탁)" },
     { id: "h7", remote: true, text: "대상에 대한 퀴즈 5문제를 쪽지로 보내기" },
-    { id: "h8", remote: true, text: "대상 이름 삼행시 쪽지 보내기" },
   ],
 };
 

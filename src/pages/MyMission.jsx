@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { addDoc, collection, doc, getDoc, onSnapshot, query, serverTimestamp, setDoc, where } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc, increment, onSnapshot, query, serverTimestamp, setDoc, where } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp, Loading } from "../App.jsx";
-import { LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT, SPEND_GUIDE_WON } from "../lib/constants.js";
+import { EXTRA_NOTES_MAX, LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT, SPEND_GUIDE_WON } from "../lib/constants.js";
 import { seededRandom, shuffle } from "../lib/random.js";
 import { syncClues } from "../lib/sync.js";
 import { Avatar, Dialogue, Panel } from "../ui.jsx";
@@ -97,6 +97,7 @@ export default function MyMission() {
       {pending.length > 0 && running && (
         <Dialogue speaker="알림" tone="gold">
           내 마니또가 보낸 미션 {pending.length}건을 아직 인증하지 않았어요. <a href="#detective">추리 보드</a>에서 코드와 후기를 입력하면 나와 마니또 모두 응모권을 받아요.
+          찾아봐도 받은 게 없으면 추리 보드에서 "받은 게 없어요"로 알려 주세요.
         </Dialogue>
       )}
       {nudge && running && (
@@ -116,6 +117,7 @@ export default function MyMission() {
           code={codes?.[slot]}
           choice={missions.choices?.[slot]}
           done={Boolean(missions.done?.[slot])}
+          notes={missions.notes?.[slot] || 0}
           allDone={missions.done || {}}
           open={running && slot <= config.week}
           phase={config.phase}
@@ -128,24 +130,42 @@ export default function MyMission() {
   );
 }
 
-function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, allDone, open, phase, remote }) {
+function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, notes, allDone, open, phase, remote }) {
   const [message, setMessage] = useState("");
   const [includeCode, setIncludeCode] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [redeemed, setRedeemed] = useState(null);
   const [thanks, setThanks] = useState(null);
+  const [reported, setReported] = useState(false); // 대상이 "받은 게 없어요"로 알렸는지
+  const [verdict, setVerdict] = useState(null); // 운영진 확인 결과: received / missing
   const [offset, setOffset] = useState({ easy: 0, normal: 0, hard: 0 }); // 난이도별로 몇 번째 카드를 보고 있는지
   const isPraise = slot === PRAISE_SLOT;
 
+  // 내 코드의 인증 문서(받는 사람과 나, 운영자만 읽는다)
   useEffect(() => {
     if (!code) return;
+    return onSnapshot(doc(db, "redemptions", code), (s) => setRedeemed(s.exists() ? s.data() : null), () => {});
+  }, [code]);
+
+  // 감사 답장은 그 인증에 딸린 익명 피드 글에 있다
+  const feedId = redeemed?.feedId || null;
+  useEffect(() => {
+    if (!feedId) return setThanks(null);
+    return onSnapshot(doc(db, "feed", feedId), (s) => setThanks(s.exists() ? s.data().thanks || null : null), () => {});
+  }, [feedId]);
+
+  // 완료를 알렸는데 인증이 없는 동안: 대상의 "받은 게 없어요" 신고와 운영진 확인 결과
+  const waiting = done && !redeemed;
+  useEffect(() => {
+    if (!waiting) return;
+    const rid = `${receiverPid}_${slot}`;
     const offs = [
-      onSnapshot(doc(db, "redemptions", code), (s) => setRedeemed(s.exists() ? s.data() : null)),
-      onSnapshot(doc(db, "thanks", code), (s) => setThanks(s.exists() ? s.data() : null)),
+      onSnapshot(doc(db, "reports", rid), (s) => setReported(s.exists()), () => {}),
+      onSnapshot(doc(db, "verdicts", rid), (s) => setVerdict(s.exists() ? s.data().verdict : null), () => {}),
     ];
     return () => offs.forEach((o) => o());
-  }, [code]);
+  }, [waiting, receiverPid, slot]);
 
   useEffect(() => {
     if (choice) setIncludeCode(choice.level === "easy" || isPraise || remote);
@@ -279,12 +299,83 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, allD
           <p className={redeemed && !redeemed.voided ? "note" : "small"}>
             {redeemed
               ? redeemed.voided ? "운영진이 이 인증을 무효 처리했어요." : `${receiverName}님이 인증했어요.`
-              : `${receiverName}님의 인증을 기다리는 중이에요.`}
+              : verdict === "received" ? "운영진이 전달된 것으로 확인했어요. 미션으로 인정돼요(도전 추가분은 직접 인증된 경우에만 있어요)."
+                : verdict === "missing" ? "운영진이 전달되지 않은 것으로 확인했어요. 이 주차는 미션으로 인정되지 않아요."
+                  : `${receiverName}님의 인증을 기다리는 중이에요.`}
           </p>
-          {thanks && <Dialogue speaker={receiverName}>{thanks.text}</Dialogue>}
+          {!redeemed && !verdict && reported && (
+            <Dialogue speaker="알림" tone="warn">
+              {receiverName}님이 {slot}주차에 받은 게 없다고 운영진에게 알렸어요. 전달이 잘 됐는지 확인해 주세요.
+              다시 전달하고 {open ? "아래 \"쪽지 더 보내기\"로 위치나 코드를 알려 주면" : "운영진에게 알려 주면"} 돼요. 운영진이 두 사람에게 확인한 뒤 처리해요.
+            </Dialogue>
+          )}
+          {thanks && <Dialogue speaker={receiverName}>{thanks}</Dialogue>}
+          {open && <MoreNotes slot={slot} myPid={myPid} receiverPid={receiverPid} receiverName={receiverName} code={code} sent={notes} showCode={!redeemed} />}
         </div>
       )}
     </Panel>
+  );
+}
+
+// 쪽지 더 보내기: 완료를 알린 주차에 쪽지를 더 보낸다. "3일 연속 매일 다른 응원 쪽지" 카드처럼 여러 날에 걸친 미션을 할 수 있게 둔 것.
+// 완료 표시와 응모권에는 영향이 없다(받는 사람 화면의 "마니또에게서 온 것"에 쪽지로 쌓인다).
+function MoreNotes({ slot, myPid, receiverPid, receiverName, code, sent, showCode }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [withCode, setWithCode] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState({ type: "", text: "" });
+  const left = EXTRA_NOTES_MAX - sent;
+
+  async function send(e) {
+    e.preventDefault();
+    if (!text.trim()) return setMsg({ type: "error", text: "쪽지 내용을 적어 주세요." });
+    setBusy(true);
+    setMsg({ type: "", text: "" });
+    try {
+      await addDoc(collection(db, "deliveries"), {
+        receiverPid, slot, kind: "note", message: text.trim(), code: showCode && withCode ? code : null, createdAt: serverTimestamp(),
+      });
+      await setDoc(doc(db, "giverMissions", myPid), { notes: { [slot]: increment(1) } }, { merge: true });
+      setText("");
+      setWithCode(false);
+      setOpen(false);
+      setMsg({ type: "ok", text: `${receiverName}님에게 쪽지를 보냈어요.` });
+    } catch (err) {
+      setMsg({ type: "error", text: err.code === "permission-denied" ? "지금은 쪽지를 보낼 수 없어요(미션 진행 기간의 열린 주차에만 보낼 수 있어요)." : "보내지 못했어요. 다시 시도해 주세요." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="more-notes">
+      {sent > 0 && <p className="small muted">이 주차에 더 보낸 쪽지 {sent}건</p>}
+      {!open && left > 0 && (
+        <button type="button" className="pk-btn sm" onClick={() => { setOpen(true); setMsg({ type: "", text: "" }); }}>쪽지 더 보내기</button>
+      )}
+      {!open && left <= 0 && <p className="small muted">이 주차에 더 보낼 수 있는 쪽지({EXTRA_NOTES_MAX}건)를 모두 보냈어요.</p>}
+      {open && (
+        <form className="stack" onSubmit={send}>
+          <label>
+            <span className="panel-label">{receiverName}님에게 더 보내는 쪽지 (익명, 남은 횟수 {left})</span>
+            <textarea className="pk-input" rows={3} maxLength={500} value={text} onChange={(e) => setText(e.target.value)}
+              placeholder="예: 둘째 날 응원이에요. 오늘도 힘내세요!" />
+          </label>
+          {showCode && (
+            <label className="check">
+              <input type="checkbox" checked={withCode} onChange={(e) => setWithCode(e.target.checked)} />
+              인증 코드도 함께 보내기 (아직 코드를 전하지 못했을 때)
+            </label>
+          )}
+          <div className="inline">
+            <button className="pk-btn main sm" disabled={busy}>쪽지 보내기</button>
+            <button type="button" className="text-btn" onClick={() => setOpen(false)}>닫기</button>
+          </div>
+        </form>
+      )}
+      {msg.text && <p className={msg.type === "error" ? "error small" : "note small"} role="status">{msg.text}</p>}
+    </div>
   );
 }
 
@@ -294,7 +385,7 @@ function TicketSummary({ codes, missions, entries }) {
   useEffect(() => {
     if (!codes) return;
     const offs = Object.entries(codes).map(([slot, code]) =>
-      onSnapshot(doc(db, "redemptions", code), (s) => setRedeemedSlots((prev) => ({ ...prev, [slot]: s.exists() && !s.data().voided })))
+      onSnapshot(doc(db, "redemptions", code), (s) => setRedeemedSlots((prev) => ({ ...prev, [slot]: s.exists() && !s.data().voided })), () => {})
     );
     return () => offs.forEach((o) => o());
   }, [codes]);
@@ -315,7 +406,10 @@ function TicketSummary({ codes, missions, entries }) {
           {myPart ? `, 우리 파트가 완수율 1위면 +${R.partBonus}` : ""}
         </li>
       </ul>
-      <p className="small">내 마니또가 미션을 안 보낸 주차는 마지막에 인증 입력 대신 1장씩 채워져요(내 미션이 {R.compMinMissions}건 이상 인증된 경우). <a href="#rules">규칙 전체 보기</a></p>
+      <p className="small">
+        내 마니또가 미션을 안 보낸 주차(운영진이 "못 받음"으로 확인한 주차 포함)는 마지막에 인증 입력 대신 1장씩 채워져요(내 미션이 {R.compMinMissions}건 이상 인증된 경우).
+        도전 추가분은 대상이 직접 인증한 미션에만 붙어요. <a href="#rules">규칙 전체 보기</a>
+      </p>
     </Panel>
   );
 }

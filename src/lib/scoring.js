@@ -3,40 +3,43 @@ import { secureRandom } from "./random.js";
 
 /**
  * 응모권 계산
- * people: [{ pid, part, disqualified, joined, dropout, creditGiver }]
+ * people: [{ pid, part, disqualified, joined, dropout }]
  *   part        소속 파트(파트 대항전에 쓴다. 없으면 대항전에서 빠진다)
  *   joined      초대 코드로 가입했는지(생략하면 가입한 것으로 본다)
  *   dropout     운영자가 "중도 이탈"로 표시했는지
- *   creditGiver 운영자가 "받고도 인증하지 않음 → 마니또의 미션 인정"으로 표시했는지(본인 응모권은 그대로)
  * assignments: { giverPid: receiverPid }
  * giverCodes: { giverPid: { 1: code, 2: code, 3: code } }
  * redemptions: { code: { receiverPid, slot, voided } }
  * missions: { giverPid: { choices: { slot: { level } } } }
  * guesses: { receiverPid: guessPid }
- * deliveries: [{ receiverPid, slot }]  마니또가 "완료 알리기"를 누를 때마다 1건(쪽지를 안 써도 생긴다)
+ * deliveries: [{ receiverPid, slot }]  마니또가 "완료 알리기"(또는 쪽지 더 보내기)를 누를 때마다 1건
+ * verdicts: { "받는사람pid_주차": "received" | "missing" }
+ *   마니또가 완료를 알렸는데 인증이 없는 주차를 운영자가 확인한 결과(받는 사람이 "받은 게 없어요"로 신고한 주차 포함).
  *
  * 규칙
  *  - 마니또: 인증된 미션 1장씩(최대 3), 도전 +1(최대 2), 끝까지 안 들키면 은신 2장.
  *    은신은 내 미션이 1건 이상 인증된 마니또만 받는다(아무것도 안 한 사람이 가장 안 들키는 문제).
+ *    도전 추가분은 받는 사람이 직접 인증한 미션에만 준다(아래 ②로 인정된 미션에는 주지 않는다).
  *  - 받는 사람: 인증 입력 1장씩(최대 3), 정답 지목 1장.
  *  - 상대방 때문에 손해 보지 않게:
- *    ① 내 마니또가 미션을 안 보낸 주차는 인증 입력 대신 1장(보상). 인증 입력과 합쳐 최대 3장. 내 미션이 1건 이상 인증된 사람만.
- *    ② 내 대상이 불참(가입 안 함·중도 이탈)이거나, 받고도 인증하지 않은 것을 운영자가 확인해 표시하면,
- *       내가 완료 알린 미션(인증 기록이 없는 것)은 인증된 것으로 인정한다. 운영자가 무효 처리한 인증은 인정하지 않는다.
+ *    ① 내 마니또가 미션을 안 보낸 주차, 그리고 완료를 알렸지만 운영자가 "못 받음"으로 확인한 주차는 인증 입력 대신 1장(보상).
+ *       인증 입력과 합쳐 최대 3장. 내 미션이 1건 이상 인증된 사람만.
+ *    ② 완료를 알렸는데 인증이 없는 미션은, 대상이 불참(가입 안 함·중도 이탈)이거나 운영자가 "받았음"으로 확인하면 인증된 것으로 인정한다.
+ *       운영자의 확인이 불참 자동 인정보다 먼저다("못 받음"이면 불참이어도 인정하지 않는다). 무효 처리된 인증은 인정하지 않는다.
+ *    ③ 확인이 없는 미인증 주차(대상이 참여 중)는 마니또도 받는 사람도 받지 못한다.
  *  - 파트 대항전: 미션 완수율 1위 파트원에게 1장(동률이면 모두). 내 미션이 1건 이상 인증된 사람만.
  *  - 가입 안 한 사람, 중도 이탈, 수상 제외는 0장.
  */
-export function computeTickets({ people, assignments, giverCodes, redemptions, missions, guesses, deliveries = [] }) {
+export function computeTickets({ people, assignments, giverCodes, redemptions, missions, guesses, deliveries = [], verdicts = {} }) {
   const out = {};
   const absent = new Set(); // 불참: 가입 안 함 또는 중도 이탈
-  const credit = new Set(); // 이 사람이 받은 완료 알림은 인증 없이도 마니또의 미션으로 인정
   for (const p of people) {
     out[p.pid] = { mission: 0, hard: 0, entries: 0, comp: 0, hidden: 0, guess: 0, partBonus: 0, total: 0, completion: 0, assumed: 0 };
     if (p.joined === false || p.dropout) absent.add(p.pid);
-    if (p.joined === false || p.dropout || p.creditGiver) credit.add(p.pid);
   }
   const valid = (code) => redemptions[code] && !redemptions[code].voided;
   const delivered = new Set(deliveries.map((d) => `${d.receiverPid}:${d.slot}`));
+  const verdictOf = (receiver, slot) => verdicts[`${receiver}_${slot}`] || null;
   const credited = {}; // giverPid -> 인증(또는 인정)된 미션 수
 
   for (const [giver, receiver] of Object.entries(assignments)) {
@@ -47,11 +50,13 @@ export function computeTickets({ people, assignments, giverCodes, redemptions, m
     let assumed = 0;
     for (const [slot, code] of Object.entries(codes)) {
       const byReceiver = valid(code);
-      const byAbsence = !redemptions[code] && credit.has(receiver) && delivered.has(`${receiver}:${slot}`);
-      if (!byReceiver && !byAbsence) continue;
+      const v = verdictOf(receiver, slot);
+      const byConfirm = !redemptions[code] && delivered.has(`${receiver}:${slot}`)
+        && (v === "received" || (v == null && absent.has(receiver)));
+      if (!byReceiver && !byConfirm) continue;
       redeemed++;
-      if (byAbsence) assumed++;
-      if (missions[giver]?.choices?.[slot]?.level === "hard") hard++;
+      if (byConfirm) assumed++;
+      else if (missions[giver]?.choices?.[slot]?.level === "hard") hard++; // 도전 추가분은 직접 인증된 미션만
     }
     credited[giver] = redeemed;
     redeemed = Math.min(redeemed, R.maxMissions);
@@ -77,13 +82,14 @@ export function computeTickets({ people, assignments, giverCodes, redemptions, m
     if (out[pid]) out[pid].entries = Math.min(n, R.maxReceiverEntries) * R.perReceiverEntry;
   }
 
-  // ① 보상: 마니또가 아무것도 안 보낸 주차(완료 알림도, 인증 기록도 없는 슬롯)
+  // ① 보상: 인증 기록이 없는 주차 중, 마니또가 완료를 알리지 않았거나 운영자가 "못 받음"으로 확인한 주차
   for (const [giver, receiver] of Object.entries(assignments)) {
     if (!out[receiver] || (credited[receiver] || 0) < R.compMinMissions) continue;
     const codes = giverCodes[giver] || {};
     let missed = 0;
     for (const [slot, code] of Object.entries(codes)) {
-      if (!delivered.has(`${receiver}:${slot}`) && !redemptions[code]) missed++;
+      if (redemptions[code]) continue;
+      if (!delivered.has(`${receiver}:${slot}`) || verdictOf(receiver, slot) === "missing") missed++;
     }
     const room = R.maxReceiverEntries * R.perReceiverEntry - out[receiver].entries;
     out[receiver].comp = Math.max(0, Math.min(missed * R.compPerMissedWeek, room));
@@ -136,7 +142,8 @@ export function partStandings(people, tickets) {
 
 /**
  * 파트 대항전 주간 순위(행사 중 발표용): 각자 "완료 알리기"를 누른 수 / (파트 인원 × 지금까지 열린 주차)
- * 인증 여부는 운영자도 짝을 모르는 동안 파트별로 셀 수 없어서 완료 알림 수로 본다. 최종 순위(partStandings)는 인증 기준이다.
+ * 주간 순위는 완료 알림 수 기준이다(처음 만들 때는 운영자도 짝을 읽을 수 없어 인증을 파트별로 셀 수 없었다.
+ * 지금은 운영자가 짝을 읽지만 기준은 그대로 두었다). 최종 순위(partStandings)는 인증 기준이다.
  * doneCounts: { pid: 완료 알린 미션 수 }, week: 열린 주차(1~3)
  */
 export function weeklyPartBoard(people, doneCounts, week) {
@@ -179,16 +186,18 @@ export function tallyVotes(cards, votes, partOf = {}) {
 /**
  * 베스트 마니또 점수: 완수율·전체 투표·운영진 평가
  * cards: [{ cardId, giverPid }], votes: { voterPid: [cardId] }, adminEval: { cardId: 0~10 }, partOf: { pid: part }
- * 투표 점수 = (표 수 ÷ 기대 득표)를 가장 높은 카드가 1이 되게 맞춘 값(tallyVotes 설명 참고).
+ * disqualified: 수상 대상이 아닌 마니또(수상 제외·불참). 이 사람들의 카드는 처음부터 없는 것으로 보고 집계한다.
+ *   그 카드에 간 표는 버리고, 그 카드가 표를 많이 받았어도 다른 카드의 투표 점수가 낮아지지 않는다.
+ * 투표 점수 = (표 수 ÷ 기대 득표)를 수상 대상 카드 중 가장 높은 카드가 1이 되게 맞춘 값(tallyVotes 설명 참고).
  * 동점이면 인증된 미션이 많은 쪽 → 투표 점수가 높은 쪽 → 운영진 평가가 높은 쪽 → 무작위(집계할 때 한 번 뽑아 결과에 저장).
  */
 export function rankBestManito({ cards, votes, adminEval, tickets, disqualified = new Set(), partOf = {}, rand = secureRandom }) {
-  const { count, expected } = tallyVotes(cards, votes, partOf);
+  const eligible = cards.filter((c) => !disqualified.has(c.giverPid));
+  const { count, expected } = tallyVotes(eligible, votes, partOf);
   const lift = (id) => (expected[id] > 0 ? count[id] / expected[id] : 0);
-  const maxLift = Math.max(0, ...cards.map((c) => lift(c.cardId))) || 1;
+  const maxLift = Math.max(0, ...eligible.map((c) => lift(c.cardId))) || 1;
   const EPS = 1e-9;
-  return cards
-    .filter((c) => !disqualified.has(c.giverPid))
+  return eligible
     .map((c) => {
       const completion = tickets[c.giverPid]?.completion || 0;
       const vote = lift(c.cardId) / maxLift;
