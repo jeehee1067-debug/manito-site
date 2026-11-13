@@ -1,7 +1,7 @@
 import { useApp } from "../App.jsx";
 import { Panel } from "../ui.jsx";
 import { PRIZES, TICKET_RULES as R, SCORE_WEIGHTS as W } from "../config/prizes.js";
-import { PROFILE_QUESTIONS, REVIEW_MIN, SPEND_GUIDE_WON } from "../lib/constants.js";
+import { EXTRA_NOTES_MAX, PROFILE_QUESTIONS, REVIEW_MIN, SPEND_GUIDE_WON } from "../lib/constants.js";
 
 // 참여자에게 보여 주는 규칙. 숫자는 prizes.js·constants.js에서 가져오므로 그쪽을 바꾸면 여기도 같이 바뀐다.
 // 문장으로 적은 규칙(보상·불참 처리·동점 기준)은 src/lib/scoring.js의 계산과 같아야 한다.
@@ -27,7 +27,7 @@ export default function Rules() {
         <table className="rules-table">
           <tbody>
             <tr><th rowSpan={3}>마니또로서</th><td>내 미션이 인증될 때마다</td><td className="num">{R.perRedeemedMission}장 (최대 {R.maxMissions})</td></tr>
-            <tr><td>도전 카드로 인증되면 추가로</td><td className="num">+{R.perHardMission}장 (최대 {R.maxHard})</td></tr>
+            <tr><td>도전 카드를 대상이 직접 인증하면 추가로</td><td className="num">+{R.perHardMission}장 (최대 {R.maxHard})</td></tr>
             <tr><td>끝까지 안 들키면(대상이 나를 지목하지 못함). 내 미션이 {R.hiddenMinMissions}건 이상 인증된 경우만</td><td className="num">{R.hidden}장</td></tr>
             <tr><th rowSpan={2}>받는 사람으로서</th><td>받은 미션을 인증할 때마다(코드 + 후기 {REVIEW_MIN}자 이상)</td><td className="num">{R.perReceiverEntry}장 (최대 {R.maxReceiverEntries})</td></tr>
             <tr><td>내 마니또를 맞히면</td><td className="num">{R.correctGuess}장</td></tr>
@@ -39,8 +39,13 @@ export default function Rules() {
         <p><b>상대방 때문에 손해 보지 않아요.</b></p>
         <ul className="rules-list">
           <li>내 마니또가 미션을 안 보낸 주차는 인증 입력 대신 {R.compPerMissedWeek}장을 받아요(인증 입력과 합쳐 최대 {R.maxReceiverEntries}장, 내 미션이 {R.compMinMissions}건 이상 인증된 사람만).</li>
-          <li>내 대상이 불참(가입 안 함, 중도 이탈)이면 내가 완료를 알린 미션은 인증된 것으로 쳐요. 대상이 받고도 끝까지 인증하지 않은 경우는 운영진이 본인에게 확인한 뒤 인정할 수 있어요.</li>
-          <li>받았는데 인증하지 않은 미션은 내 응모권으로 채워지지 않아요. 받으면 꼭 인증해 주세요. 마니또도 그래야 응모권을 받아요.</li>
+          <li>
+            <b>마니또가 완료를 알렸는데 받은 게 없다면</b> 추리 보드에서 그 주차에 "받은 게 없어요"를 눌러 주세요. 운영진이 두 사람에게 확인하고 주차별로 정해요.
+            <b> 못 받음</b>으로 확인되면 마니또가 안 보낸 주차와 똑같이 {R.compPerMissedWeek}장을 보상받고, <b>받았음</b>으로 확인되면 마니또의 미션으로 인정돼요.
+          </li>
+          <li>내 대상이 불참(가입 안 함, 중도 이탈)이면 내가 완료를 알린 미션은 인증된 것으로 쳐요. 대상이 받고도 끝까지 인증하지 않은 경우는 운영진이 확인한 뒤 주차별로 인정할 수 있어요.</li>
+          <li>이렇게 대상 불참이나 운영진 확인으로 인정된 미션은 미션 응모권 {R.perRedeemedMission}장만 받아요. <b>도전 추가분은 대상이 직접 인증한 미션에만</b> 붙어요.</li>
+          <li>받았는데 인증하지 않은 미션은 내 응모권으로 채워지지 않아요. 받으면 꼭 인증해 주세요. 마니또도 그래야 응모권을 제대로 받아요.</li>
         </ul>
         <p className="small">응모권이 0장이면 추첨 대상이 아니에요. 가입하지 않은 사람, 중도 이탈, 수상 제외도 0장이에요.</p>
       </Panel>
@@ -92,6 +97,8 @@ export default function Rules() {
           <li>돈이 안 드는 카드만 골라도 응모권은 똑같아요. 도전 카드도 돈이 안 드는 것이 있어요.</li>
           <li>"소액 비용" 표시가 있는 카드는 간식·음료처럼 내 돈이 들어요. 건당 {SPEND_GUIDE_WON.toLocaleString()}원 이하를 권장해요.</li>
           <li>카드가 마음에 안 들면 "다른 카드 보기"로 같은 난이도의 다른 카드를 고를 수 있어요.</li>
+          <li>카드 고르기·완료 알리기·인증은 그 주차가 열린 뒤에만 할 수 있어요. 지난 주차는 미션 진행 기간 안이면 늦게라도 할 수 있어요.</li>
+          <li>완료를 알린 주차에는 "쪽지 더 보내기"로 쪽지를 더 보낼 수 있어요(주차마다 {EXTRA_NOTES_MAX}건까지). "3일 연속 응원 쪽지" 카드는 첫날 완료를 알린 뒤 이것으로 이어서 보내면 돼요.</li>
         </ul>
       </Panel>
 
@@ -108,8 +115,9 @@ export default function Rules() {
 
       <Panel title="누가 무엇을 볼 수 있나요">
         <ul className="rules-list">
-          <li><b>다른 참여자</b>: 이름·근무지{partsInUse ? "·파트" : ""}, 익명 피드의 후기{partsInUse ? ", 파트별 미션 합계" : ""}만 봐요. 내가 미션을 몇 개 했는지도 다른 참여자는 볼 수 없어요. 내 짝, 인증 코드, 단서, 쪽지, 프로필 답, 메일 주소는 볼 수 없어요.</li>
-          <li><b>운영자</b>: 진행 현황(누가 미션을 몇 개 했는지, 최근 접속), 후기, 가입한 메일을 봐요. 누가 누구의 마니또인지는 투표 단계부터, 쪽지 내용은 집계 단계부터 볼 수 있어요. 프로필 답과 단서는 볼 수 없어요.</li>
+          <li><b>다른 참여자</b>: 이름·근무지{partsInUse ? "·파트" : ""}, 익명 피드의 후기{partsInUse ? ", 파트별 미션 합계" : ""}만 봐요. 익명 피드의 글에는 누가 썼는지(받는 사람)가 저장돼 있지 않아요. 내가 미션을 몇 개 했는지도 다른 참여자는 볼 수 없어요. 내 짝, 인증 코드, 단서, 쪽지, 프로필 답, 메일 주소는 볼 수 없어요.</li>
+          <li><b>내 마니또</b>: 내가 입력한 인증(코드·후기)은 나와 그 미션을 보낸 마니또만 다시 볼 수 있어요.</li>
+          <li><b>운영자·공동 운영자</b>: 마니또에 참여하지 않는 계정이에요. 그래서 누가 누구의 마니또인지, 주차별 진행 상황, 최종 지목, 후기, 가입한 메일을 처음부터 볼 수 있어요(진행을 챙기고 "받은 게 없어요"를 확인하는 데 써요). 쪽지 내용은 집계 단계부터 볼 수 있고, 프로필 답과 단서는 볼 수 없어요.</li>
           <li><b>사이트 관리 계정</b>(Firebase 콘솔): 저장된 데이터를 기술적으로 직접 열어 볼 수 있어요(서버 없이 운영하는 방식의 한계예요).</li>
         </ul>
       </Panel>

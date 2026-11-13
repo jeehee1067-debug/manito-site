@@ -197,10 +197,12 @@ function Session({ user, logout }) {
     tabs.push(["profile", "내 프로필"]);
   }
   if (ctx.myPid || ctx.isAdmin) tabs.push(["rules", "규칙"]);
-  if (phase >= PHASE.REVEAL || ctx.isAdmin) tabs.push(["reveal", "결과"]);
+  // 연결 전 계정(참여자도 운영자도 아님)에는 메뉴가 없다
+  if ((phase >= PHASE.REVEAL && ctx.myPid) || ctx.isAdmin) tabs.push(["reveal", "결과"]);
   if (ctx.isAdmin) tabs.push(["admin", "운영"]);
 
   // 지금 로그인한 사람. 같은 기기를 여러 사람이 쓸 때 남의 계정으로 들어와 있는지 바로 알 수 있게 헤더에 보인다.
+  // 운영자·공동 운영자는 참여하지 않는 계정이라 이름 대신 "운영자"로 보인다.
   const who = ctx.myPid ? `${ctx.nameOf(ctx.myPid)}님` : ctx.isAdmin ? "운영자" : "";
   const current = tabs.find(([k]) => k === tab)?.[0] || (ctx.isAdmin && !ctx.myPid ? "admin" : tabs[0]?.[0]);
 

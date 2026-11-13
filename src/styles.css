@@ -317,6 +317,29 @@ textarea.pk-input { resize: vertical; line-height: 1.6; }
 .pk-table tbody tr:nth-child(even) { background: var(--paper-2); }
 .pk-table tr.warn td { color: var(--red); }
 .pk-table td.email { text-align: left; white-space: normal; word-break: break-all; font-size: 12px; min-width: 9em; }
+.pk-table td.left { text-align: left; }
+/* 짝 현황 표: 주차별 상태 */
+.pk-table.pair-table td.st-redeemed { background: #dff3e4; color: #1d6a39; font-weight: 700; }
+.pk-table.pair-table td.st-confirmed { background: #e7f1dc; color: #1d6a39; }
+.pk-table.pair-table td.st-sent { background: #fff6d8; }
+.pk-table.pair-table td.st-reported, .pk-table.pair-table td.st-missing { background: #fbe1dd; color: var(--red); font-weight: 700; }
+.pk-table.pair-table td.st-voided { color: var(--ink-soft); text-decoration: line-through; }
+.chip.sm { padding: 2px 8px; font-size: 12px; margin: 0 2px; }
+
+/* 계정 번호(연결 전 화면), 공동 운영자 목록 */
+.account-no {
+  display: grid; gap: 2px; background: var(--paper-2); border: 3px solid var(--ink); border-radius: 8px; padding: 8px 10px; margin: 8px 0;
+}
+.account-no span { font-size: 12px; color: var(--ink-soft); }
+.account-no strong { font-size: 15px; letter-spacing: 0.04em; word-break: break-all; user-select: all; }
+.admin-list .row-item { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; }
+.account-id { word-break: break-all; }
+.error.banner { background: #fff; border: 3px solid var(--red); border-radius: 10px; padding: 10px 12px; margin-bottom: 16px; }
+
+/* 받은 게 없어요, 쪽지 더 보내기 */
+.report-box { border-top: 2px dashed #c3bfae; margin-top: 10px; padding-top: 8px; display: grid; gap: 6px; justify-items: start; }
+.more-notes { border-top: 2px dashed #c3bfae; padding-top: 8px; display: grid; gap: 6px; justify-items: start; }
+.more-notes form { width: 100%; }
 
 /* ---------- 결과 ---------- */
 .draws { list-style: none; display: flex; flex-direction: column; gap: 10px; }

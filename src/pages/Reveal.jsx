@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { doc, onSnapshot, updateDoc } from "firebase/firestore";
+import { doc, onSnapshot, runTransaction } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp, Loading } from "../App.jsx";
 import { PHASE } from "../lib/constants.js";
@@ -12,6 +12,8 @@ const DRAW_ORDER = [...PRIZES.tiers, { key: "grand", ...PRIZES.grand }];
 export default function Reveal() {
   const { config, isAdmin, nameOf, myPid, myPart } = useApp();
   const [r, setR] = useState(undefined);
+  const [drawing, setDrawing] = useState(false);
+  const [drawMsg, setDrawMsg] = useState("");
 
   useEffect(() => onSnapshot(doc(db, "results", "public"), (s) => setR(s.exists() ? s.data() : null), () => setR(null)), []);
 
@@ -29,14 +31,31 @@ export default function Reveal() {
   const myManito = r.pairs.find((p) => p.receiverPid === myPid)?.giverPid;
   const mine = myPid ? r.ticketDetail?.[myPid] : null;
 
+  // 추첨 결과는 한 번 쓰면 바꿀 수 없다. 두 번 누르거나 운영자 둘이 동시에 눌러도 덮어쓰지 않게,
+  // 서버의 지금 값을 읽어 "아직 안 뽑은 순서"일 때만 쓴다(트랜잭션). 보안 규칙도 이미 있는 추첨 결과의 변경·삭제를 거부한다.
   async function draw(step, index) {
-    const prevKeys = DRAW_ORDER.slice(0, index).map((s) => s.key);
-    if (prevKeys.some((k) => !draws[k])) return window.alert("앞 순서 추첨을 먼저 해 주세요.");
-    // 2~4등끼리는 중복 당첨 없음, 대추첨은 전원 대상
-    const exclude = step.key === "grand" ? new Set() : new Set(PRIZES.tiers.flatMap((t) => draws[t.key] || []));
-    const entries = Object.entries(r.tickets).map(([pid, weight]) => ({ pid, weight }));
-    const winners = weightedDraw(entries, step.count, undefined, exclude);
-    await updateDoc(doc(db, "results", "public"), { [`draws.${step.key}`]: winners });
+    if (drawing) return;
+    setDrawing(true);
+    setDrawMsg("");
+    const ref = doc(db, "results", "public");
+    try {
+      await runTransaction(db, async (tx) => {
+        const cur = (await tx.get(ref)).data();
+        const done = cur.draws || {};
+        if (done[step.key]) throw new Error("already");
+        if (DRAW_ORDER.slice(0, index).some((s) => !done[s.key])) throw new Error("order");
+        // 2~4등끼리는 중복 당첨 없음, 대추첨은 전원 대상
+        const exclude = step.key === "grand" ? new Set() : new Set(PRIZES.tiers.flatMap((t) => done[t.key] || []));
+        const entries = Object.entries(cur.tickets).map(([pid, weight]) => ({ pid, weight }));
+        tx.update(ref, { [`draws.${step.key}`]: weightedDraw(entries, step.count, undefined, exclude) });
+      });
+    } catch (err) {
+      setDrawMsg(err.message === "order" ? "앞 순서 추첨을 먼저 해 주세요."
+        : err.message === "already" ? "이미 추첨한 순서예요. 추첨 결과는 다시 뽑거나 바꿀 수 없어요."
+          : "추첨하지 못했어요. 잠시 뒤 다시 눌러 주세요.");
+    } finally {
+      setDrawing(false);
+    }
   }
 
   return (
@@ -52,7 +71,7 @@ export default function Reveal() {
                 내 응모권 {mine.total}장: 미션 {mine.mission} + 도전 {mine.hard} + 인증 입력 {mine.entries}
                 {mine.comp > 0 && ` + 못 받은 주차 보상 ${mine.comp}`} + 은신 {mine.hidden} + 정답 지목 {mine.guess}
                 {mine.partBonus > 0 && ` + 우승 파트 ${mine.partBonus}`}
-                {mine.assumed > 0 && ` (대상 불참으로 인정된 미션 ${mine.assumed}건 포함)`}
+                {mine.assumed > 0 && ` (대상 불참·운영진 확인으로 인정된 미션 ${mine.assumed}건 포함, 인정된 미션에는 도전 추가분 없음)`}
                 {mine.total === 0 && mine.mission + mine.hard + mine.entries + mine.hidden + mine.guess + (mine.comp || 0) + (mine.partBonus || 0) > 0 && " · 수상 제외 또는 중도 이탈로 0장 처리됐어요"}
               </p>
             )}
@@ -61,7 +80,8 @@ export default function Reveal() {
       )}
 
       <Panel title="추첨">
-        <p className="small">응모권 수에 비례해 뽑아요. 순서: {DRAW_ORDER.map((s) => s.label).join(" → ")}.</p>
+        <p className="small">응모권 수에 비례해 뽑아요. 순서: {DRAW_ORDER.map((s) => s.label).join(" → ")}. 한 번 뽑은 결과는 다시 뽑을 수 없어요.</p>
+        {drawMsg && <p className="error" role="alert">{drawMsg}</p>}
         <ol className="draws">
           {DRAW_ORDER.map((step, i) => (
             <li key={step.key} className={step.key === "grand" ? "draw grand" : "draw"}>
@@ -76,7 +96,7 @@ export default function Reveal() {
                   ))}
                 </div>
               ) : canDraw ? (
-                <button className={step.key === "grand" ? "pk-btn gold" : "pk-btn main"} onClick={() => draw(step, i)}>추첨하기</button>
+                <button className={step.key === "grand" ? "pk-btn gold" : "pk-btn main"} disabled={drawing} onClick={() => draw(step, i)}>추첨하기</button>
               ) : (
                 <p className="muted small">추첨 전</p>
               )}

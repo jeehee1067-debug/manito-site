@@ -4,8 +4,11 @@ import { auth, db } from "../firebase.js";
 import { login, signup, claimWithInvite, resetPassword, validateEmail, authErrorMessage } from "../lib/account.js";
 import { Garland, Gifts, XMAS_LEADERS, XmasTree } from "../xmas.jsx";
 
-// 첫 운영자 설정 버튼은 주소 끝에 ?setup을 붙였을 때만 보인다(운영자 설정이 끝난 뒤에는 숨김).
-// 이미 운영자가 있으면 config 생성이 보안 규칙에 막혀서, 이 주소로 들어와도 운영자가 될 수 없다.
+// 운영자 계정 만들기 버튼은 주소 끝에 ?setup을 붙였을 때만 보인다(참여자 화면에는 숨김).
+//  - 아직 운영자가 없으면: 이 계정이 첫 운영자가 된다.
+//  - 이미 운영자가 있으면: config 생성이 보안 규칙에 막혀서 운영자가 될 수 없다. 계정만 만들어지고 "연결 전" 화면으로 가는데,
+//    거기 나오는 계정 번호를 운영자에게 알려 주면 공동 운영자로 지정받을 수 있다.
+// 운영자·공동 운영자는 참여하지 않는 계정이다(초대 코드로 명단에 연결할 수 없다).
 const SHOW_SETUP = new URLSearchParams(window.location.search).has("setup");
 
 // mode: login 로그인 / signup 처음 가입 / reset 비밀번호 찾기 / bootstrap 첫 운영자 설정
@@ -50,7 +53,12 @@ export default function Login({ bootstrap = false }) {
           if (bad) throw new Error(bad);
           await signup(email, password, keep);
         }
-        await setDoc(doc(db, "config", "app"), { admins: [auth.currentUser.uid], phase: 0, week: 1, cluesReleased: 0 });
+        try {
+          await setDoc(doc(db, "config", "app"), { admins: [auth.currentUser.uid], phase: 0, week: 1, cluesReleased: 0 });
+        } catch (err) {
+          // 이미 운영자가 있는 경우: 계정은 만들어졌고 "연결 전" 화면(계정 번호)이 나온다. 오류로 보이지 않게 넘어간다.
+          if (err?.code !== "permission-denied") throw err;
+        }
       }
     } catch (err) {
       setError(mode === "reset" && err?.code?.includes("user-not-found") ? "이 메일로 가입된 계정이 없어요. 주소를 다시 확인해 주세요." : authErrorMessage(err));
@@ -85,9 +93,15 @@ export default function Login({ bootstrap = false }) {
             <button role="tab" aria-selected={mode === "signup"} className={mode === "signup" ? "chip is-on" : "chip"} onClick={() => go("signup")}>처음 가입</button>
           </div>
         ) : (
-          <h2 className="panel-title">{mode === "reset" ? "비밀번호 찾기" : "운영자 설정"}</h2>
+          <h2 className="panel-title">{mode === "reset" ? "비밀번호 찾기" : "운영자 계정 만들기"}</h2>
         )}
-        {mode === "bootstrap" && <p className="note">처음 한 번만 하는 설정이에요. 이 계정이 운영자가 됩니다.</p>}
+        {mode === "bootstrap" && (
+          <p className="note">
+            {bootstrap
+              ? "처음 한 번만 하는 설정이에요. 이 계정이 운영자가 됩니다. 운영자는 마니또에 참여하지 않는 계정이에요."
+              : "운영자와 공동 운영자는 마니또에 참여하지 않는 계정이에요. 아직 운영자가 없으면 이 계정이 운영자가 되고, 이미 있으면 다음 화면에 나오는 계정 번호를 운영자에게 알려 주면 공동 운영자로 지정받아요."}
+          </p>
+        )}
         {mode === "reset" && <p className="small">가입할 때 쓴 메일 주소를 적으면 비밀번호를 다시 정하는 링크를 보내 드려요.</p>}
 
         <form onSubmit={submit} className="stack">
@@ -120,7 +134,7 @@ export default function Login({ bootstrap = false }) {
           {error && <p className="error" role="alert">{error}</p>}
           {notice && <p className="note" role="status">{notice}</p>}
           <button className="pk-btn main" disabled={busy}>
-            {{ login: "로그인", signup: "가입하고 내 이름 연결", reset: "재설정 메일 보내기", bootstrap: "운영자로 시작하기" }[mode]}
+            {{ login: "로그인", signup: "가입하고 내 이름 연결", reset: "재설정 메일 보내기", bootstrap: bootstrap ? "운영자로 시작하기" : "운영자 계정 만들기" }[mode]}
           </button>
         </form>
 
@@ -128,10 +142,10 @@ export default function Login({ bootstrap = false }) {
           {mode === "login" && (
             <button type="button" className="text-btn" onClick={() => go("reset")}>비밀번호를 잊었어요</button>
           )}
-          {/* 로그인 전에는 config를 읽을 수 없어(보안 규칙) 첫 운영자인지 알 수 없다. 첫 운영자는 여기서 들어간다.
-              이미 운영자가 있으면 config 생성이 규칙에 막히고, 만들어진 계정은 초대 코드 연결 화면으로 간다. */}
+          {/* 로그인 전에는 config를 읽을 수 없어(보안 규칙) 첫 운영자인지 알 수 없다. 운영자·공동 운영자 계정은 여기서 만든다.
+              이미 운영자가 있으면 config 생성이 규칙에 막히고, 만들어진 계정은 "연결 전" 화면(계정 번호)으로 간다. */}
           {!bootstrap && tabMode && SHOW_SETUP && (
-            <button type="button" className="text-btn" onClick={() => go("bootstrap")}>처음 설정하는 운영자인가요?</button>
+            <button type="button" className="text-btn" onClick={() => go("bootstrap")}>운영자·공동 운영자 계정 만들기</button>
           )}
           {!bootstrap && !tabMode && (
             <button type="button" className="text-btn" onClick={() => go("login")}>로그인으로 돌아가기</button>

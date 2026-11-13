@@ -117,9 +117,9 @@ export function generateCodes(giverPids, rand = secureRandom) {
   return byGiver;
 }
 
-// 재배정 때 지울 문서 목록(meta/assignment). 운영자는 이 문서를 언제든 읽을 수 있으므로
-// 배열 순서가 배정 순서를 드러내지 않게 정렬해서 저장한다.
-// (pairs 순서 그대로 두면 pids[i]의 대상이 pids[i+1]이 되고, codes도 3개씩 마니또 순서와 맞물린다)
+// 재배정 때 지울 문서 목록(meta/assignment). 정렬해서 저장한다
+// (pairs 순서 그대로 두면 pids[i]의 대상이 pids[i+1]이 되고, codes도 3개씩 마니또 순서와 맞물려 배정 순서가 그대로 드러난다.
+//  운영자는 이제 짝을 읽을 수 있어서 비밀 유지에 꼭 필요하지는 않지만, 메모에 짝 정보를 남기지 않는 쪽으로 그대로 둔다).
 export function assignmentMemo(pairs, codesByGiver) {
   return {
     codes: Object.values(codesByGiver).flatMap((c) => Object.values(c)).sort(),

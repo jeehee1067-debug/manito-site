@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  arrayRemove, arrayUnion, collection, doc, getDoc, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where,
+  arrayRemove, arrayUnion, collection, deleteDoc, doc, getDoc, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch,
 } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp } from "../App.jsx";
 import { Avatar, Dialogue, Panel } from "../ui.jsx";
-import { PHASE, PROFILE_QUESTIONS, REVIEW_MIN, CLUE_COUNT, PART_HINT_IDX } from "../lib/constants.js";
+import { PHASE, PRAISE_SLOT, PROFILE_QUESTIONS, REVIEW_MIN, CLUE_COUNT, PART_HINT_IDX } from "../lib/constants.js";
 import { normalizeCode } from "../lib/random.js";
 
 export default function Detective() {
@@ -33,34 +33,89 @@ export default function Detective() {
 }
 
 function Inbox({ myPid }) {
+  const { config } = useApp();
   const [items, setItems] = useState([]);
-  const [redeemed, setRedeemed] = useState(new Set());
+  const [mine, setMine] = useState([]); // 내가 입력한 인증 [{ code, slot }]
   useEffect(() => {
     const offs = [
       onSnapshot(query(collection(db, "deliveries"), where("receiverPid", "==", myPid)), (s) =>
         setItems(s.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)))
       ),
       onSnapshot(query(collection(db, "redemptions"), where("receiverPid", "==", myPid)), (s) =>
-        setRedeemed(new Set(s.docs.map((d) => d.id)))
+        setMine(s.docs.map((d) => ({ code: d.id, slot: d.data().slot })))
       ),
     ];
     return () => offs.forEach((o) => o());
   }, [myPid]);
+
+  const redeemedCodes = new Set(mine.map((r) => r.code));
+  const redeemedSlots = new Set(mine.map((r) => r.slot));
+  // 마니또가 완료를 알렸는데 내가 아직 인증하지 않은 1·2주차(3주차 칭찬 카드는 사이트로 바로 오므로 "받은 게 없어요"가 없다)
+  const waiting = [...new Set(items.filter((it) => it.slot !== PRAISE_SLOT).map((it) => it.slot))]
+    .filter((slot) => !redeemedSlots.has(slot))
+    .sort((a, b) => a - b);
+  const speaker = (it) => (it.kind === "praise" ? "마니또의 칭찬 카드" : it.kind === "note" ? `마니또 · ${it.slot}주차 쪽지` : `마니또 · ${it.slot}주차`);
 
   return (
     <Panel title="마니또에게서 온 것">
       {items.length === 0 && <p className="muted">아직 도착한 게 없어요. 마니또가 미션을 하면 여기에 알림이 와요.</p>}
       <div className="stack">
         {items.map((it) => (
-          <Dialogue key={it.id} speaker={it.kind === "praise" ? "마니또의 칭찬 카드" : `마니또 · ${it.slot}주차`} tone={it.kind === "praise" ? "gold" : ""}>
+          <Dialogue key={it.id} speaker={speaker(it)} tone={it.kind === "praise" ? "gold" : ""}>
             <p>{it.message || "마니또가 미션을 했대요. 주변을 살펴보세요!"}</p>
             {it.code && (
-              <p className="small">인증 코드 <strong className="mono">{it.code}</strong>{redeemed.has(it.code) ? " (인증 완료)" : ""}</p>
+              <p className="small">인증 코드 <strong className="mono">{it.code}</strong>{redeemedCodes.has(it.code) ? " (인증 완료)" : ""}</p>
             )}
           </Dialogue>
         ))}
       </div>
+      {waiting.map((slot) => <ReportBox key={slot} myPid={myPid} slot={slot} phase={config.phase} />)}
     </Panel>
+  );
+}
+
+// 받은 게 없어요: 마니또가 완료를 알렸는데 찾아봐도 받은 것이 없을 때 주차별로 운영진에게 알린다.
+// 운영진이 두 사람에게 확인한 뒤 "받았음"(마니또의 미션 인정) 또는 "못 받음"(나에게 그 주차 보상)으로 정한다.
+function ReportBox({ myPid, slot, phase }) {
+  const [reported, setReported] = useState(false);
+  const [verdict, setVerdict] = useState(null);
+  const [error, setError] = useState("");
+  const rid = `${myPid}_${slot}`;
+  useEffect(() => {
+    const offs = [
+      onSnapshot(doc(db, "reports", rid), (s) => setReported(s.exists()), () => {}),
+      onSnapshot(doc(db, "verdicts", rid), (s) => setVerdict(s.exists() ? s.data().verdict : null), () => {}),
+    ];
+    return () => offs.forEach((o) => o());
+  }, [rid]);
+  const canReport = phase >= PHASE.RUNNING && phase <= PHASE.VOTING; // 미션 마감 뒤에도 집계 전까지는 알릴 수 있다
+
+  async function report() {
+    setError("");
+    if (!window.confirm(`${slot}주차에 받은 게 없다고 운영진에게 알릴까요?\n\n주변(책상, 서랍, 자리 근처)과 위 쪽지를 한 번 더 확인해 주세요. 운영진이 마니또에게도 확인해요.`)) return;
+    await setDoc(doc(db, "reports", rid), { receiverPid: myPid, slot, createdAt: serverTimestamp() })
+      .catch(() => setError("알리지 못했어요. 잠시 뒤 다시 눌러 주세요."));
+  }
+  const cancel = () => deleteDoc(doc(db, "reports", rid)).catch(() => setError("취소하지 못했어요."));
+
+  return (
+    <div className="report-box">
+      <p className="small">
+        <b>{slot}주차</b>: 마니또가 미션을 했다고 알렸는데 아직 인증하지 않았어요. 받았다면 아래 "인증하기"에 코드와 후기를 입력해 주세요.
+      </p>
+      {verdict === "received" && <p className="small note">운영진 확인: 전달된 것으로 확인됐어요. {phase === PHASE.RUNNING ? "코드를 찾으면 지금이라도 인증할 수 있어요." : ""}</p>}
+      {verdict === "missing" && <p className="small note">운영진 확인: 못 받은 것으로 처리됐어요. 이 주차는 인증 입력 대신 응모권 1장으로 보상돼요(내 미션이 1건 이상 인증된 경우).</p>}
+      {!verdict && reported && (
+        <p className="small">
+          받은 게 없다고 운영진에게 알렸어요. 운영진이 확인한 뒤 처리해요.
+          {canReport && <> <button type="button" className="text-btn" onClick={cancel}>알림 취소</button></>}
+        </p>
+      )}
+      {!verdict && !reported && canReport && (
+        <button type="button" className="pk-btn sm" onClick={report}>받은 게 없어요</button>
+      )}
+      {error && <p className="error small" role="alert">{error}</p>}
+    </div>
   );
 }
 
@@ -82,20 +137,22 @@ function CodeEntry({ myPid }) {
     try {
       const codeSnap = await getDoc(doc(db, "codes", c)).catch(() => null);
       if (!codeSnap || !codeSnap.exists()) throw new Error("이 코드는 나에게 온 마니또 코드가 아니에요. 다시 확인해 주세요.");
+      const slot = codeSnap.data().slot;
+      if (slot > (config.week || 1)) throw new Error(`${slot}주차 코드예요. ${slot}주차가 열리면 인증할 수 있어요.`);
       const existing = await getDoc(doc(db, "redemptions", c));
       if (existing.exists()) throw new Error("이미 인증한 코드예요.");
-      await setDoc(doc(db, "redemptions", c), {
-        receiverPid: myPid,
-        slot: codeSnap.data().slot,
-        review: review.trim(),
-        voided: false,
-        createdAt: serverTimestamp(),
-      });
+      // 인증 문서(받는 사람·코드가 들어 있어 나·마니또·운영자만 읽음)와 익명 피드 글(받는 사람 정보 없음)을 한 묶음으로 쓴다.
+      // 보안 규칙은 둘이 같이 있을 때만 받는다(인증 없이 피드 글만, 또는 그 반대는 거부).
+      const feedId = doc(collection(db, "feed")).id;
+      const batch = writeBatch(db);
+      batch.set(doc(db, "redemptions", c), { receiverPid: myPid, slot, review: review.trim(), voided: false, feedId, createdAt: serverTimestamp() });
+      batch.set(doc(db, "feed", feedId), { slot, review: review.trim(), voided: false, createdAt: serverTimestamp() });
+      await batch.commit();
       setCode("");
       setReview("");
       setMsg({ type: "ok", text: "인증했어요. 응모권 1장이 쌓였어요." });
     } catch (err) {
-      setMsg({ type: "error", text: err.code === "permission-denied" ? "지금은 인증할 수 없는 단계예요." : err.message });
+      setMsg({ type: "error", text: err.code === "permission-denied" ? "지금은 인증할 수 없어요. 미션 진행 기간이 맞는지 확인하고, 계속 안 되면 운영진에게 알려 주세요." : err.message });
     } finally {
       setBusy(false);
     }
@@ -124,16 +181,11 @@ function CodeEntry({ myPid }) {
 
 function MyRedemptions({ myPid }) {
   const [rows, setRows] = useState([]);
-  const [thanks, setThanks] = useState({});
   useEffect(() => {
     return onSnapshot(query(collection(db, "redemptions"), where("receiverPid", "==", myPid)), (s) =>
-      setRows(s.docs.map((d) => ({ code: d.id, ...d.data() })))
+      setRows(s.docs.map((d) => ({ code: d.id, ...d.data() })).sort((a, b) => a.slot - b.slot))
     );
   }, [myPid]);
-  useEffect(() => {
-    const offs = rows.map((r) => onSnapshot(doc(db, "thanks", r.code), (s) => setThanks((p) => ({ ...p, [r.code]: s.exists() ? s.data().text : null }))));
-    return () => offs.forEach((o) => o());
-  }, [rows]);
 
   if (!rows.length) return null;
   return (
@@ -143,7 +195,7 @@ function MyRedemptions({ myPid }) {
           <li key={r.code} className="row-item">
             <p>{r.review}</p>
             {r.voided && <p className="error small">운영진이 무효 처리한 인증이에요.</p>}
-            {thanks[r.code] ? <p className="small muted">보낸 감사 답장: {thanks[r.code]}</p> : <ThanksForm code={r.code} />}
+            {r.feedId && <Thanks feedId={r.feedId} />}
           </li>
         ))}
       </ul>
@@ -151,18 +203,27 @@ function MyRedemptions({ myPid }) {
   );
 }
 
-function ThanksForm({ code }) {
+// 감사 답장은 익명 피드 글에 붙는다(글쓴이만 한 번 쓸 수 있다). 마니또는 자기 미션의 피드 글에서 읽는다.
+function Thanks({ feedId }) {
+  const [sent, setSent] = useState(undefined); // undefined = 불러오는 중, null = 아직 안 씀
   const [text, setText] = useState("");
   const [open, setOpen] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => onSnapshot(doc(db, "feed", feedId), (s) => setSent(s.exists() ? s.data().thanks || null : null), () => setSent(null)), [feedId]);
+
+  if (sent === undefined) return null;
+  if (sent) return <p className="small muted">보낸 감사 답장: {sent}</p>;
   if (!open) return <button className="text-btn" onClick={() => setOpen(true)}>마니또에게 감사 답장 보내기</button>;
   return (
     <form className="inline" onSubmit={async (e) => {
       e.preventDefault();
       if (!text.trim()) return;
-      await setDoc(doc(db, "thanks", code), { text: text.trim(), createdAt: serverTimestamp() });
+      setError("");
+      await updateDoc(doc(db, "feed", feedId), { thanks: text.trim() }).catch(() => setError("보내지 못했어요."));
     }}>
-      <input className="pk-input" value={text} maxLength={200} onChange={(e) => setText(e.target.value)} placeholder="마니또에게 익명으로 전해져요" />
+      <input className="pk-input" value={text} maxLength={200} onChange={(e) => setText(e.target.value)} placeholder="마니또에게 익명으로 전해져요 (피드에도 보여요)" />
       <button className="pk-btn main sm">보내기</button>
+      {error && <span className="error small" role="alert">{error}</span>}
     </form>
   );
 }
