@@ -359,12 +359,45 @@ describe("2. 인증은 나에게 온 코드로만, 피드 글은 내 실제 인�
     await assertFails(updateDoc(doc(db, "redemptions", "B1B1"), { receiverPid: "p004" }));
     await assertFails(updateDoc(doc(db, "feed", FEED_B1), { review: "나".repeat(20) }));
     await assertFails(updateDoc(doc(db, "feed", FEED_B1), { thanks: "운영자가 쓴 답장" }));
-    // 피드에서만 가리기(응모권과 무관), 감사 답장 지우기
-    await assertSucceeds(updateDoc(doc(db, "feed", FEED_B1), { hidden: true }));
+    // 감사 답장 지우기
     await put("feed/" + FEED_B1, { slot: 1, review: review20, voided: false, createdAt: new Date(2026, 10, 1), thanks: "막말 답장" });
     await assertSucceeds(updateDoc(doc(db, "feed", FEED_B1), { thanks: deleteField() }));
     await assertFails(updateDoc(doc(p("p004"), "feed", FEED_B1), { hidden: true }));
     await assertFails(setDoc(doc(db, "feed", "adminpost000"), post(1))); // 운영자도 피드에 글을 만들 수는 없다
+  });
+
+  test("피드에서 가리기 (Admin.jsx Moderation): 후기를 비우고 원문은 운영자만 읽는 hiddenFeed로, 되돌리기는 원문으로만", async () => {
+    const db = admin();
+    const hide = (review = review20, feedReview = "") => {
+      const b = writeBatch(db);
+      b.set(doc(db, "hiddenFeed", FEED_B1), { review });
+      b.update(doc(db, "feed", FEED_B1), { hidden: true, review: feedReview });
+      return b.commit();
+    };
+    await assertFails(updateDoc(doc(db, "feed", FEED_B1), { hidden: true })); // 표시만 하면 직접 요청으로 내용이 보이므로 거부
+    await assertFails(updateDoc(doc(db, "feed", FEED_B1), { hidden: true, review: "" })); // 원문을 옮기지 않고 지우기
+    await assertFails(hide("나".repeat(20))); // 옮긴 원문이 실제 후기와 다름
+    await assertFails(hide(review20, "가린 글")); // 후기를 다른 글로 바꾸기
+    await assertSucceeds(hide());
+    // 참여자에게는 빈 후기만 보이고, 원문은 못 읽는다
+    const seen = await assertSucceeds(getDoc(doc(p("p004"), "feed", FEED_B1)));
+    if (seen.data().review !== "" || seen.data().hidden !== true) throw new Error("가린 글의 후기가 남아 있음");
+    await assertFails(getDoc(doc(p("p004"), "hiddenFeed", FEED_B1)));
+    await assertFails(getDoc(doc(p("p003"), "hiddenFeed", FEED_B1))); // 글쓴이도
+    await assertFails(setDoc(doc(p("p003"), "hiddenFeed", FEED_B1), { review: "바꿔치기" }));
+    await assertSucceeds(getDoc(doc(db, "hiddenFeed", FEED_B1)));
+    // 가린 글에는 감사 답장을 붙일 수 없다(후기가 인증 문서와 달라짐)
+    await assertFails(updateDoc(doc(p("p003"), "feed", FEED_B1), { thanks: "고마워요" }));
+    // 다시 보이기: hiddenFeed의 원문으로만
+    await assertFails(updateDoc(doc(db, "feed", FEED_B1), { hidden: false, review: "나".repeat(20) }));
+    await assertFails(updateDoc(doc(db, "feed", FEED_B1), { hidden: true, review: review20 })); // 가린 채로 내용 되살리기
+    const b = writeBatch(db);
+    b.update(doc(db, "feed", FEED_B1), { hidden: false, review: review20 });
+    b.delete(doc(db, "hiddenFeed", FEED_B1));
+    await assertSucceeds(b.commit());
+    // 예전 방식으로 가린 글(hidden만 있고 후기가 남은 것)은 다시 보이기만 된다
+    await put("feed/" + FEED_B1, { slot: 1, review: review20, voided: false, hidden: true, createdAt: new Date(2026, 10, 1) });
+    await assertSucceeds(updateDoc(doc(db, "feed", FEED_B1), { hidden: false }));
   });
 
   test("감사 답장은 그 글을 쓴 받는 사람만, 한 번만 (Detective.jsx ThanksForm)", async () => {

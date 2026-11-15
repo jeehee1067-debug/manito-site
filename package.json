@@ -9,7 +9,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --test tests/logic.test.js",
-    "test:rules": "firebase emulators:exec --only firestore --project demo-manito \"node --test tests/rules.test.js\""
+    "test:rules": "firebase emulators:exec --only firestore --project demo-manito \"node --test tests/rules.test.js\"",
+    "test:e2e": "node e2e/run-all.cjs"
   },
   "dependencies": {
     "firebase": "10.14.1",

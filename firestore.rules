@@ -41,7 +41,7 @@ service cloud.firestore {
     // 게시된 규칙의 버전 확인용. 운영 화면이 이 경로를 읽어 보고, 거부되면 "콘솔의 규칙이 예전 것"이라고 알려 준다.
     // 화면이 쓰는 경로·값의 모양을 바꿀 때 src/lib/constants.js의 RULES_VERSION과 같이 올린다.
     match /rulesVersion/{v} {
-      allow get: if isAdmin() && v == '20261115';
+      allow get: if isAdmin() && v == '20261116';
     }
 
     // ── 설정 ──────────────────────────────────────────────────────────────
@@ -264,11 +264,26 @@ service cloud.firestore {
         && myRedemptionAfter(resource.data.slot).feedId == id
         && myRedemptionAfter(resource.data.slot).review == resource.data.review;
       // 운영자: 무효 처리(인증 문서와 같이 바꾼다), 피드에서만 가리기(hidden, 응모권과 무관), 감사 답장 지우기
+      //  가리기: 후기를 비우고(review == '') 원문은 운영자만 읽는 hiddenFeed/{id}로 옮긴다. 피드 글은 참여자 누구나 읽을 수 있어서,
+      //  hidden 표시만 하면 직접 요청으로는 내용이 그대로 보이기 때문이다. 다시 보이기는 hiddenFeed의 원문으로만 되돌린다.
       allow update: if isAdmin()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['voided', 'hidden', 'thanks'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['voided', 'hidden', 'thanks', 'review'])
         && request.resource.data.voided is bool
         && request.resource.data.get('hidden', false) is bool
-        && (!('thanks' in request.resource.data) || request.resource.data.thanks == resource.data.get('thanks', null));
+        && (!('thanks' in request.resource.data) || request.resource.data.thanks == resource.data.get('thanks', null))
+        && (request.resource.data.get('hidden', false) == false || request.resource.data.review == '')
+        && (request.resource.data.review == resource.data.review
+            || (request.resource.data.review == ''
+                && getAfter(/databases/$(database)/documents/hiddenFeed/$(id)).data.review == resource.data.review)
+            || (resource.data.review == ''
+                && request.resource.data.review == get(/databases/$(database)/documents/hiddenFeed/$(id)).data.review));
+    }
+    // 가린 피드 글의 원문(운영자만). { review }
+    match /hiddenFeed/{id} {
+      allow read, delete: if isAdmin();
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['review'])
+        && request.resource.data.review is string;
     }
 
     // 마니또 -> 받는 사람 알림/쪽지. 보낸 사람 정보는 저장하지 않는다.
