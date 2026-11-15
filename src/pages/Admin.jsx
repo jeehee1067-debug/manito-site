@@ -763,8 +763,24 @@ function Moderation() {
     if (r.feedId) b.update(doc(db, "feed", r.feedId), { voided: !r.voided });
     await b.commit();
   };
-  // 피드에서만 가리기(응모권과 무관): 막말 후기로 마니또의 응모권을 깎으려는 경우에도 쓸 수 있게 무효 처리와 따로 둔다
-  const toggleHide = (r) => updateDoc(doc(db, "feed", r.feedId), { hidden: !feed[r.feedId]?.hidden });
+  // 피드에서만 가리기(응모권과 무관): 막말 후기로 마니또의 응모권을 깎으려는 경우에도 쓸 수 있게 무효 처리와 따로 둔다.
+  // 피드 글은 참여자 누구나 읽을 수 있어서, 가릴 때는 후기를 비우고 원문은 운영자만 읽는 hiddenFeed로 옮긴다(보안 규칙이 확인).
+  const toggleHide = async (r) => {
+    const f = feed[r.feedId];
+    const b = writeBatch(db);
+    if (!f.hidden) {
+      b.set(doc(db, "hiddenFeed", r.feedId), { review: f.review });
+      b.update(doc(db, "feed", r.feedId), { hidden: true, review: "" });
+    } else if (f.review === "") {
+      const orig = await getDoc(doc(db, "hiddenFeed", r.feedId));
+      if (!orig.exists()) return window.alert("가린 후기의 원문을 찾지 못했어요.");
+      b.update(doc(db, "feed", r.feedId), { hidden: false, review: orig.data().review });
+      b.delete(doc(db, "hiddenFeed", r.feedId));
+    } else {
+      b.update(doc(db, "feed", r.feedId), { hidden: false }); // 예전 방식으로 가린 글(후기가 남아 있음)
+    }
+    await b.commit().catch(() => window.alert("바꾸지 못했어요. 잠시 뒤 다시 눌러 주세요."));
+  };
   const removeThanks = (r) => {
     if (!window.confirm("이 감사 답장을 지울까요? 받는 사람은 다시 쓸 수 없어요.")) return;
     return updateDoc(doc(db, "feed", r.feedId), { thanks: deleteField() });

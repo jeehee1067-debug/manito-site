@@ -11,7 +11,7 @@ import leader3 from "./assets/xmas/leader3.png";
 import leader4 from "./assets/xmas/leader4.png";
 
 // 로그인 화면 주인공: 방탈출의 파트장님·PL님(public/char/boss1~4.png)에 크리스마스 소품을 얹은 그림.
-// 순서: 김주헌 파트장님(루돌프), 김진석 파트장님(엘프 모자), 윤지혜 파트장님(털모자), 손승준 PL님(산타 모자).
+// 순서: boss1(루돌프 머리띠), boss2(엘프 모자), boss3(털모자), boss4(산타 모자). boss4가 PL님.
 // 시즌이 끝나면 Login.jsx에서 원본(public/char/boss1~4.png)을 쓰면 된다.
 export const XMAS_LEADERS = [leader1, leader2, leader3, leader4];
 

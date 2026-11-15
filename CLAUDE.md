@@ -20,6 +20,7 @@ npm run build
 
 GitHub Actions도 같은 순서로 돌린다(main: 통과해야 배포, 다른 브랜치: 테스트만).
 화면 점검은 `npm run dev:emu` — 실제 프로젝트 대신 로컬 에뮬레이터(로그인 9099, Firestore 8080)에 붙는다.
+화면 흐름 검증은 `npm run dev:emu`를 띄운 채 `npm run test:e2e`(`e2e/`, Playwright, CI에서는 안 돌림). **화면 문구·버튼·쓰는 값을 바꾸면 이 스크립트도 같이 고치고 돌린다.**
 
 ## 가장 중요한 것: 보안 규칙과 코드가 어긋나지 않게
 
@@ -38,7 +39,8 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 - **쓰기 횟수 `n`**: 참여자가 고치는 문서(`users`·`avatars`·`profiles`·`clues`·`giverMissions`·`progress`·`reports`·`guesses`·`votes`)는 쓸 때마다 `n`을 정확히 1 올려야 한다(규칙 `bumped()`, 화면은 `src/lib/writes.js`의 `bump()` = `increment(1)`). 운영 화면 "쓰기 횟수"가 이 값으로 한도 소진을 일으킨 사람을 찾는다. **이 문서들에 쓰는 화면 코드를 새로 만들면 `...bump()`를 꼭 넣는다**(빠지면 거부됨). 한 번만 만들 수 있는 문서(`deliveries`·`redemptions`·`feed`·`noteFlags`)에는 없다.
 - 시각 필드(`createdAt`, `lastSeen`, `noteFlags.at`)는 `request.time`(= `serverTimestamp()`)만 받는다.
 - 명단 원본(`roster`)은 운영자만 읽는다(연결된 계정 uid, 수상 제외·중도 이탈 표시가 들어 있다). 참여자는 `public/roster` 요약만.
-- 인증 문서(`redemptions/{코드}`: `receiverPid, slot, review, voided, feedId, cardMatch, createdAt`)는 인증한 받는 사람(get·자기 것 목록), 그 코드를 가진 마니또(get), 운영자만 읽는다. 익명 피드는 **별도 문서 `feed/{무작위ID}`**(`slot, review, voided, createdAt, thanks?, hidden?` — 받는 사람·코드 없음)이고, 인증과 한 묶음(batch)으로만 만들 수 있다: 규칙이 `receiverCodes/{받는사람}`(giverCodes를 받는 사람 기준으로 뒤집은 것, 참여자는 못 읽음)로 그 사람의 코드를 찾아 `getAfter(redemptions/코드).feedId == 이 글`인지, 그 글이 이번 묶음에서 새로 생기는지 확인한다(이미 있는 남의 글을 가리키기 방지). 감사 답장은 글쓴이가 자기 `feed` 글의 `thanks`를 한 번만 쓴다(후기도 인증 문서와 같아야 함). 운영자의 무효 처리는 두 문서의 `voided`를 같이 바꾸고, 운영자는 피드 `hidden`(피드에서만 가림)·`thanks` 지우기·인증 `cardMatch` 고치기를 할 수 있다.
+- 인증 문서(`redemptions/{코드}`: `receiverPid, slot, review, voided, feedId, cardMatch, createdAt`)는 인증한 받는 사람(get·자기 것 목록), 그 코드를 가진 마니또(get), 운영자만 읽는다. 익명 피드는 **별도 문서 `feed/{무작위ID}`**(`slot, review, voided, createdAt, thanks?, hidden?` — 받는 사람·코드 없음)이고, 인증과 한 묶음(batch)으로만 만들 수 있다: 규칙이 `receiverCodes/{받는사람}`(giverCodes를 받는 사람 기준으로 뒤집은 것, 참여자는 못 읽음)로 그 사람의 코드를 찾아 `getAfter(redemptions/코드).feedId == 이 글`인지, 그 글이 이번 묶음에서 새로 생기는지 확인한다(이미 있는 남의 글을 가리키기 방지). 감사 답장은 글쓴이가 자기 `feed` 글의 `thanks`를 한 번만 쓴다(후기도 인증 문서와 같아야 함). 운영자의 무효 처리는 두 문서의 `voided`를 같이 바꾸고, 운영자는 피드 가리기·`thanks` 지우기·인증 `cardMatch` 고치기를 할 수 있다.
+- 피드 가리기: 피드 글은 참여자 누구나 읽으므로 `hidden: true`와 함께 `review`를 `''`로 비우고 원문은 `hiddenFeed/{id}`(`review`, 운영자만)로 옮긴다(한 묶음, 규칙이 `getAfter`로 원문이 같은지 확인). 다시 보이기는 `hiddenFeed`의 원문으로만, 그리고 `hiddenFeed`를 지운다. 가린 글은 후기가 인증 문서와 달라져서 감사 답장도 막힌다.
 - `cardMatch`: 받는 사람이 인증할 때 받은 것이 마니또가 고른 카드(완료 알림의 `card`)와 맞는지. `false`면 도전 추가분이 없다(`scoring.js`). 예전 인증에는 없고 없으면 맞는 것으로 본다.
 - `receiverCodes`는 배정할 때 같이 쓴다. 없으면 인증(피드 글 확인)이 거부되므로, 예전 방식으로 배정된 자료는 미션 시작 뒤 운영 화면(`Pairs`)이 채워 넣는다.
 - 인증(`redemptions`), 완료 알림·쪽지(`deliveries`), 카드 고르기·완료 표시(`giverMissions`)는 **열린 주차(`config.week`)까지만** 되고, `giverMissions`는 phase 1에만 쓴다. 닫힌 주차의 값은 "그대로 두는 것"만 허용해서, 운영자가 주차를 내려도 다른 주차 쓰기가 막히지 않는다. `progress.doneCount`도 열린 주차 수를 넘겨 올릴 수 없다.
@@ -67,7 +69,7 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 - `App`은 로그인 상태만 보고, 로그인한 사람의 구독·화면은 `Session`(key = uid)에 있다. 사람이 바뀌면 통째로 새로 만들어진다.
 - 가입·운영자 계정 비밀번호는 8자 이상, 글자+숫자(`validatePassword`, 화면에서만). "로그인 유지"는 기본 꺼짐(기기마다 `localStorage` `manito:keep`에 기억).
 - 화면 가리기: 내 미션의 대상 이름·캐릭터는 기본으로 가리고 60초 보기, 운영 화면 짝 현황은 접힘, 초대 코드·메일은 "보기"를 눌러야 보임.
-- App Check는 `src/firebase.config.js`의 `appCheckSiteKey`가 있을 때만 켜진다(에뮬레이터 제외). 사내망에서 reCAPTCHA가 열리는지 확인하기 전에는 콘솔에서 적용(enforce)을 켜지 말 것(README "App Check").
+- App Check는 `src/firebase.config.js`의 `appCheckSiteKey`가 있을 때만 켜진다(에뮬레이터 제외). 제공자는 `appCheckProvider`(기본 `"enterprise"` = reCAPTCHA Enterprise, `"v3"`도 가능). 사내망에서 reCAPTCHA가 열리는지 확인하기 전에는 콘솔에서 적용(enforce)을 켜지 말 것(README "App Check").
 - 내 `users` 문서는 서버 저장이 확인된 스냅샷만 반영한다(`hasPendingWrites` 무시). 가입 직후 로컬 스냅샷으로 화면을 열면 규칙이 아직 "연결 전"으로 보고 내 배정 읽기를 거부한다(실제로 재현된 버그).
 
 ## 읽기 수 (무료 한도 하루 5만 건)
@@ -119,6 +121,7 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 | `src/firebase.js` | Firebase 연결. `npm run dev:emu`(`.env.emulator`)일 때만 에뮬레이터 연결. `appCheckSiteKey`가 있으면 App Check(reCAPTCHA v3) |
 | `src/xmas.jsx`, `src/xmas.css`, `src/assets/xmas/` | 연말·크리스마스 장식(시즌 한정). 빼는 방법은 README "연말 장식" |
 | `tests/rules.test.js` | 보안 규칙 테스트 |
+| `e2e/` | 화면 흐름 검증(`npm run test:e2e`, `run-all.cjs`가 7개를 차례로). 로컬 에뮬레이터 데이터를 지우고 시작한다 |
 | `src/pages/*` | 화면 |
 | `src/styles.css` | 방탈출 `assets/css/style.css`의 색·테두리·버튼·대사창 값을 따름. 시즌 장식은 여기 넣지 말고 `xmas.css`에 |
 | `public/char/p1~p4.png` | 방탈출 참가자 캐릭터 |
@@ -128,5 +131,5 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 
 - 사내망에서 Firebase 로그인(`identitytoolkit.googleapis.com`)과 Firestore(`firestore.googleapis.com`) 접속 확인, 비밀번호 재설정 메일 수신(회사 메일 차단 여부)과 링크(`프로젝트ID.firebaseapp.com`) 열림 확인
 - 실제 Firebase 프로젝트에 연결한 상태의 화면 점검. 에뮬레이터로는 6명·3개 파트 기준 전체 흐름(운영자 설정 → 명단 → 배정 → 가입 → 미션 → 인증·피드·감사 답장 → 쪽지 더 보내기·쪽지 신고·가리기 → 카드와 다름 인증 → 공동 운영자 지정 → 받은 게 없어요 신고·확인 → 단서·파트 순위 발표 → 지목 → 투표 → 집계 전 확인 → 집계·검산 → 숫자 넣고 추첨·추첨 검증)을 화면으로 진행해 확인했다(콘솔 오류 0건). 실제 프로젝트·사내망은 아직.
-- App Check: 코드만 있고 키가 비어 있어 꺼져 있다. 무료 요금제에서 적용되는지, 사내망에서 reCAPTCHA가 열리는지 확인 안 됨.
+- App Check: 코드만 있고 키가 비어 있어 꺼져 있다(reCAPTCHA Enterprise 기본). 실제 프로젝트에서 켰을 때의 동작, 사내망에서 reCAPTCHA가 열리는지 확인 안 됨.
 - 읽기 반복으로 무료 한도를 소진하는 것은 막지 못한다(서버 코드 필요).

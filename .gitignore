@@ -3,3 +3,5 @@ dist/
 # Firebase 에뮬레이터·CLI 로그
 *-debug.log
 .firebase/
+# 화면 흐름 검증 스크린샷
+e2e/shots/
