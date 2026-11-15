@@ -39,7 +39,7 @@ export const LEVEL_LABEL = { easy: "쉬움", normal: "보통", hard: "도전" };
 export const SPEND_GUIDE_WON = 5000;
 
 // 완료한 주차에 "쪽지 더 보내기"로 보낼 수 있는 추가 쪽지 수(주차마다). 3일 연속 쪽지 카드를 할 수 있게 둔 것이라 넉넉히 잡았다.
-// 화면에서만 세는 값이다(보안 규칙은 쪽지 개수를 세지 못한다).
+// firestore.rules에도 같은 숫자(5)가 적혀 있다(giverMissions.notes와 쪽지 문서 ID 순번으로 센다). 바꾸면 규칙도 같이 고칠 것 — npm test가 같은지 확인한다.
 export const EXTRA_NOTES_MAX = 5;
 
 // 게시돼 있어야 하는 보안 규칙 버전. firestore.rules의 rulesVersion과 같아야 한다.
