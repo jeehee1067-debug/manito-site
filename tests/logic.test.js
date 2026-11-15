@@ -5,7 +5,7 @@ import { computeTickets, weightedDraw, pickMostTickets, rankBestManito, tallyVot
 import { readFileSync } from "node:fs";
 import { seededRandom } from "../src/lib/random.js";
 import { parseRosterLine, rosterSummary, summaryToList, sameSummary } from "../src/lib/roster.js";
-import { MISSION_CARDS, PROFILE_QUESTIONS, CLUE_COUNT, profileAnswerError } from "../src/lib/constants.js";
+import { MISSION_CARDS, PROFILE_QUESTIONS, CLUE_COUNT, EXTRA_NOTES_MAX, profileAnswerError } from "../src/lib/constants.js";
 import { pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../src/lib/pairs.js";
 
 // 참여자 54명(부서 56명 중 운영자·PL님 제외). 파트 크기를 주면 { pid, part } 목록을 만든다.
@@ -648,6 +648,13 @@ test("추첨: 현장에서 정한 숫자와 응모권만으로 결과가 정해�
   assert.equal(verifyDraws({ ...tickets, [t4[0]]: 0 }, draws, order)[0].ok, false);
   // 예전 방식(배열만 저장)은 검증할 수 없음으로 표시
   assert.deepEqual(verifyDraws(tickets, { t4: t4 }, order).map((x) => x.ok), [null]);
+});
+
+test("보안 규칙의 추가 쪽지 한도가 EXTRA_NOTES_MAX와 같다", () => {
+  const rules = readFileSync(new URL("../firestore.rules", import.meta.url), "utf8");
+  const limits = [...rules.matchAll(/(?:noteCount\(getAfter\(myMissions\(\)\)\.data, string\(request\.resource\.data\.slot\)\)|n1) <= (\d+)/g)].map((m) => Number(m[1]));
+  assert.equal(limits.length, 2, "규칙에서 쪽지 한도 두 곳(deliveries, giverMissions)을 찾지 못함");
+  limits.forEach((n) => assert.equal(n, EXTRA_NOTES_MAX));
 });
 
 test("보안 규칙의 단서 형식(clueAnswerOk)이 프로필 문항(PROFILE_QUESTIONS)과 같다", () => {
