@@ -4,6 +4,8 @@ rules_version = '2';
 // 단계는 한 칸씩 앞으로만 넘어간다.
 // 운영자(공동 운영자 포함)는 참여하지 않는 계정이다. 명단에 연결할 수 없고, 짝·진행 상황·지목을 언제든 읽는다.
 // 참여자는 자기 것만 읽는다. 익명 피드(feed)에는 받는 사람 정보가 없다.
+// 참여자가 반복해서 고칠 수 있는 문서에는 쓴 횟수(n)를 1씩 올려서 같이 써야 한다(bumped).
+// 무료 한도(하루 쓰기 2만 건)를 일부러 소진하는 사람이 있으면 운영 화면에서 누구 문서인지 보인다.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -13,6 +15,9 @@ service cloud.firestore {
     // 열린 주차(1~3). 인증·완료 알림·카드 고르기는 이 주차까지만 된다.
     function week() { return cfg().get('week', 1); }
     function isAdmin() { return signedIn() && request.auth.uid in cfg().admins; }
+    // 처음 운영자(admins[0]). 운영자 목록, 초대 코드, 계정 연결 해제처럼 "누가 누구인지"를 바꾸는 일은 처음 운영자만 한다
+    // (공동 운영자가 자기 다른 계정을 참여자로 끼워 넣거나 운영자를 늘리는 것을 막는다).
+    function isOwner() { return signedIn() && request.auth.uid == cfg().admins[0]; }
     function linked() { return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)); }
     // 참여자(초대 코드로 명단에 연결된 계정) 또는 운영자. 가입만 한 외부 계정은 아무것도 못 읽게 한다.
     function member() { return linked() || isAdmin(); }
@@ -25,11 +30,18 @@ service cloud.firestore {
     function myGiverCodes() { return get(/databases/$(database)/documents/giverCodes/$(myPid())).data.codes; }
     // 내 앞으로 발급된 코드(내 마니또가 가진 코드). 참여자는 이 문서를 읽을 수 없고 규칙만 쓴다.
     function myInboxCodes() { return get(/databases/$(database)/documents/receiverCodes/$(myPid())).data.codes; }
+    function myMissions() { return /databases/$(database)/documents/giverMissions/$(myPid()); }
+    // 쓴 횟수(n)를 정확히 1 올렸는지. 새 문서는 1, 예전 문서(n 없음)는 0에서 시작한다.
+    function bumped() {
+      return request.resource.data.get('n', 0) == (resource == null ? 0 : resource.data.get('n', 0)) + 1;
+    }
+    // 문자열 길이 제한
+    function shortStr(v, max) { return v is string && v.size() <= max; }
 
     // 게시된 규칙의 버전 확인용. 운영 화면이 이 경로를 읽어 보고, 거부되면 "콘솔의 규칙이 예전 것"이라고 알려 준다.
     // 화면이 쓰는 경로·값의 모양을 바꿀 때 src/lib/constants.js의 RULES_VERSION과 같이 올린다.
     match /rulesVersion/{v} {
-      allow get: if signedIn() && v == '20261113';
+      allow get: if isAdmin() && v == '20261115';
     }
 
     // ── 설정 ──────────────────────────────────────────────────────────────
@@ -41,42 +53,67 @@ service cloud.firestore {
         || (after == before + 1
             && (after < 5 || exists(/databases/$(database)/documents/results/public)));
     }
-    // 운영자는 한 번에 한 계정씩 늘릴 수 있고, 명단에 연결된 계정(참여자)은 운영자가 될 수 없다. 운영자가 0명이 될 수 없다.
+    // 운영자 목록(과 메모)은 처음 운영자(admins[0])만 바꾼다. 처음 운영자는 목록에서 빠지지 않는다(공동 운영자가 내보낼 수 없다).
+    // 한 번에 한 계정씩 늘릴 수 있고, 명단에 연결된 계정(참여자)은 운영자가 될 수 없다.
     function adminsOk() {
-      let added = request.resource.data.admins.removeAll(resource.data.admins);
-      return request.resource.data.admins is list
-        && request.resource.data.admins.size() > 0
-        && (added.size() == 0
-            || (added.size() == 1 && !exists(/databases/$(database)/documents/users/$(added[0]))));
+      let before = resource.data.admins;
+      let after = request.resource.data.admins;
+      let added = after.removeAll(before);
+      return (after == before
+              && request.resource.data.get('adminNotes', {}) == resource.data.get('adminNotes', {}))
+        || (request.auth.uid == before[0]
+            && after is list
+            && after.size() > 0
+            && after[0] == before[0]
+            && (added.size() == 0
+                || (added.size() == 1 && !exists(/databases/$(database)/documents/users/$(added[0])))));
     }
-    // 주차는 1~3. 단서는 줄일 수 없고, 주차마다 2개까지만 공개된다(공개 개수 ≤ 2 × 주차).
+    // 주차는 1~3이고 한 번에 한 칸씩만 올린다(내리는 것은 된다). 단서는 줄일 수 없고, 한 번에 2개까지, 주차마다 2개까지만 공개된다(공개 개수 ≤ 2 × 주차).
     function weekCluesOk() {
       let w = request.resource.data.get('week', 1);
+      let w0 = resource.data.get('week', 1);
       let c = request.resource.data.get('cluesReleased', 0);
       let c0 = resource.data.get('cluesReleased', 0);
-      return w is int && w >= 1 && w <= 3
-        && c is int && c >= c0 && c <= 6
+      return w is int && w >= 1 && w <= 3 && w <= w0 + 1
+        && c is int && c >= c0 && c <= 6 && c <= c0 + 2
         && (c == c0 || c <= 2 * w);
     }
+    // 배정과 관련된 값(배정 회차, 같은 파트 제외 여부, 같은 근무지 여부)은 준비 단계에서만 바뀐다
+    // (미션 중에 회차를 올리면 파트 단서를 못 읽게 되고, 공개된 단서를 다시 쓸 수 있게 된다).
+    function assignFieldsOk() {
+      return resource.data.phase == 0
+        || (request.resource.data.get('assignVer', 0) == resource.data.get('assignVer', 0)
+            && request.resource.data.get('partExcluded', null) == resource.data.get('partExcluded', null)
+            && request.resource.data.get('siteMatched', null) == resource.data.get('siteMatched', null));
+    }
+    // 설정은 참여자·운영자만 읽는다(공지, 운영자 계정 번호·메모가 들어 있다).
+    // 연결 전 계정은 "아직 설정이 없는지"만 알 수 있다(문서가 없을 때만 읽힘 → 첫 운영자 설정 화면).
     match /config/app {
-      allow read: if signedIn();
+      allow get: if member() || (signedIn() && resource == null);
       allow create: if signedIn()
         && request.resource.data.admins == [request.auth.uid]
         && request.resource.data.phase == 0;
-      allow update: if isAdmin() && phaseStepOk() && adminsOk() && weekCluesOk();
+      allow update: if isAdmin() && phaseStepOk() && adminsOk() && weekCluesOk() && assignFieldsOk();
     }
 
     // ── 명단·계정 ─────────────────────────────────────────────────────────
     // 명단 원본(연결된 계정 uid, 수상 제외·중도 이탈 표시 포함)은 운영자만 읽는다.
     // 참여자 화면은 public/roster 요약(이름·근무지·파트)만 읽고, 초대 코드 연결은 명단을 읽지 않고 바로 쓴다.
+    // 운영자는 명단을 고칠 수 있지만 연결된 계정(uid)은 비우는 것(연결 해제)만, 처음 운영자만 한다(다른 계정으로 바꿔 끼워 사칭하는 것 방지).
+    // 초대 코드로 연결할 때는 아직 아무 이름에도 연결되지 않은 계정만(이미 연결된 사람이 남의 코드로 두 사람 몫을 가져가지 못하게).
     match /roster/{pid} {
       allow read: if isAdmin();
-      allow create, delete: if isAdmin() && phase() == 0;
-      allow update: if isAdmin()
+      allow create: if isOwner() && phase() == 0 && request.resource.data.get('uid', null) == null;
+      allow delete: if isOwner() && phase() == 0;
+      allow update: if (isAdmin()
+            && (request.resource.data.get('uid', null) == resource.data.get('uid', null)
+                || (isOwner() && request.resource.data.get('uid', null) == null)))
         || (signedIn()
             && resource.data.uid == null
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['uid', 'inviteUsed'])
             && request.resource.data.uid == request.auth.uid
+            && (!exists(/databases/$(database)/documents/users/$(request.auth.uid))
+                || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.personId == pid)
             && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteUsed)).data.personId == pid);
     }
 
@@ -88,9 +125,11 @@ service cloud.firestore {
     }
 
     // 초대 코드 -> 명단 연결
+    // 초대 코드: 만들기·지우기는 처음 운영자만
     match /invites/{code} {
       allow get: if signedIn();
-      allow list, write: if isAdmin();
+      allow list: if isAdmin();
+      allow write: if isOwner();
     }
 
     // 계정 ↔ 명단 연결. 본인과 운영자만 읽는다(운영 화면에 "연결된 메일"로 보임).
@@ -99,32 +138,48 @@ service cloud.firestore {
       return request.resource.data.get('email', null) == null
         || request.resource.data.email == request.auth.token.email;
     }
+    function userShapeOk() {
+      return request.resource.data.keys().hasOnly(['personId', 'eliminated', 'email', 'n'])
+        && request.resource.data.get('eliminated', []) is list
+        && request.resource.data.get('eliminated', []).size() <= 100;
+    }
     match /users/{uid} {
       allow read: if request.auth.uid == uid || isAdmin();
       // 운영자 계정은 명단에 연결할 수 없다(운영자는 참여하지 않는다).
       allow create: if request.auth.uid == uid
         && !isAdmin()
         && get(/databases/$(database)/documents/roster/$(request.resource.data.personId)).data.uid == uid
-        && emailOk();
+        && emailOk() && userShapeOk() && bumped();
       allow update: if request.auth.uid == uid
         && request.resource.data.personId == resource.data.personId
-        && emailOk();
-      // 운영자 "연결 해제": 엉뚱한 사람이 연결됐거나 메일·비밀번호 문제로 새 계정으로 옮길 때.
+        && emailOk() && userShapeOk() && bumped();
+      // 처음 운영자의 "연결 해제": 엉뚱한 사람이 연결됐거나 메일·비밀번호 문제로 새 계정으로 옮길 때.
       // 지우면 그 계정은 다시 "연결 전"이 되어 아무것도 못 읽는다.
-      allow delete: if isAdmin();
+      allow delete: if isOwner();
     }
 
     // 캐릭터 선택: 참여자는 모두 볼 수 있고 본인만 바꾼다.
     match /avatars/{pid} {
       allow read: if member();
-      allow write: if linked() && myPid() == pid
+      allow create, update: if linked() && myPid() == pid
+        && request.resource.data.keys().hasOnly(['avatar', 'n'])
         && request.resource.data.avatar is int
-        && request.resource.data.avatar >= 0 && request.resource.data.avatar < 8;
+        && request.resource.data.avatar >= 0 && request.resource.data.avatar < 8
+        && bumped();
     }
 
-    // 프로필 답변은 본인만. 단서는 clues 컬렉션으로 따로 전달된다.
+    // 프로필 답변: 본인이 쓰고, 운영자도 읽는다(거짓 단서 확인용. 운영자는 참여하지 않는다). 단서는 clues 컬렉션으로 따로 전달된다.
+    function answersOk(a) {
+      return a is list && a.size() == 6
+        && shortStr(a[0], 60) && shortStr(a[1], 60) && shortStr(a[2], 60)
+        && shortStr(a[3], 60) && shortStr(a[4], 60) && shortStr(a[5], 60);
+    }
     match /profiles/{pid} {
-      allow read, write: if linked() && myPid() == pid;
+      allow read: if (linked() && myPid() == pid) || isAdmin();
+      allow create, update: if linked() && myPid() == pid
+        && request.resource.data.keys().hasOnly(['answers', 'updatedAt', 'n'])
+        && answersOk(request.resource.data.answers)
+        && bumped();
     }
 
     // ── 짝과 코드 ─────────────────────────────────────────────────────────
@@ -163,7 +218,9 @@ service cloud.firestore {
       allow create: if linked() && phase() == 1
         && codeDoc(code).receiverPid == myPid()
         && codeDoc(code).slot <= week()
-        && request.resource.data.keys().hasOnly(['receiverPid', 'slot', 'review', 'voided', 'feedId', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['receiverPid', 'slot', 'review', 'voided', 'feedId', 'createdAt', 'cardMatch'])
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.get('cardMatch', true) is bool
         && request.resource.data.receiverPid == myPid()
         && request.resource.data.slot == codeDoc(code).slot
         && request.resource.data.review is string
@@ -172,10 +229,14 @@ service cloud.firestore {
         && request.resource.data.voided == false
         && request.resource.data.feedId is string
         && request.resource.data.feedId.size() >= 10 && request.resource.data.feedId.size() <= 40
-        // 피드 글과 한 묶음(batch)으로만 만들 수 있다
+        // 피드 글과 한 묶음(batch)으로만 만들 수 있다: 같은 묶음에서 새로 생기는 글이어야 한다(남의 기존 글을 가리킬 수 없다)
+        && !exists(/databases/$(database)/documents/feed/$(request.resource.data.feedId))
         && existsAfter(/databases/$(database)/documents/feed/$(request.resource.data.feedId));
+      // 운영자: 무효 처리, "카드와 다름" 판정 고치기(도전 추가분)
       allow update: if isAdmin()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['voided']);
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['voided', 'cardMatch'])
+        && request.resource.data.voided is bool
+        && request.resource.data.get('cardMatch', true) is bool;
     }
 
     // 익명 피드. 받는 사람 정보도 코드도 없다: { slot, review, voided, createdAt, thanks? }, 문서 ID는 무작위.
@@ -200,38 +261,91 @@ service cloud.firestore {
         && request.resource.data.thanks is string
         && request.resource.data.thanks.size() > 0
         && request.resource.data.thanks.size() <= 200
-        && myRedemptionAfter(resource.data.slot).feedId == id;
-      // 운영자의 인증 무효 처리(인증 문서와 같이 바꾼다)
+        && myRedemptionAfter(resource.data.slot).feedId == id
+        && myRedemptionAfter(resource.data.slot).review == resource.data.review;
+      // 운영자: 무효 처리(인증 문서와 같이 바꾼다), 피드에서만 가리기(hidden, 응모권과 무관), 감사 답장 지우기
       allow update: if isAdmin()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['voided']);
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['voided', 'hidden', 'thanks'])
+        && request.resource.data.voided is bool
+        && request.resource.data.get('hidden', false) is bool
+        && (!('thanks' in request.resource.data) || request.resource.data.thanks == resource.data.get('thanks', null));
     }
 
     // 마니또 -> 받는 사람 알림/쪽지. 보낸 사람 정보는 저장하지 않는다.
-    //  mission: 1·2주차 완료 알림, praise: 3주차 칭찬 카드, note: 완료한 주차에 더 보내는 쪽지(3일 연속 쪽지 카드용)
+    //  mission: 1·2주차 완료 알림, praise: 3주차 칭찬 카드
+    //    → 문서 ID가 "받는사람_주차"로 정해져 있어 주차마다 한 번만 만들 수 있고, 완료 표시(giverMissions.done)와 한 묶음으로만 만든다.
+    //      (완료 표시 없이 알림만 보내 받는 사람의 보상을 막고 운영자 화면에는 안 보이게 하는 것을 막는다)
+    //  note: 완료한 주차에 더 보내는 쪽지(3일 연속 쪽지 카드용). giverMissions.notes[주차]를 1 올리는 것과 한 묶음으로만, 주차마다 5건까지.
+    // 운영자는 언제든 읽고(괴롭힘 확인), 숨길 수 있다(hidden). 받는 사람은 쪽지를 신고할 수 있다(noteFlags).
+    function noteCount(d, s) { return d.get(['notes', s], 0); }
+    //  쪽지 문서 ID도 "받는사람_주차_n순번"으로 정해져 있어(순번 = 쪽지 수) 개수를 속일 수 없다.
+    //  mission 알림에는 마니또가 고른 카드(card: 난이도·내용)가 같이 간다(받는 사람이 받은 것과 맞는지 확인 → 도전 추가분).
+    function missionCardOk(slot) {
+      let ch = choiceIn(getAfter(myMissions()).data, slot);
+      return ch != null
+        && request.resource.data.card is map
+        && request.resource.data.card.keys().hasOnly(['level', 'text'])
+        && request.resource.data.card.level == ch.level
+        && request.resource.data.card.text == ch.text;
+    }
     match /deliveries/{id} {
       allow read: if linked() && resource.data.receiverPid == myPid();
-      allow read: if isAdmin() && phase() >= 4;
+      allow read, delete: if isAdmin();
       allow create: if linked() && phase() == 1
+        && request.resource.data.keys().hasOnly(['receiverPid', 'slot', 'kind', 'message', 'code', 'card', 'createdAt'])
+        && request.resource.data.createdAt == request.time
         && request.resource.data.receiverPid == myReceiver()
         && request.resource.data.slot is int
         && request.resource.data.slot >= 1 && request.resource.data.slot <= week()
-        && request.resource.data.message is string
-        && request.resource.data.message.size() <= 500
-        && ((request.resource.data.kind == 'mission' && request.resource.data.slot < 3)
-            || (request.resource.data.kind == 'praise' && request.resource.data.slot == 3)
-            || (request.resource.data.kind == 'note'
-                && request.resource.data.message.size() > 0
-                && doneIn(get(/databases/$(database)/documents/giverMissions/$(myPid())).data, string(request.resource.data.slot))));
+        && shortStr(request.resource.data.message, 500)
+        && (request.resource.data.get('code', null) == null
+            || (request.resource.data.code is string && request.resource.data.code.size() == 4))
+        && (((request.resource.data.kind == 'mission' && request.resource.data.slot < 3
+               && missionCardOk(string(request.resource.data.slot)))
+             || (request.resource.data.kind == 'praise' && request.resource.data.slot == 3
+               && request.resource.data.message.size() >= 10
+               && !('card' in request.resource.data)))
+            && id == myReceiver() + '_' + string(request.resource.data.slot)
+            && doneIn(getAfter(myMissions()).data, string(request.resource.data.slot))
+          || (request.resource.data.kind == 'note'
+              && !('card' in request.resource.data)
+              && request.resource.data.message.size() > 0
+              && doneIn(get(myMissions()).data, string(request.resource.data.slot))
+              && noteCount(getAfter(myMissions()).data, string(request.resource.data.slot))
+                   == noteCount(get(myMissions()).data, string(request.resource.data.slot)) + 1
+              && noteCount(getAfter(myMissions()).data, string(request.resource.data.slot)) <= 5
+              && id == myReceiver() + '_' + string(request.resource.data.slot) + '_n'
+                       + string(noteCount(getAfter(myMissions()).data, string(request.resource.data.slot)))));
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hidden'])
+        && request.resource.data.hidden is bool;
+    }
+    // 쪽지 신고: 받는 사람이 자기에게 온 쪽지 하나를 운영자에게 알린다(문서 ID = 쪽지 ID, 한 번만).
+    match /noteFlags/{id} {
+      allow get: if linked() && get(/databases/$(database)/documents/deliveries/$(id)).data.receiverPid == myPid();
+      allow read, delete: if isAdmin();
+      allow create: if linked()
+        && get(/databases/$(database)/documents/deliveries/$(id)).data.receiverPid == myPid()
+        && request.resource.data.keys().hasOnly(['at'])
+        && request.resource.data.at == request.time;
     }
 
     // 미션 슬롯 잠금 (도전 미션 응모권 보호)
     //  - 미션 진행 단계에만, 열린 주차의 슬롯만 바꿀 수 있다(아직 안 열린 주차의 카드 고르기·완료 표시는 거부).
-    //  - 완료 표시(done)는 되돌릴 수 없다.
+    //  - 완료 표시(done)는 되돌릴 수 없고, 그 주차 완료 알림(deliveries/받는사람_주차)과 한 묶음으로만 켤 수 있다.
     //  - 완료했거나, 완료 표시 전이라도 그 슬롯 코드가 이미 인증된 1·2주차 슬롯은 고른 카드(난이도)를 바꿀 수 없다.
     //    (쪽지로 코드를 먼저 보내 인증받은 뒤 도전 카드로 바꾸는 것을 막는다)
     //  - 3주차 칭찬 슬롯에는 칭찬 카드만 들어간다(도전 응모권 없음).
+    //  - 추가 쪽지 수(notes)는 줄일 수 없고 주차마다 5건까지.
     function choiceIn(d, s) { return d.get(['choices', s], null); }
     function doneIn(d, s) { return d.get(['done', s], false) == true; }
+    function choiceShapeOk(c, levels) {
+      return c == null
+        || (c.keys().hasOnly(['cardId', 'level', 'text'])
+            && c.get('level', '') in levels
+            && shortStr(c.get('cardId', ''), 20)
+            && shortStr(c.get('text', ''), 200));
+    }
     function slotSame(before, s) {
       return choiceIn(request.resource.data, s) == choiceIn(before, s)
         && doneIn(request.resource.data, s) == doneIn(before, s);
@@ -239,10 +353,17 @@ service cloud.firestore {
     function slotRedeemed(pid, s) {
       return exists(/databases/$(database)/documents/redemptions/$(get(/databases/$(database)/documents/giverCodes/$(pid)).data.codes[s]));
     }
+    // 완료 표시를 새로 켜면 같은 묶음에 그 주차 완료 알림이 있어야 한다
+    function doneWithDelivery(before, s) {
+      return doneIn(before, s) || !doneIn(request.resource.data, s)
+        || existsAfter(/databases/$(database)/documents/deliveries/$(myReceiver() + '_' + s));
+    }
     function missionSlotOk(pid, before, s) {
       return slotSame(before, s)
         || (int(s) <= week()
             && !(doneIn(before, s) && !doneIn(request.resource.data, s))
+            && choiceShapeOk(choiceIn(request.resource.data, s), ['easy', 'normal', 'hard'])
+            && doneWithDelivery(before, s)
             && (choiceIn(request.resource.data, s) == choiceIn(before, s)
                 || !(doneIn(before, s) || slotRedeemed(pid, s))));
     }
@@ -250,11 +371,25 @@ service cloud.firestore {
       return slotSame(before, '3')
         || (3 <= week()
             && !(doneIn(before, '3') && !doneIn(request.resource.data, '3'))
-            && (choiceIn(request.resource.data, '3') == null
-                || choiceIn(request.resource.data, '3').get('level', null) == 'praise'));
+            && choiceShapeOk(choiceIn(request.resource.data, '3'), ['praise'])
+            && doneWithDelivery(before, '3'));
+    }
+    // 쪽지 수는 그대로이거나, 같은 묶음에 그 순번의 쪽지(받는사람_주차_n새순번)가 있을 때만 1 오른다(가짜 "+쪽지 3" 표시 방지)
+    function noteSlotOk(before, s) {
+      let n0 = noteCount(before, s);
+      let n1 = noteCount(request.resource.data, s);
+      return n1 == n0
+        || (n1 == n0 + 1 && n1 <= 5
+            && existsAfter(/databases/$(database)/documents/deliveries/$(myReceiver() + '_' + s + '_n' + string(n1))));
+    }
+    function notesOk(before) {
+      return noteSlotOk(before, '1') && noteSlotOk(before, '2') && noteSlotOk(before, '3');
     }
     function missionsOk(pid, before) {
-      return missionSlotOk(pid, before, '1') && missionSlotOk(pid, before, '2') && praiseSlotOk(before);
+      return request.resource.data.keys().hasOnly(['choices', 'done', 'notes', 'n'])
+        && missionSlotOk(pid, before, '1') && missionSlotOk(pid, before, '2') && praiseSlotOk(before)
+        && notesOk(before)
+        && bumped();
     }
     match /giverMissions/{pid} {
       allow read: if linked() && myPid() == pid;
@@ -266,30 +401,46 @@ service cloud.firestore {
     // 진행 상황(완료 알린 미션 수, 프로필 작성, 최근 접속 등): 본인과 운영자만 읽는다.
     // 다른 참여자에게 실시간으로 보이면, 내가 미션을 받은 순간 누구 숫자가 올랐는지로 마니또가 드러난다.
     // 파트별 순위는 운영자가 주 1회 public/board에 발표한 것만 본다.
-    // 완료 수는 열린 주차를 넘겨 올릴 수 없다(그대로 두는 것은 된다).
+    // 완료 수는 열린 주차를 넘겨 올릴 수 없다(그대로 두는 것은 된다). 파트 주간 순위는 이 값이 아니라 giverMissions.done으로 센다.
+    // 최근 접속(lastSeen)은 서버 시각으로만 쓴다.
+    function progressOk(before) {
+      return request.resource.data.keys().hasOnly(['profileDone', 'cluesVer', 'doneCount', 'guessed', 'lastSeen', 'n'])
+        && request.resource.data.get('doneCount', 0) is int
+        && request.resource.data.get('doneCount', 0) >= 0
+        && (request.resource.data.get('doneCount', 0) <= week()
+            || request.resource.data.get('doneCount', 0) == before.get('doneCount', 0))
+        && (request.resource.data.get('lastSeen', null) == before.get('lastSeen', null)
+            || request.resource.data.get('lastSeen', null) == request.time)
+        && bumped();
+    }
     match /progress/{pid} {
       allow read: if linked() && myPid() == pid;
       allow read: if isAdmin();
-      allow create: if linked() && myPid() == pid
-        && request.resource.data.get('doneCount', 0) <= week();
-      allow update: if linked() && myPid() == pid
-        && (request.resource.data.get('doneCount', 0) <= week()
-            || request.resource.data.get('doneCount', 0) == resource.data.get('doneCount', 0));
+      allow create: if linked() && myPid() == pid && progressOk({});
+      allow update: if linked() && myPid() == pid && progressOk(resource.data);
     }
 
     // "받은 게 없어요" 신고: 마니또가 완료를 알렸는데 받은 것이 없을 때 받는 사람이 주차별로 남긴다.
     // 문서 ID = 받는사람ID_주차. 본인, 그 사람의 마니또, 운영자만 읽는다.
+    // 취소는 지우지 않고 active를 false로 바꾼다(쓴 횟수 n이 남아서 반복 요청이 보인다).
     match /reports/{rid} {
       allow get: if linked() && rid.split('_')[0] == myPid();
       allow get: if linked() && rid.split('_')[0] == myReceiver();
       allow read: if isAdmin();
       allow create: if linked() && phase() >= 1 && phase() <= 3
-        && request.resource.data.keys().hasOnly(['receiverPid', 'slot', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['receiverPid', 'slot', 'active', 'createdAt', 'n'])
         && request.resource.data.receiverPid == myPid()
         && request.resource.data.slot is int
         && request.resource.data.slot >= 1 && request.resource.data.slot <= week()
-        && rid == myPid() + '_' + string(request.resource.data.slot);
-      allow delete: if linked() && rid.split('_')[0] == myPid() && phase() <= 3;
+        && rid == myPid() + '_' + string(request.resource.data.slot)
+        && request.resource.data.active == true
+        && request.resource.data.createdAt == request.time
+        && bumped();
+      allow update: if linked() && rid.split('_')[0] == myPid() && phase() >= 1 && phase() <= 3
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active', 'createdAt', 'n'])
+        && request.resource.data.active is bool
+        && (request.resource.data.createdAt == resource.data.get('createdAt', null) || request.resource.data.createdAt == request.time)
+        && bumped();
     }
     // 운영자의 주차별 확인 결과: received(받았음 → 마니또의 미션 인정) / missing(못 받음 → 받는 사람에게 보상).
     // 신고가 없어도 남길 수 있다(받고도 인증하지 않은 경우). 집계 단계까지 바꿀 수 있다.
@@ -311,6 +462,8 @@ service cloud.firestore {
     //    최종 지목 단계(2)부터 받는 사람이 읽는다. 참여자는 쓸 수 없어서 거짓으로 바꿀 수 없다.
     // 다시 배정하면 지난 회차 단서(예전 마니또의 답)는 읽을 수 없고, 새 마니또가 앱을 열 때 지금 회차로 다시 쓴다.
     match /clues/{id} {
+      // 운영자는 단서를 읽는다(거짓 단서 확인, 집계 때 "단서를 다 채웠는지" 확인). 운영자는 참여하지 않는다.
+      allow read: if isAdmin();
       allow get: if linked()
         && resource.data.receiverPid == myPid()
         && resource.data.get('ver', -1) == assignVer()
@@ -332,31 +485,58 @@ service cloud.firestore {
         && request.resource.data.answer.size() > 0 && request.resource.data.answer.size() <= 40
         && id == request.resource.data.receiverPid + '_6';
     }
+    // 단서 답의 형식: 고르기 문항은 보기 중 하나, 직접 쓰기 문항은 최소 글자 수. src/lib/constants.js의 PROFILE_QUESTIONS와 같아야 한다
+    // (tests/logic.test.js가 확인한다). 사실인지는 확인할 수 없어서, 운영자가 단서를 읽을 수 있게 했다.
+    function clueAnswerOk(i, a) {
+      return shortStr(a, 60) && a.size() > 0 && (
+        (i == 0 && a in ["아이스 아메리카노", "따뜻한 커피", "라떼·달달한 커피", "차·기타 음료", "물만 마심"])
+        || (i == 1 && a in ["구내식당에서 먹음", "구내식당 테이크아웃", "밖에서·도시락", "자주 거름"])
+        || (i == 2 && a in ["8시 전", "8~9시", "9시 이후"])
+        || (i == 3 && a.trim().size() >= 2)
+        || (i == 4 && a in ["자가용", "통근버스", "대중교통", "걸어서·자전거"])
+        || (i == 5 && a.trim().size() >= 2));
+    }
     function clueWriteOk(id) {
       return linked()
+        && request.resource.data.keys().hasOnly(['receiverPid', 'idx', 'answer', 'ver', 'n'])
         && request.resource.data.ver == assignVer()
         && request.resource.data.receiverPid == myReceiver()
         && request.resource.data.idx is int
         && request.resource.data.idx >= 0 && request.resource.data.idx < 6
-        && request.resource.data.answer is string
-        && request.resource.data.answer.size() > 0 && request.resource.data.answer.size() <= 60
-        && id == request.resource.data.receiverPid + '_' + string(request.resource.data.idx);
+        && clueAnswerOk(request.resource.data.idx, request.resource.data.answer)
+        && id == request.resource.data.receiverPid + '_' + string(request.resource.data.idx)
+        && bumped();
     }
 
+    // 운영자의 "대상이 기다리고 있어요" 알림: 그 사람의 마니또만 읽는다(누가 받은 게 없는지 다른 참여자에게 보이지 않게).
     match /nudges/{receiverPid} {
-      allow read: if member();
-      allow write: if isAdmin();
+      allow get: if linked() && receiverPid == myReceiver();
+      allow read, write: if isAdmin();
     }
 
     match /guesses/{pid} {
       allow get: if linked() && myPid() == pid;
       allow read: if isAdmin();
-      allow write: if linked() && myPid() == pid && phase() == 2
-        && request.resource.data.guessPid != pid;
+      allow create, update: if linked() && myPid() == pid && phase() == 2
+        && request.resource.data.keys().hasOnly(['guessPid', 'createdAt', 'n'])
+        && request.resource.data.guessPid is string
+        && request.resource.data.guessPid != pid
+        && exists(/databases/$(database)/documents/roster/$(request.resource.data.guessPid))
+        && request.resource.data.createdAt == request.time
+        && bumped();
     }
 
+    // 투표 카드에는 카드 주인을 짐작할 정보(파트)를 넣지 않는다.
     match /voteCards/{cardId} {
       allow read: if member() && phase() >= 3;
+      allow write: if isAdmin() && phase() == 3
+        && (request.resource == null || request.resource.data.keys().hasOnly(['reviews']));
+    }
+    // 파트별로 보이는 카드 목록 { part, cardIds }. 내 파트의 목록만 읽는다(다른 파트 카드의 주인 파트는 알 수 없다).
+    function myRosterPart() { return get(/databases/$(database)/documents/public/roster).data.people[myPid()].part; }
+    match /voteViews/{viewId} {
+      allow read: if linked() && phase() >= 3 && resource.data.part == myRosterPart();
+      allow read: if isAdmin();
       allow write: if isAdmin() && phase() == 3;
     }
     match /cardOwners/{cardId} {
@@ -368,9 +548,12 @@ service cloud.firestore {
     match /votes/{pid} {
       allow get: if linked() && myPid() == pid;
       allow read: if isAdmin() && phase() >= 4;
-      allow write: if linked() && myPid() == pid && phase() == 3
+      allow create, update: if linked() && myPid() == pid && phase() == 3
+        && request.resource.data.keys().hasOnly(['cardIds', 'createdAt', 'n'])
         && request.resource.data.cardIds is list
-        && request.resource.data.cardIds.size() <= 3;
+        && request.resource.data.cardIds.size() <= 3
+        && request.resource.data.createdAt == request.time
+        && bumped();
     }
 
     // 운영 메모: 재배정 시 지울 코드 목록

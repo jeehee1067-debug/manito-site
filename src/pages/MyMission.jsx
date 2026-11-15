@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { addDoc, collection, doc, getDoc, increment, onSnapshot, query, serverTimestamp, setDoc, where } from "firebase/firestore";
+import { collection, doc, getDoc, increment, onSnapshot, query, serverTimestamp, setDoc, where, writeBatch } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp, Loading } from "../App.jsx";
 import { EXTRA_NOTES_MAX, LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT, SPEND_GUIDE_WON } from "../lib/constants.js";
@@ -7,6 +7,10 @@ import { seededRandom, shuffle } from "../lib/random.js";
 import { syncClues } from "../lib/sync.js";
 import { Avatar, Dialogue, Panel } from "../ui.jsx";
 import { TICKET_RULES } from "../config/prizes.js";
+import { bump } from "../lib/writes.js";
+
+// 대상 이름은 처음에 가려 둔다(사무실에서 화면을 열면 옆 사람이 볼 수 있어서). "이름 보기"를 누르면 이만큼 보인다.
+const SHOW_MS = 60 * 1000;
 
 const LEVELS = ["easy", "normal", "hard"];
 const ALL_CARDS = Object.values(MISSION_CARDS).flat();
@@ -28,6 +32,12 @@ export default function MyMission() {
   const [nudge, setNudge] = useState(false);
   const [inboxSlots, setInboxSlots] = useState([]); // 내 마니또가 완료를 알린 주차
   const [mine, setMine] = useState([]); // 내가 받는 사람으로서 입력한 인증
+  const [shown, setShown] = useState(false); // 대상 이름을 보이는지(기본은 가림)
+  useEffect(() => {
+    if (!shown) return undefined;
+    const t = setTimeout(() => setShown(false), SHOW_MS);
+    return () => clearTimeout(t);
+  }, [shown]);
 
   // 받는 사람으로서: 마니또가 보냈는데 아직 인증하지 않은 미션이 있으면 알려 준다(인증해야 둘 다 응모권을 받는다).
   useEffect(() => {
@@ -82,14 +92,24 @@ export default function MyMission() {
   const pending = [...new Set(inboxSlots)].filter((slot) => !mine.some((r) => r.slot === slot));
   const myEntries = Math.min(TICKET_RULES.maxReceiverEntries, mine.filter((r) => !r.voided).length);
 
+  // 가려 둔 동안에는 화면 어디에도 대상 이름을 쓰지 않는다
+  // 존칭까지 붙인 이름("홍길동님"). 가려 둔 동안에는 "내 대상".
+  const targetName = shown ? `${nameOf(receiverPid)}님` : "내 대상";
+
   return (
     <>
       <section className="panel target">
-        <Avatar pid={receiverPid} size={140} />
+        {shown ? <Avatar pid={receiverPid} size={140} /> : <div className="avatar-mask" aria-hidden="true">?</div>}
         <div>
           <span className="dialogue-speaker static">내가 몰래 챙길 사람</span>
-          <p className="target-name">{nameOf(receiverPid)}</p>
-          {theirLoc && <span className="loc-tag">{theirLoc}</span>}
+          <p className={shown ? "target-name" : "target-name masked"}>{shown ? nameOf(receiverPid) : "● ● ●"}</p>
+          {shown && theirLoc && <span className="loc-tag">{theirLoc}</span>}
+          <p>
+            <button type="button" className="pk-btn sm target-toggle" aria-pressed={shown} onClick={() => setShown(!shown)}>
+              {shown ? "가리기" : "이름 보기"}
+            </button>
+          </p>
+          {!shown && <p className="small muted">옆 사람이 볼 수 있어서 처음에는 가려 둬요. 누르면 1분 동안 보여요.</p>}
           {remote && <p className="small">다른 근무지라서 직접 가지 않아도 되는 미션 카드가 나와요.</p>}
         </div>
       </section>
@@ -101,7 +121,7 @@ export default function MyMission() {
         </Dialogue>
       )}
       {nudge && running && (
-        <Dialogue speaker="운영진" tone="warn">{nameOf(receiverPid)}님이 아직 받은 미션이 없어요. 이번 주 미션을 먼저 해 주세요!</Dialogue>
+        <Dialogue speaker="운영진" tone="warn">{targetName}이 아직 받은 미션이 없어요. 이번 주 미션을 먼저 해 주세요!</Dialogue>
       )}
       {!progress.unknown && !progress.profileDone && (
         <Dialogue speaker="운영진" tone="warn">내 프로필이 비어 있어요. 대상에게 갈 단서가 프로필에서 나오니 <a href="#profile">지금 채워 주세요</a>.</Dialogue>
@@ -113,7 +133,7 @@ export default function MyMission() {
           slot={slot}
           myPid={myPid}
           receiverPid={receiverPid}
-          receiverName={nameOf(receiverPid)}
+          receiverName={targetName}
           code={codes?.[slot]}
           choice={missions.choices?.[slot]}
           done={Boolean(missions.done?.[slot])}
@@ -167,13 +187,14 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
     return () => offs.forEach((o) => o());
   }, [waiting, receiverPid, slot]);
 
+  // 인증 코드는 기본으로 쪽지에 같이 보낸다(실물 메모를 다른 사람이 치우거나 잃어버려도 대상이 인증할 수 있게).
   useEffect(() => {
-    if (choice) setIncludeCode(choice.level === "easy" || isPraise || remote);
-  }, [choice, isPraise, remote]);
+    if (choice || isPraise) setIncludeCode(true);
+  }, [choice, isPraise]);
 
   async function choose(card) {
     setError("");
-    await setDoc(doc(db, "giverMissions", myPid), { choices: { [slot]: { cardId: card.id, level: card.level, text: card.text } } }, { merge: true })
+    await setDoc(doc(db, "giverMissions", myPid), { choices: { [slot]: { cardId: card.id, level: card.level, text: card.text } }, ...bump() }, { merge: true })
       .catch(() => setError(redeemed ? "이미 인증된 미션이라 카드를 새로 고를 수 없어요." : "카드를 고르지 못했어요. 다시 시도해 주세요."));
   }
 
@@ -183,19 +204,24 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
     if (isPraise && message.trim().length < 10) return setError("칭찬 카드는 10자 이상 써 주세요.");
     setBusy(true);
     try {
-      await addDoc(collection(db, "deliveries"), {
+      // 완료 알림(문서 ID = 받는사람_주차, 주차마다 한 번)과 완료 표시를 한 묶음으로 쓴다. 보안 규칙이 둘이 같이 있을 때만 받는다.
+      const next = { ...allDone, [slot]: true };
+      const update = { done: { [slot]: true }, ...bump() };
+      if (isPraise) update.choices = { [slot]: { cardId: "praise", level: "praise", text: "올해의 칭찬 한 줄" } };
+      const batch = writeBatch(db);
+      // 1·2주차 알림에는 고른 카드(난이도·내용)를 같이 보낸다. 대상이 받은 것과 맞는지 확인하고, 다르면 도전 추가분이 빠진다.
+      batch.set(doc(db, "deliveries", `${receiverPid}_${slot}`), {
         receiverPid,
         slot,
         kind: isPraise ? "praise" : "mission",
         message: message.trim(),
         code: includeCode || isPraise ? code : null,
+        ...(isPraise ? {} : { card: { level: choice.level, text: choice.text } }),
         createdAt: serverTimestamp(),
       });
-      const next = { ...allDone, [slot]: true };
-      const update = { done: { [slot]: true } };
-      if (isPraise) update.choices = { [slot]: { cardId: "praise", level: "praise", text: "올해의 칭찬 한 줄" } };
-      await setDoc(doc(db, "giverMissions", myPid), update, { merge: true });
-      await setDoc(doc(db, "progress", myPid), { doneCount: Object.values(next).filter(Boolean).length }, { merge: true });
+      batch.set(doc(db, "giverMissions", myPid), update, { merge: true });
+      await batch.commit();
+      await setDoc(doc(db, "progress", myPid), { doneCount: Object.values(next).filter(Boolean).length, ...bump() }, { merge: true });
       setMessage("");
     } catch (err) {
       setError(err.code === "permission-denied" ? "지금은 미션을 보낼 수 없는 단계예요." : "보내지 못했어요. 다시 시도해 주세요.");
@@ -256,13 +282,13 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
               {/* 코드가 이미 인증된 슬롯은 보안 규칙이 카드 변경을 막는다 */}
               {!redeemed && (
                 <button type="button" className="text-btn"
-                  onClick={() => setDoc(doc(db, "giverMissions", myPid), { choices: { [slot]: null } }, { merge: true }).catch(() => {})}>
+                  onClick={() => setDoc(doc(db, "giverMissions", myPid), { choices: { [slot]: null }, ...bump() }, { merge: true }).catch(() => {})}>
                   다른 카드 고르기
                 </button>
               )}
             </div>
           )}
-          {!isPraise && redeemed && <p className="small">{receiverName}님이 이미 인증해서 카드를 바꿀 수 없어요. 완료 알리기만 눌러 주세요.</p>}
+          {!isPraise && redeemed && <p className="small">{receiverName}이 이미 인증해서 카드를 바꿀 수 없어요. 완료 알리기만 눌러 주세요.</p>}
           <div className="code-tag" aria-label="인증 코드">
             <span>인증 코드</span>
             <strong>{code || "----"}</strong>
@@ -270,10 +296,11 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
           <p className="small">
             {isPraise
               ? "칭찬 카드는 사이트 쪽지로 전달되고, 인증 코드도 함께 보내져요."
-              : "실물 미션이면 이 코드를 메모에 적어 함께 두세요. 쪽지 미션이면 아래에서 코드를 함께 보내면 돼요."}
+              : "실물 미션이면 이 코드를 메모에 적어 함께 두면 좋아요. 아래에서 코드를 쪽지로도 함께 보내면 메모를 잃어버려도 인증할 수 있어요."}
+            {!isPraise && " 고른 카드 내용은 대상에게 같이 보여요(받은 것이 카드와 다르면 도전 추가분이 빠져요)."}
           </p>
           <label>
-            <span className="panel-label">{isPraise ? `${receiverName}님에게 보내는 칭찬 (익명)` : "쪽지 (선택, 익명으로 전달)"}</span>
+            <span className="panel-label">{isPraise ? `${receiverName}에게 보내는 칭찬 (익명)` : "쪽지 (선택, 익명으로 전달)"}</span>
             <textarea className="pk-input" rows={3} maxLength={500} value={message} onChange={(e) => setMessage(e.target.value)}
               placeholder={isPraise ? "올해 고마웠던 점, 멋있었던 순간" : "예: 오늘 책상 서랍을 확인해 보세요"} />
           </label>
@@ -298,14 +325,14 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
           )}
           <p className={redeemed && !redeemed.voided ? "note" : "small"}>
             {redeemed
-              ? redeemed.voided ? "운영진이 이 인증을 무효 처리했어요." : `${receiverName}님이 인증했어요.`
+              ? redeemed.voided ? "운영진이 이 인증을 무효 처리했어요." : `${receiverName}이 인증했어요.`
               : verdict === "received" ? "운영진이 전달된 것으로 확인했어요. 미션으로 인정돼요(도전 추가분은 직접 인증된 경우에만 있어요)."
                 : verdict === "missing" ? "운영진이 전달되지 않은 것으로 확인했어요. 이 주차는 미션으로 인정되지 않아요."
-                  : `${receiverName}님의 인증을 기다리는 중이에요.`}
+                  : `${receiverName}의 인증을 기다리는 중이에요.`}
           </p>
           {!redeemed && !verdict && reported && (
             <Dialogue speaker="알림" tone="warn">
-              {receiverName}님이 {slot}주차에 받은 게 없다고 운영진에게 알렸어요. 전달이 잘 됐는지 확인해 주세요.
+              {receiverName}이 {slot}주차에 받은 게 없다고 운영진에게 알렸어요. 전달이 잘 됐는지 확인해 주세요.
               다시 전달하고 {open ? "아래 \"쪽지 더 보내기\"로 위치나 코드를 알려 주면" : "운영진에게 알려 주면"} 돼요. 운영진이 두 사람에게 확인한 뒤 처리해요.
             </Dialogue>
           )}
@@ -333,14 +360,18 @@ function MoreNotes({ slot, myPid, receiverPid, receiverName, code, sent, showCod
     setBusy(true);
     setMsg({ type: "", text: "" });
     try {
-      await addDoc(collection(db, "deliveries"), {
+      // 쪽지와 쪽지 수(notes)를 한 묶음으로 쓴다. 보안 규칙이 쪽지 수를 1 올릴 때만, 주차마다 5건까지 받는다.
+      const batch = writeBatch(db);
+      // 문서 ID = 받는사람_주차_n순번(순번 = 보낸 뒤의 쪽지 수). 보안 규칙이 순번과 쪽지 수가 맞을 때만 받는다.
+      batch.set(doc(db, "deliveries", `${receiverPid}_${slot}_n${sent + 1}`), {
         receiverPid, slot, kind: "note", message: text.trim(), code: showCode && withCode ? code : null, createdAt: serverTimestamp(),
       });
-      await setDoc(doc(db, "giverMissions", myPid), { notes: { [slot]: increment(1) } }, { merge: true });
+      batch.set(doc(db, "giverMissions", myPid), { notes: { [slot]: increment(1) }, ...bump() }, { merge: true });
+      await batch.commit();
       setText("");
       setWithCode(false);
       setOpen(false);
-      setMsg({ type: "ok", text: `${receiverName}님에게 쪽지를 보냈어요.` });
+      setMsg({ type: "ok", text: `${receiverName}에게 쪽지를 보냈어요.` });
     } catch (err) {
       setMsg({ type: "error", text: err.code === "permission-denied" ? "지금은 쪽지를 보낼 수 없어요(미션 진행 기간의 열린 주차에만 보낼 수 있어요)." : "보내지 못했어요. 다시 시도해 주세요." });
     } finally {
@@ -358,7 +389,7 @@ function MoreNotes({ slot, myPid, receiverPid, receiverName, code, sent, showCod
       {open && (
         <form className="stack" onSubmit={send}>
           <label>
-            <span className="panel-label">{receiverName}님에게 더 보내는 쪽지 (익명, 남은 횟수 {left})</span>
+            <span className="panel-label">{receiverName}에게 더 보내는 쪽지 (익명, 남은 횟수 {left})</span>
             <textarea className="pk-input" rows={3} maxLength={500} value={text} onChange={(e) => setText(e.target.value)}
               placeholder="예: 둘째 날 응원이에요. 오늘도 힘내세요!" />
           </label>
@@ -402,7 +433,8 @@ function TicketSummary({ codes, missions, entries }) {
         <li>받는 사람으로서: 인증 입력 {entries} / {R.maxReceiverEntries}</li>
         <li className="muted">
           마지막에 더해지는 것: 끝까지 안 들키면 +{R.hidden}
-          {mission >= R.hiddenMinMissions ? "" : ` (내 미션이 ${R.hiddenMinMissions}건 이상 인증돼야 받을 수 있어요)`}, 내 마니또를 맞히면 +{R.correctGuess}
+          {mission >= R.hiddenMinMissions ? "" : ` (내 미션이 ${R.hiddenMinMissions}건 이상 인증돼야 받을 수 있어요)`}
+          {R.hiddenNeedsClues ? "(프로필을 다 채워 단서 6개가 대상에게 가야 해요)" : ""}, 내 마니또를 맞히면 +{R.correctGuess}
           {myPart ? `, 우리 파트가 완수율 1위면 +${R.partBonus}` : ""}
         </li>
       </ul>

@@ -27,8 +27,8 @@ export default function Rules() {
         <table className="rules-table">
           <tbody>
             <tr><th rowSpan={3}>마니또로서</th><td>내 미션이 인증될 때마다</td><td className="num">{R.perRedeemedMission}장 (최대 {R.maxMissions})</td></tr>
-            <tr><td>도전 카드를 대상이 직접 인증하면 추가로</td><td className="num">+{R.perHardMission}장 (최대 {R.maxHard})</td></tr>
-            <tr><td>끝까지 안 들키면(대상이 나를 지목하지 못함). 내 미션이 {R.hiddenMinMissions}건 이상 인증된 경우만</td><td className="num">{R.hidden}장</td></tr>
+            <tr><td>도전 카드를 대상이 직접 인증하면 추가로(대상이 "받은 것이 카드와 달라요"로 인증하면 없음)</td><td className="num">+{R.perHardMission}장 (최대 {R.maxHard})</td></tr>
+            <tr><td>끝까지 안 들키면(대상이 나를 지목하지 못함). 내 미션이 {R.hiddenMinMissions}건 이상 인증되고{R.hiddenNeedsClues ? ", 프로필을 다 채워 단서 6개가 대상에게 간 경우만" : " 경우만"}</td><td className="num">{R.hidden}장</td></tr>
             <tr><th rowSpan={2}>받는 사람으로서</th><td>받은 미션을 인증할 때마다(코드 + 후기 {REVIEW_MIN}자 이상)</td><td className="num">{R.perReceiverEntry}장 (최대 {R.maxReceiverEntries})</td></tr>
             <tr><td>내 마니또를 맞히면</td><td className="num">{R.correctGuess}장</td></tr>
             {partsInUse && (
@@ -73,6 +73,7 @@ export default function Rules() {
         </table>
         <ul className="rules-list">
           <li>추첨은 송년회 현장에서, 응모권 수에 비례해 뽑아요. 순서는 {PRIZES.tiers.map((t) => t.label.replace("응모권 추첨 ", "")).join(" → ")} → {PRIZES.grand.label}.</li>
+          <li>추첨마다 현장에서 숫자 하나를 정해(예: 참석자가 부른 숫자) 넣고, 그 숫자와 응모권 표만으로 당첨자가 정해져요. 결과 탭의 "추첨 검증"으로 누구나 다시 계산해 같은지 확인할 수 있어요(운영진이 결과를 고를 수 없어요).</li>
           <li>{PRIZES.tiers.map((t) => t.label.replace("응모권 추첨 ", "")).join("·")}끼리는 중복 당첨이 없고, {PRIZES.grand.label}은 앞에서 당첨된 사람도 대상이에요.</li>
           <li>
             {PRIZES.bestManito.label}: 미션 완수율 {pct(W.completion)} + 전체 투표 {pct(W.vote)} + 운영진 평가 {pct(W.admin)}.
@@ -86,7 +87,8 @@ export default function Rules() {
       <Panel title="단서와 최종 지목">
         <ul className="rules-list">
           <li>내 프로필 {PROFILE_QUESTIONS.length}문항의 답이 내 대상에게 단서로 가요. 매주 금요일 2개씩, 모두에게 같은 시각에 공개돼요.</li>
-          <li>이미 공개된 답은 바꿀 수 없어요. 사실대로 답해 주세요.</li>
+          <li>이미 공개된 답은 바꿀 수 없어요. 사실대로 답해 주세요. 운영진은 단서가 사실인지 확인할 수 있어요.</li>
+          <li>프로필을 채우지 않아 단서가 안 나간 마니또는 끝까지 안 들켜도 은신 응모권이 없어요.</li>
           {partsInUse && <li>최종 지목이 열리면 마지막 단서로 <b>마니또의 파트</b>가 공개돼요. 이 단서는 명단에서 자동으로 만들어져요.</li>}
           <li>최종 지목은 마감 전까지 바꿀 수 있어요. 지목하지 않으면 정답 응모권이 없고, 내 마니또는 안 들킨 것으로 쳐요.</li>
         </ul>
@@ -106,8 +108,10 @@ export default function Rules() {
         <p className="small">아래가 확인되면 응모권·수상에서 제외될 수 있어요.</p>
         <ul className="rules-list">
           <li>송년회 공개 전에 정체를 알려주거나 캐묻기(투표 기간 포함)</li>
-          <li>하지 않은 미션을 완료로 알리거나, 받지 않은 미션을 인증하기</li>
+          <li>하지 않은 미션을 완료로 알리거나, 받지 않은 미션을 인증하기, 받고도 "받은 게 없어요"로 알리기</li>
+          <li>내가 누구를 맡았는지 다른 사람에게 알려주거나 서로 맞춰 보기(정체를 알려주는 것과 같아요)</li>
           <li>단서를 거짓으로 답하기</li>
+          <li>사이트를 일부러 반복 요청해 멈추게 하기(누가 했는지 운영진에게 기록이 남아요)</li>
           <li>투표 기간에 자기 카드에 표를 부탁하기</li>
         </ul>
         <p className="small">내용이 없는 후기는 운영진이 무효 처리할 수 있어요(무효가 되면 그 미션의 응모권도 빠져요).</p>
@@ -117,7 +121,7 @@ export default function Rules() {
         <ul className="rules-list">
           <li><b>다른 참여자</b>: 이름·근무지{partsInUse ? "·파트" : ""}, 익명 피드의 후기{partsInUse ? ", 파트별 미션 합계" : ""}만 봐요. 익명 피드의 글에는 누가 썼는지(받는 사람)가 저장돼 있지 않아요. 내가 미션을 몇 개 했는지도 다른 참여자는 볼 수 없어요. 내 짝, 인증 코드, 단서, 쪽지, 프로필 답, 메일 주소는 볼 수 없어요.</li>
           <li><b>내 마니또</b>: 내가 입력한 인증(코드·후기)은 나와 그 미션을 보낸 마니또만 다시 볼 수 있어요.</li>
-          <li><b>운영자·공동 운영자</b>: 마니또에 참여하지 않는 계정이에요. 그래서 누가 누구의 마니또인지, 주차별 진행 상황, 최종 지목, 후기, 가입한 메일을 처음부터 볼 수 있어요(진행을 챙기고 "받은 게 없어요"를 확인하는 데 써요). 쪽지 내용은 집계 단계부터 볼 수 있고, 프로필 답과 단서는 볼 수 없어요.</li>
+          <li><b>운영자·공동 운영자</b>: 마니또에 참여하지 않는 계정이에요. 그래서 누가 누구의 마니또인지, 주차별 진행 상황, 최종 지목, 후기, 쪽지(괴롭힘 확인용), 단서(거짓 단서 확인용), 가입한 메일을 처음부터 볼 수 있어요. 프로필 답도 볼 수 있고, 투표 내용은 집계 단계부터 봐요. 기분 나쁜 쪽지는 추리 보드에서 "이 쪽지 신고"로 알려 주세요.</li>
           <li><b>사이트 관리 계정</b>(Firebase 콘솔): 저장된 데이터를 기술적으로 직접 열어 볼 수 있어요(서버 없이 운영하는 방식의 한계예요).</li>
         </ul>
       </Panel>

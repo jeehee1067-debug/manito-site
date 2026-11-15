@@ -22,7 +22,7 @@ export default function Feed() {
     }, () => setLoaded(true));
   }, [count]);
 
-  const items = docs.filter((r) => !r.voided);
+  const items = docs.filter((r) => !r.voided && !r.hidden); // 무효 처리했거나 운영진이 가린 글은 빼고
   const hasMore = docs.length >= count;
 
   return (

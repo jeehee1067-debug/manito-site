@@ -1,6 +1,7 @@
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { CLUE_COUNT } from "./constants.js";
+import { bump } from "./writes.js";
 
 // 내 프로필 답변을 내 대상에게 갈 단서로 복사한다(공개 여부는 보안 규칙이 단계별로 막는다).
 // ver = config.assignVer(배정 회차). 운영자가 다시 배정하면 회차가 올라가서, 지난 회차 단서는 보안 규칙이 읽지 못하게 하고
@@ -14,18 +15,16 @@ export async function syncClues(myPid, ver = 0) {
   const receiverPid = assignSnap.data().receiverPid;
   const answers = profileSnap.data().answers || [];
   // 한 칸씩 따로 쓴다. 이미 공개된 칸은 보안 규칙이 답 변경을 막는데(권한 없음), 그 칸 때문에 나머지 칸까지 막히지 않게.
+  // 빈 답은 쓰지 않는다(규칙이 형식에 맞는 답만 받는다. 빈 칸은 받는 사람 화면에 "아직 안 채웠어요"로 보이고, 은신 응모권도 없다).
   const results = await Promise.allSettled(
-    Array.from({ length: CLUE_COUNT }, (_, i) =>
-      setDoc(doc(db, "clues", `${receiverPid}_${i}`), {
-        receiverPid,
-        idx: i,
-        answer: (answers[i] || "").trim() || "(답변 없음)",
-        ver,
-      })
+    Array.from({ length: CLUE_COUNT }, (_, i) => (answers[i] || "").trim()).map((answer, i) =>
+      answer
+        ? setDoc(doc(db, "clues", `${receiverPid}_${i}`), { receiverPid, idx: i, answer, ver, ...bump() }, { merge: true })
+        : Promise.resolve()
     )
   );
   const failed = results.filter((r) => r.status === "rejected" && r.reason?.code !== "permission-denied");
   if (failed.length) throw failed[0].reason;
-  await setDoc(doc(db, "progress", myPid), { cluesVer: ver }, { merge: true });
+  await setDoc(doc(db, "progress", myPid), { cluesVer: ver, ...bump() }, { merge: true });
   return true;
 }

@@ -1,33 +1,42 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, getDoc, getDocs, setDoc, serverTimestamp } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, setDoc, serverTimestamp, where } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp } from "../App.jsx";
 import { PHASE } from "../lib/constants.js";
 import { seededRandom, shuffle } from "../lib/random.js";
 import { Panel } from "../ui.jsx";
+import { bump } from "../lib/writes.js";
 
 export default function Vote() {
   const { myPid, myPart, config } = useApp();
   const [cards, setCards] = useState([]);
+  const [shownIds, setShownIds] = useState(null); // 내 파트에 보이는 카드 번호(voteViews). null = 전부(파트가 없는 사람)
   const [picked, setPicked] = useState([]);
   const [saved, setSaved] = useState(null);
   const [msg, setMsg] = useState("");
 
   useEffect(() => {
     getDocs(collection(db, "voteCards")).then((s) => setCards(s.docs.map((d) => ({ id: d.id, ...d.data() }))));
+    // 카드에는 주인의 파트가 없다. 내 파트에 보이는 카드 목록만 따로 읽는다(다른 파트의 목록은 보안 규칙이 막는다).
+    if (myPart) {
+      getDocs(query(collection(db, "voteViews"), where("part", "==", myPart)))
+        .then((s) => setShownIds(new Set(s.docs.flatMap((d) => d.data().cardIds || []))))
+        .catch(() => setShownIds(new Set()));
+    }
     getDoc(doc(db, "votes", myPid)).then((s) => {
       if (s.exists()) {
         setSaved(s.data().cardIds);
         setPicked(s.data().cardIds);
       }
     }).catch(() => {});
-  }, [myPid]);
+  }, [myPid, myPart]);
 
   // 내 파트 마니또의 카드(내 카드 포함)는 빼고, 사람마다 다른 순서·번호로 보여준다.
-  // 이 조건은 집계(scoring.js tallyVotes)의 "볼 수 있는 카드"와 같아야 한다. 파트가 없는 사람은 전부 본다.
+  // 이 조건은 집계(scoring.js tallyVotes)의 "볼 수 있는 카드"와 같아야 한다. 파트가 없는 사람은 전부 본다
+  // (그래도 자기 카드에 준 표는 집계에서 세지 않는다).
   const visible = useMemo(
-    () => shuffle(cards.filter((c) => !myPart || c.part !== myPart), seededRandom(`vote:${myPid}`)),
-    [cards, myPart, myPid]
+    () => shuffle(cards.filter((c) => !myPart || (shownIds && shownIds.has(c.id))), seededRandom(`vote:${myPid}`)),
+    [cards, myPart, shownIds, myPid]
   );
   const open = config.phase === PHASE.VOTING;
 
@@ -38,7 +47,7 @@ export default function Vote() {
 
   async function submit() {
     try {
-      await setDoc(doc(db, "votes", myPid), { cardIds: picked, createdAt: serverTimestamp() });
+      await setDoc(doc(db, "votes", myPid), { cardIds: picked, createdAt: serverTimestamp(), ...bump() }, { merge: true });
       setSaved(picked);
       setMsg("투표했어요. 마감 전까지 바꿀 수 있어요.");
     } catch {

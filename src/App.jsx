@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { doc, getDoc, onSnapshot, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import { auth, db, configured } from "./firebase.js";
+import { bump } from "./lib/writes.js";
 import { AVATARS, PHASE, PHASES } from "./lib/constants.js";
 import { summaryToList } from "./lib/roster.js";
 import Login from "./pages/Login.jsx";
@@ -104,18 +105,35 @@ export default function App() {
 }
 
 const AVATAR_TTL = 10 * 60 * 1000;
+// 설정(config/app)을 읽을 수 없는 계정: 아직 명단에도 운영자 목록에도 없는 "연결 전" 계정(보안 규칙).
+const LOCKED = "locked";
 
 function Session({ user, logout }) {
-  const [config, setConfig] = useState(undefined);
+  const [config, setConfig] = useState(undefined); // undefined 불러오는 중, null 설정 없음(첫 운영자 설정), LOCKED 연결 전 계정
+  const [recheckNo, setRecheckNo] = useState(0); // 공동 운영자로 지정됐는지 다시 확인할 때 올린다
   const [me, setMe] = useState(undefined); // users/{uid}
   const [roster, setRoster] = useState(undefined); // public/roster 요약 → [{ pid, name, loc, part }]
   const [avatars, setAvatars] = useState({}); // 화면에 나온 사람만 한 번씩 읽어 둔다 { pid: 번호 | null }
   const asked = useRef(new Map()); // pid → 마지막으로 읽은 시각
   const [tab, setTab] = useHashTab("mission");
 
+  // 설정은 참여자·운영자만 읽는다. 연결 전 계정은 거부되고(LOCKED) "내 이름 연결" 화면을 본다.
+  // 초대 코드로 연결되면(personId가 생기면) 다시 구독한다.
+  const linkedPid = me?.personId || null;
+  useEffect(() => watch(doc(db, "config", "app"),
+    (s) => setConfig(s.exists() ? s.data() : null),
+    (err) => setConfig(err?.code === "permission-denied" ? LOCKED : null)), [user, linkedPid, recheckNo]);
+
+  // 연결 전 화면에서 다른 창에 갔다 오면(운영자에게 계정 번호를 알려 주고 돌아오면) 지정됐는지 다시 확인한다.
+  useEffect(() => {
+    if (config !== LOCKED) return undefined;
+    const on = () => document.visibilityState === "visible" && setRecheckNo((n) => n + 1);
+    document.addEventListener("visibilitychange", on);
+    return () => document.removeEventListener("visibilitychange", on);
+  }, [config]);
+
   useEffect(() => {
     const offs = [
-      watch(doc(db, "config", "app"), (s) => setConfig(s.exists() ? s.data() : null), () => setConfig(null)),
       // 내 users 문서는 서버 저장이 확인된 뒤에만 반영한다. 가입 직후 화면에 먼저 반영하면, 서버 규칙은 아직
       // "연결 전"으로 보고 내 배정·프로필 읽기를 거부해 "아직 배정 전이에요"로 굳는다(실제로 재현됨).
       watch(doc(db, "users", user.uid), (s) => {
@@ -127,13 +145,13 @@ function Session({ user, logout }) {
 
   // 예전에 가입해서 users 문서에 메일이 없으면 채워 둔다(운영 화면 "연결된 메일"용).
   useEffect(() => {
-    if (me && user.email && me.email !== user.email) updateDoc(doc(db, "users", user.uid), { email: user.email }).catch(() => {});
+    if (me && user.email && me.email !== user.email) updateDoc(doc(db, "users", user.uid), { email: user.email, ...bump() }).catch(() => {});
   }, [me, user]);
 
   // 최근 접속: 로그인(또는 새로고침)할 때 한 번 남긴다. 운영 화면에서 오래 안 들어온 사람을 챙기는 데 쓴다.
   const myPidForSeen = me?.personId || null;
   useEffect(() => {
-    if (myPidForSeen) setDoc(doc(db, "progress", myPidForSeen), { lastSeen: serverTimestamp() }, { merge: true }).catch(() => {});
+    if (myPidForSeen) setDoc(doc(db, "progress", myPidForSeen), { lastSeen: serverTimestamp(), ...bump() }, { merge: true }).catch(() => {});
   }, [myPidForSeen]);
 
   // 명단은 초대 코드로 연결된 참여자와 운영자만 읽을 수 있다(보안 규칙). 연결되면 그때 구독한다.
@@ -188,6 +206,24 @@ function Session({ user, logout }) {
 
   if (config === undefined || me === undefined || roster === undefined) return <Loading />;
   if (config === null) return <Login bootstrap />;
+  if (config === LOCKED) {
+    // 연결 전 계정: 초대 코드 연결, 또는 공동 운영자로 지정받을 계정 번호. 설정(공지·단계)은 읽을 수 없다.
+    return (
+      <AppCtx.Provider value={{ user, recheck: () => setRecheckNo((n) => n + 1) }}>
+        <div className="app">
+          <header className="hud">
+            <Garland />
+            <div className="hud-row">
+              <span className="hud-logo">S1FA 마니또</span>
+              <button className="pk-btn ghost sm hud-out" onClick={logout}>로그아웃</button>
+            </div>
+          </header>
+          <main><Claim /></main>
+          <XmasFooter />
+        </div>
+      </AppCtx.Provider>
+    );
+  }
 
   const phase = config.phase;
   const tabs = [];

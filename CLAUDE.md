@@ -32,17 +32,27 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 
 - 1~5번 묶음: 막아야 하는 것 — 남의 `assignments`·`giverCodes`·`codes`·`clues`·`deliveries`·`progress`·`redemptions`·`roster` 읽기, 남의 코드로 `redemptions` 생성, 인증 없는 `feed` 글, 안 열린 주차의 인증·완료 알림·카드 고르기, `config.phase` 건너뛰기·역행, 집계 없는 공개, 운영자 계정의 명단 연결, 추첨 결과 덮어쓰기, 완료했거나 코드가 인증된 슬롯의 `choices` 난이도 변경
 - "앱 흐름" 묶음: 각 화면이 실제로 보내는 값의 모양을 옮겨 적은 것. **화면 코드에서 Firestore에 쓰는 값을 바꾸면 규칙과 이 테스트를 같이 고친다.**
-- 읽기는 `member()`(초대 코드로 연결된 참여자 또는 운영자)만. 연결 전 계정이 읽을 수 있는 건 `config/app`과 초대 코드 한 건뿐이라, 초대 코드 연결(`claimWithInvite`)은 명단을 읽지 않고 바로 쓴다.
-- **운영자·공동 운영자는 참여하지 않는 계정이다.** 운영자 계정은 `users` 문서를 만들 수 없고(명단 연결 불가), `users` 문서가 있는 계정은 `config.admins`에 넣을 수 없다(한 번에 한 계정씩만 추가, 0명 불가). 그래서 운영자는 `assignments`·`giverCodes`·`codes`·`giverMissions`·`guesses`·`redemptions`·`reports`·`verdicts`·`progress`·`roster`를 **언제든** 읽는다. `deliveries`(쪽지 내용)와 `votes`는 phase 4부터, `clues`·`profiles`는 읽지 못한다.
+- 읽기는 `member()`(초대 코드로 연결된 참여자 또는 운영자)만. 연결 전 계정이 읽을 수 있는 건 초대 코드 한 건과 "`config/app`이 아직 없다"는 사실뿐이다(운영자 목록이 들어 있어서 `config/app`도 `member()`만 읽는다). 그래서 초대 코드 연결(`claimWithInvite`)은 명단을 읽지 않고 바로 쓰고, `App`은 `config/app` 읽기가 거부되면 `LOCKED`(연결 전 화면 + 계정 번호 + "지정됐는지 다시 확인")로 보여 준다.
+- **운영자·공동 운영자는 참여하지 않는 계정이다.** 운영자 계정은 `users` 문서를 만들 수 없고(명단 연결 불가), `users` 문서가 있는 계정은 `config.admins`에 넣을 수 없다(한 번에 한 계정씩만 추가, 0명 불가). 그래서 운영자는 `assignments`·`giverCodes`·`codes`·`giverMissions`·`guesses`·`redemptions`·`reports`·`verdicts`·`progress`·`roster`·`deliveries`(쪽지 내용)·`clues`·`profiles`를 **언제든** 읽는다(쪽지 신고 처리·거짓 단서 확인). `votes`는 phase 4부터.
+- **처음 운영자(`isOwner()` = `config.admins[0]`)만**: 운영자 목록·`adminNotes` 변경, `invites` 쓰기, `roster` 추가·삭제와 연결 계정(`uid`) 비우기, `users` 삭제(연결 해제). 공동 운영자는 `roster.uid`를 바꿀 수 없다(남의 계정을 이름에 끼워 사칭하는 것 방지). 화면도 같은 버튼을 처음 운영자에게만 보인다(`useIsOwner`).
+- **쓰기 횟수 `n`**: 참여자가 고치는 문서(`users`·`avatars`·`profiles`·`clues`·`giverMissions`·`progress`·`reports`·`guesses`·`votes`)는 쓸 때마다 `n`을 정확히 1 올려야 한다(규칙 `bumped()`, 화면은 `src/lib/writes.js`의 `bump()` = `increment(1)`). 운영 화면 "쓰기 횟수"가 이 값으로 한도 소진을 일으킨 사람을 찾는다. **이 문서들에 쓰는 화면 코드를 새로 만들면 `...bump()`를 꼭 넣는다**(빠지면 거부됨). 한 번만 만들 수 있는 문서(`deliveries`·`redemptions`·`feed`·`noteFlags`)에는 없다.
+- 시각 필드(`createdAt`, `lastSeen`, `noteFlags.at`)는 `request.time`(= `serverTimestamp()`)만 받는다.
 - 명단 원본(`roster`)은 운영자만 읽는다(연결된 계정 uid, 수상 제외·중도 이탈 표시가 들어 있다). 참여자는 `public/roster` 요약만.
-- 인증 문서(`redemptions/{코드}`)는 인증한 받는 사람(get·자기 것 목록), 그 코드를 가진 마니또(get), 운영자만 읽는다. 익명 피드는 **별도 문서 `feed/{무작위ID}`**(`slot, review, voided, createdAt, thanks?` — 받는 사람·코드 없음)이고, 인증과 한 묶음(batch)으로만 만들 수 있다: 규칙이 `receiverCodes/{받는사람}`(giverCodes를 받는 사람 기준으로 뒤집은 것, 참여자는 못 읽음)로 그 사람의 코드를 찾아 `getAfter(redemptions/코드).feedId == 이 글`인지 확인한다. 감사 답장은 글쓴이가 자기 `feed` 글의 `thanks`를 한 번만 쓴다. 운영자의 무효 처리는 두 문서의 `voided`를 같이 바꾼다.
+- 인증 문서(`redemptions/{코드}`: `receiverPid, slot, review, voided, feedId, cardMatch, createdAt`)는 인증한 받는 사람(get·자기 것 목록), 그 코드를 가진 마니또(get), 운영자만 읽는다. 익명 피드는 **별도 문서 `feed/{무작위ID}`**(`slot, review, voided, createdAt, thanks?, hidden?` — 받는 사람·코드 없음)이고, 인증과 한 묶음(batch)으로만 만들 수 있다: 규칙이 `receiverCodes/{받는사람}`(giverCodes를 받는 사람 기준으로 뒤집은 것, 참여자는 못 읽음)로 그 사람의 코드를 찾아 `getAfter(redemptions/코드).feedId == 이 글`인지, 그 글이 이번 묶음에서 새로 생기는지 확인한다(이미 있는 남의 글을 가리키기 방지). 감사 답장은 글쓴이가 자기 `feed` 글의 `thanks`를 한 번만 쓴다(후기도 인증 문서와 같아야 함). 운영자의 무효 처리는 두 문서의 `voided`를 같이 바꾸고, 운영자는 피드 `hidden`(피드에서만 가림)·`thanks` 지우기·인증 `cardMatch` 고치기를 할 수 있다.
+- `cardMatch`: 받는 사람이 인증할 때 받은 것이 마니또가 고른 카드(완료 알림의 `card`)와 맞는지. `false`면 도전 추가분이 없다(`scoring.js`). 예전 인증에는 없고 없으면 맞는 것으로 본다.
 - `receiverCodes`는 배정할 때 같이 쓴다. 없으면 인증(피드 글 확인)이 거부되므로, 예전 방식으로 배정된 자료는 미션 시작 뒤 운영 화면(`Pairs`)이 채워 넣는다.
 - 인증(`redemptions`), 완료 알림·쪽지(`deliveries`), 카드 고르기·완료 표시(`giverMissions`)는 **열린 주차(`config.week`)까지만** 되고, `giverMissions`는 phase 1에만 쓴다. 닫힌 주차의 값은 "그대로 두는 것"만 허용해서, 운영자가 주차를 내려도 다른 주차 쓰기가 막히지 않는다. `progress.doneCount`도 열린 주차 수를 넘겨 올릴 수 없다.
-- `deliveries.kind`: `mission`(1·2주차 완료 알림), `praise`(3주차 칭찬 카드), `note`(완료한 주차에 더 보내는 쪽지 — 그 주차가 `done`이어야 하고 빈 쪽지는 안 됨).
-- "받은 게 없어요": `reports/{받는사람_주차}`는 받는 사람이 만들고 지운다(phase 1~3, 열린 주차). `verdicts/{받는사람_주차}`(`received`/`missing`)는 운영자가 쓴다(phase 1~4). 둘 다 받는 사람·그 사람의 마니또·운영자만 읽는다.
-- `config/app` 수정 규칙: 단계는 그대로이거나 한 칸 앞으로만, 공개(5)로 넘어가려면 `results/public`이 있어야 한다. 주차는 1~3. 단서는 줄일 수 없고 **공개 개수 ≤ 2 × 주차**.
-- `results/public`: phase 4에는 통째로 다시 쓸 수 있지만 `draws`는 비어 있어야 하고, phase 5에는 `draws`에 새 칸을 더하는 것만 된다(변경·삭제·재집계 불가). 화면(`Reveal.jsx`)은 트랜잭션으로 "아직 안 뽑은 순서"일 때만 쓴다.
+- `deliveries`(`receiverPid, slot, kind, message, code, card, createdAt`, 보낸 사람 정보 없음) 문서 ID는 정해져 있다.
+  - `mission`(1·2주차 완료 알림, `card` = 고른 카드의 `level`·`text`와 같아야 함)·`praise`(3주차 칭찬 카드, 10자 이상, `card` 없음): ID `{받는사람}_{주차}`. `giverMissions.done[주차]`를 켜는 것과 한 묶음으로만(규칙이 `getAfter`/`existsAfter`로 서로 확인). 그래서 주차마다 한 번이고, 완료 표시와 알림이 항상 같이 있다.
+  - `note`(완료한 주차에 더 보내는 쪽지, 빈 쪽지 안 됨): ID `{받는사람}_{주차}_n{번째}`, `giverMissions.notes[주차]`를 1 올리는 것과 한 묶음으로만, 주차마다 `EXTRA_NOTES_MAX`(5)건까지.
+  - 운영자는 `hidden`만 바꾸고(받는 사람 화면에서 가림), 지울 수 있다. 받는 사람은 `noteFlags/{쪽지ID}`(`at`)로 한 번 신고한다(운영 화면 "쪽지 검토").
+- "받은 게 없어요": `reports/{받는사람_주차}`(`receiverPid, slot, active, createdAt, n`)는 받는 사람이 만들고, 취소는 `active = false`로 바꾼다(지울 수 없음, phase 1~3, 열린 주차). `verdicts/{받는사람_주차}`(`received`/`missing`)는 운영자가 쓴다(phase 1~4). 둘 다 받는 사람·그 사람의 마니또·운영자만 읽는다. 예전 신고에는 `active`가 없고 없으면 유효한 신고로 본다(`pairs.js`).
+- `nudges/{받는사람}`(운영자가 켜는 알림. 그 사람의 마니또 화면에 "대상이 기다리고 있어요")은 그 받는 사람의 마니또만 get한다.
+- `config/app` 수정 규칙: 단계는 그대로이거나 한 칸 앞으로만, 공개(5)로 넘어가려면 `results/public`이 있어야 한다. 주차는 1~3이고 한 번에 한 칸까지만 올린다. 단서는 줄일 수 없고 한 번에 2개까지, **공개 개수 ≤ 2 × 주차**. `assignVer`·`partExcluded`·`siteMatched`는 phase 0에서만 바꾼다.
+- `results/public`: phase 4에는 통째로 다시 쓸 수 있지만 `draws`는 비어 있어야 하고, phase 5에는 `draws`에 새 칸을 더하는 것만 된다(변경·삭제·재집계 불가). 화면(`Reveal.jsx`)은 트랜잭션으로 "아직 안 뽑은 순서"일 때만 쓴다. 추첨 칸은 `{ seed, winners }`(현장에서 정한 숫자와 `seededDraw` 결과, 예전 자료는 당첨자 배열)이고, 결과 화면 "추첨 검증"이 `verifyDraws`로 다시 계산한다.
+- 투표 카드: `voteCards/{id}`는 `reviews`만(파트 정보 없음), 파트별로 보이는 카드 목록은 `voteViews/{id}`(`part, cardIds`, 참여자는 `public/roster`의 내 파트와 같은 것만 읽음), 카드 주인은 `cardOwners`(운영자만).
 - 단서는 배정 회차(`config.assignVer`, 배정할 때마다 +1)가 같은 것만 읽고 쓴다. 다시 배정해도 예전 마니또의 답이 남지 않게(실제로 재현된 버그).
+- 단서 답 형식: 고르기 문항(0~3번)은 `firestore.rules`의 `clueAnswerOk`에 적힌 보기 중 하나, 직접 쓰기(4·5번)는 공백 빼고 2자 이상, 모두 60자까지. **`PROFILE_QUESTIONS`의 보기를 바꾸면 규칙의 보기 목록도 같이 고친다**(`npm test`가 같은지 확인).
 - 이미 공개된 단서 칸(`idx < cluesReleased`)은 같은 답으로만 다시 쓸 수 있다(프로필 화면도 그 칸을 잠금). 비어 있던 칸 새로 쓰기와 지난 회차 덮어쓰기는 된다.
 - 파트 단서는 단서 문서 7번째 칸(`idx 6`). 배정할 때 운영자 브라우저가 쓰고 참여자는 쓸 수 없다. 받는 사람은 phase 2부터 읽는다.
 - 단서 6칸은 일괄 저장이 아니라 한 칸씩 쓴다(공개된 칸이 규칙에 막혀도 나머지가 저장되게).
@@ -55,12 +65,16 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 - 실제 메일 주소 + 비밀번호(Firebase Authentication). 비밀번호 찾기는 `sendPasswordResetEmail`.
 - 메일 주소는 `users/{uid}.email`에만(본인·운영자만 읽음, 규칙이 `request.auth.token.email`과 같은지 확인). 운영 화면 "연결된 메일"과 "연결 해제"(명단 연결 풀기 + `users` 문서 삭제 + 초대 코드 새로 발급)에 쓴다.
 - `App`은 로그인 상태만 보고, 로그인한 사람의 구독·화면은 `Session`(key = uid)에 있다. 사람이 바뀌면 통째로 새로 만들어진다.
+- 가입·운영자 계정 비밀번호는 8자 이상, 글자+숫자(`validatePassword`, 화면에서만). "로그인 유지"는 기본 꺼짐(기기마다 `localStorage` `manito:keep`에 기억).
+- 화면 가리기: 내 미션의 대상 이름·캐릭터는 기본으로 가리고 60초 보기, 운영 화면 짝 현황은 접힘, 초대 코드·메일은 "보기"를 눌러야 보임.
+- App Check는 `src/firebase.config.js`의 `appCheckSiteKey`가 있을 때만 켜진다(에뮬레이터 제외). 사내망에서 reCAPTCHA가 열리는지 확인하기 전에는 콘솔에서 적용(enforce)을 켜지 말 것(README "App Check").
 - 내 `users` 문서는 서버 저장이 확인된 스냅샷만 반영한다(`hasPendingWrites` 무시). 가입 직후 로컬 스냅샷으로 화면을 열면 규칙이 아직 "연결 전"으로 보고 내 배정 읽기를 거부한다(실제로 재현된 버그).
 
 ## 읽기 수 (무료 한도 하루 5만 건)
 
 참여자 화면에서 컬렉션 전체를 구독하지 말 것. 명단은 `public/roster` 요약, 캐릭터는 화면에 나온 사람만(10분 캐시), 피드는 `feed` 30건씩(감사 답장은 같은 문서), 파트 순위는 `public/board` 1건.
-운영 화면은 짝 현황 때문에 배정·코드·미션·인증·신고·지목 컬렉션을 통째로 구독한다(운영자 계정만 쓰므로 허용).
+운영 화면은 짝 현황 때문에 배정·코드·미션·인증·완료 알림·신고·지목 컬렉션을 통째로 구독한다(운영자 계정만 쓰므로 허용).
+읽기 반복으로 한도를 소진하는 것은 서버 코드 없이 막거나 기록할 수 없다(README "비밀 유지 범위와 한계"). 쓰기는 `n`으로 사람별로 센다.
 기기 저장소 캐시(persistentLocalCache)는 같은 기기 여러 사람 사용 때문에 쓰지 않는다. 자세한 내용은 README "무료 한도와 읽기 수".
 
 ## 정해진 규칙 (바꾸려면 사용자에게 먼저 확인)
@@ -71,8 +85,9 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
   - 한 파트가 (근무지 모드에서는 근무지마다) 인원의 절반을 넘으면 같은 파트 짝을 완전히 피할 수 없다. 그때는 되도록 적게 만들고 경고하며 `config.partExcluded = false`가 돼 추리 보드가 내 파트를 빼지 않는다.
 - 단서: 프로필 6문항(고르기 4 + 직접 쓰기 2, `PROFILE_QUESTIONS`), 매주 금요일 운영자가 전원 동일하게 2개씩 공개(인증 수와 무관하게 — 은신 응모권 공정성 때문). 주차마다 2개까지만(공개 개수 ≤ 2 × 주차). 최종 지목 단계부터 마지막 단서로 마니또의 **파트**가 공개된다(부서 전원이 한 팀이고 파트만 다르다).
 - 응모권: 미션 인증 1(최대 3), 도전 +1(최대 2), 받는 사람 입력 1(최대 3), 은신 2, 정답 지목 1, 우승 파트 1. 정체를 알려주면 둘의 합계가 −1이 되도록 설계됨.
-  - 은신은 내 미션이 1건 이상 인증된 마니또만. 가입 안 한 사람·중도 이탈·수상 제외는 0장.
-  - 도전 추가분은 받는 사람이 **직접 인증한 미션에만** 준다. 대상 불참이나 운영자 확인으로 인정된 미션에는 주지 않는다.
+  - 은신은 내 미션이 1건 이상 인증되고 **단서 6칸을 모두 낸**(`hiddenNeedsClues`, `cluesDoneSet`) 마니또만. 가입 안 한 사람·중도 이탈·수상 제외는 0장.
+  - 도전 추가분은 받는 사람이 **직접 인증한 미션에만**, 그리고 인증할 때 "카드와 다름"(`cardMatch: false`)이 아닐 때만 준다. 대상 불참이나 운영자 확인으로 인정된 미션에는 주지 않는다.
+  - "완료를 알린 주차"는 완료 알림(`deliveries`)이 있거나 완료 표시(`giverMissions.done`)가 있는 주차다(둘은 한 묶음으로 저장되지만 예전 자료를 위해 합쳐서 본다).
   - 상대방 때문에 손해 보지 않게: 마니또가 안 보낸 주차는 받는 사람에게 1장씩 보상(입력과 합쳐 최대 3, 본인 미션 1건 이상). 완료를 알렸는데 인증이 없는 주차는 운영자가 주차별로 확인한다 — **받았음**이면 마니또의 미션으로 인정, **못 받음**이면 인정하지 않고 받는 사람에게 안 보낸 주차와 같은 보상. 대상이 불참이면 확인 없이도 인정(단, "못 받음" 확인이 먼저). 확인이 없으면 어느 쪽에도 없다.
   - 받는 사람은 받은 것이 없으면 "받은 게 없어요"로 주차별 신고를 한다(1·2주차, 집계 전까지). 운영자는 신고가 없어도 집계 단계의 "집계 전 확인"에서 같은 확인을 할 수 있다.
   - 파트 대항전: 주간 순위는 완료 알린 수 ÷ (가입 인원 × 열린 주차)로 매주 금요일 단서 공개 때 발표(`weeklyPartBoard`). 마지막 집계에서 인증된 미션 기준 완수율 1위 파트(동률이면 모두)의 파트원에게 1장(`partStandings`). 내 미션이 1건 이상 인증된 사람만, 불참·수상 제외는 없음.
@@ -80,7 +95,7 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 - 투표: 내 파트 카드는 보이지 않는다(`Vote.jsx`). 파트 인원이 달라 생기는 유불리는 집계에서 "표 수 ÷ 기대 득표"로 보정한다(`tallyVotes`). **`Vote.jsx`의 보이는 카드 조건과 `tallyVotes`의 조건은 같아야 한다.** 수상 대상이 아닌 마니또(가입 안 함·중도 이탈·수상 제외)는 투표 카드를 만들 때 빼고, 나중에 제외된 사람의 카드는 집계에서 없는 것으로 본다(`rankBestManito`: 다른 사람의 투표 점수를 깎지 않게).
 - 미션 비용: 돈이 드는 카드는 `cost: true`로 표시, 건당 5천원 이하 권장(`SPEND_GUIDE_WON`). 난이도마다 무비용 카드가 원격용 포함 2장 이상 있어야 한다(테스트가 확인).
 - 미션 카드: "대상 이름 삼행시 쪽지 보내기"는 보통 카드. 완료한 주차에는 "쪽지 더 보내기"(주차마다 `EXTRA_NOTES_MAX`건, 화면에서만 셈)가 있어 "3일 연속 응원 쪽지" 도전 카드를 할 수 있다. 추가 쪽지는 완료 표시·응모권에 영향이 없다.
-- 운영 실수 방지: 집계 없이 공개 단계로 못 넘어감, 추첨 결과 덮어쓰기 불가, 단서 주차당 2개, 주차를 내릴 때 확인창, 규칙 버전 경고.
+- 운영 실수 방지: 집계 없이 공개 단계로 못 넘어감, 추첨 결과 덮어쓰기 불가, 단서 주차당 2개, 주차를 내릴 때 확인창, 규칙 버전 경고, 집계 "검산", 현장 숫자로 하는 검증 가능한 추첨.
 - 상품: `src/config/prizes.js` 한 곳에서 관리. 사용자가 상품 구성을 아직 손볼 예정.
 - 선물 예산 한도는 112만원(세금포함). 참여자가 54명으로 줄었지만 한도와 상품 구성은 그대로 두기로 했다.
 
@@ -91,16 +106,17 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 | `src/config/prizes.js` | 상품·응모권 규칙·베스트 마니또 가중치 |
 | `src/lib/constants.js` | 단계, 근무지, 프로필 질문, 미션 카드, 캐릭터 목록 |
 | `src/lib/assign.js` | 배정(같은 파트 제외. 조건에 맞는 원을 만든 뒤 자리 맞바꾸기로 섞음), 코드 생성 |
-| `src/lib/scoring.js` | 응모권 계산(운영자 확인 `verdicts` 반영), 파트 대항전 순위(주간·최종), 투표 집계, 베스트 마니또 순위, 가중 추첨 |
-| `src/lib/pairs.js` | 운영 화면 짝 현황(마니또별 주차 상태·지목), 운영자가 확인할 주차, 받는 사람 기준 코드(`receiverCodes`) |
+| `src/lib/scoring.js` | 응모권 계산(운영자 확인 `verdicts`·`cardMatch`·단서 6칸 반영), 파트 대항전 순위(주간·최종), 투표 집계, 베스트 마니또 순위, 가중 추첨, 숫자로 다시 계산할 수 있는 추첨(`seededDraw`·`verifyDraws`) |
+| `src/lib/pairs.js` | 운영 화면 짝 현황(마니또별 주차 상태·지목), 운영자가 확인할 주차, 받는 사람 기준 코드(`receiverCodes`), 마니또가 낸 단서(`clueAnswers`·`cluesDoneSet`) |
+| `src/lib/writes.js` | 쓰기 횟수 `bump()` = `{ n: increment(1) }` |
 | `src/lib/roster.js` | 참여자 화면용 명단 요약(`public/roster`, 이름·근무지·파트). 운영 화면(`Admin.jsx`)이 명단과 다르면 다시 씀. 명단 입력 한 줄 읽기 |
 | `src/pages/Rules.jsx` | 참여자용 규칙 안내(숫자는 `prizes.js`·`constants.js`에서) |
 | `src/pages/PartBoard.jsx` | 파트 순위 탭(운영자가 발표한 `public/board`만 읽음) |
 | `src/pages/Claim.jsx` | "연결 전" 화면: 초대 코드 연결, 공동 운영자로 지정받을 계정의 계정 번호 |
 | `src/pages/Feed.jsx` | 익명 피드(`feed` 문서만 읽음) |
-| `src/pages/Admin.jsx` | 운영 화면: 단계, 명단·배정, 주차·단서, 짝 현황(`Pairs`), 받은 게 없어요·집계 전 확인(`Unresolved`), 투표 카드, 집계, 공동 운영자, 규칙 버전 경고(`RulesCheck`) |
+| `src/pages/Admin.jsx` | 운영 화면: 단계, 명단·배정, 주차·단서, 짝 현황(`Pairs`), 받은 게 없어요·집계 전 확인(`Unresolved`), 인증 검토(`Moderation`), 쪽지 검토(`NotesReview`), 쓰기 횟수(`WriteCounts`), 투표 카드, 집계·검산, 공동 운영자, 규칙 버전 경고(`RulesCheck`) |
 | `src/ui.jsx` | 패널·대사창·캐릭터 공통 컴포넌트 |
-| `src/firebase.js` | Firebase 연결. `npm run dev:emu`(`.env.emulator`)일 때만 에뮬레이터 연결 |
+| `src/firebase.js` | Firebase 연결. `npm run dev:emu`(`.env.emulator`)일 때만 에뮬레이터 연결. `appCheckSiteKey`가 있으면 App Check(reCAPTCHA v3) |
 | `src/xmas.jsx`, `src/xmas.css`, `src/assets/xmas/` | 연말·크리스마스 장식(시즌 한정). 빼는 방법은 README "연말 장식" |
 | `tests/rules.test.js` | 보안 규칙 테스트 |
 | `src/pages/*` | 화면 |
@@ -111,4 +127,6 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 ## 아직 안 된 것
 
 - 사내망에서 Firebase 로그인(`identitytoolkit.googleapis.com`)과 Firestore(`firestore.googleapis.com`) 접속 확인, 비밀번호 재설정 메일 수신(회사 메일 차단 여부)과 링크(`프로젝트ID.firebaseapp.com`) 열림 확인
-- 실제 Firebase 프로젝트에 연결한 상태의 화면 점검. 에뮬레이터로는 6명·3개 파트 기준 전체 흐름(운영자 설정 → 명단 → 배정 → 가입 → 미션 → 인증·피드·감사 답장 → 쪽지 더 보내기 → 공동 운영자 지정 → 받은 게 없어요 신고·확인 → 단서·파트 순위 발표 → 지목 → 투표 → 집계 전 확인 → 집계 → 추첨)을 화면으로 진행해 확인했다(콘솔 오류 0건). 실제 프로젝트·사내망은 아직.
+- 실제 Firebase 프로젝트에 연결한 상태의 화면 점검. 에뮬레이터로는 6명·3개 파트 기준 전체 흐름(운영자 설정 → 명단 → 배정 → 가입 → 미션 → 인증·피드·감사 답장 → 쪽지 더 보내기·쪽지 신고·가리기 → 카드와 다름 인증 → 공동 운영자 지정 → 받은 게 없어요 신고·확인 → 단서·파트 순위 발표 → 지목 → 투표 → 집계 전 확인 → 집계·검산 → 숫자 넣고 추첨·추첨 검증)을 화면으로 진행해 확인했다(콘솔 오류 0건). 실제 프로젝트·사내망은 아직.
+- App Check: 코드만 있고 키가 비어 있어 꺼져 있다. 무료 요금제에서 적용되는지, 사내망에서 reCAPTCHA가 열리는지 확인 안 됨.
+- 읽기 반복으로 무료 한도를 소진하는 것은 막지 못한다(서버 코드 필요).

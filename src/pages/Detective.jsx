@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  arrayRemove, arrayUnion, collection, deleteDoc, doc, getDoc, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch,
+  arrayRemove, arrayUnion, collection, doc, getDoc, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch,
 } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp } from "../App.jsx";
 import { Avatar, Dialogue, Panel } from "../ui.jsx";
-import { PHASE, PRAISE_SLOT, PROFILE_QUESTIONS, REVIEW_MIN, CLUE_COUNT, PART_HINT_IDX } from "../lib/constants.js";
+import { LEVEL_LABEL, PHASE, PRAISE_SLOT, PROFILE_QUESTIONS, REVIEW_MIN, CLUE_COUNT, PART_HINT_IDX } from "../lib/constants.js";
 import { normalizeCode } from "../lib/random.js";
+import { bump } from "../lib/writes.js";
 
 export default function Detective() {
   const { myPid, config, roster } = useApp();
@@ -21,10 +22,15 @@ export default function Detective() {
       .catch(() => setHintPart(null));
   }, [myPid, hintOpen, config.assignVer]);
 
+  // 마니또에게서 온 것(완료 알림·쪽지): 받은 것 목록과 인증하기(고른 카드 확인)가 같이 쓴다
+  const [items, setItems] = useState([]);
+  useEffect(() => onSnapshot(query(collection(db, "deliveries"), where("receiverPid", "==", myPid)), (s) =>
+    setItems(s.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0))), () => {}), [myPid]);
+
   return (
     <>
-      <Inbox myPid={myPid} />
-      <CodeEntry myPid={myPid} />
+      <Inbox myPid={myPid} items={items} />
+      <CodeEntry myPid={myPid} items={items} />
       <MyRedemptions myPid={myPid} />
       <Clues myPid={myPid} partsInUse={partsInUse} hintOpen={hintOpen} hintPart={hintPart} />
       <Suspects myPid={myPid} hintPart={hintOpen ? hintPart : null} />
@@ -32,21 +38,11 @@ export default function Detective() {
   );
 }
 
-function Inbox({ myPid }) {
+function Inbox({ myPid, items }) {
   const { config } = useApp();
-  const [items, setItems] = useState([]);
   const [mine, setMine] = useState([]); // 내가 입력한 인증 [{ code, slot }]
-  useEffect(() => {
-    const offs = [
-      onSnapshot(query(collection(db, "deliveries"), where("receiverPid", "==", myPid)), (s) =>
-        setItems(s.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)))
-      ),
-      onSnapshot(query(collection(db, "redemptions"), where("receiverPid", "==", myPid)), (s) =>
-        setMine(s.docs.map((d) => ({ code: d.id, slot: d.data().slot })))
-      ),
-    ];
-    return () => offs.forEach((o) => o());
-  }, [myPid]);
+  useEffect(() => onSnapshot(query(collection(db, "redemptions"), where("receiverPid", "==", myPid)), (s) =>
+    setMine(s.docs.map((d) => ({ code: d.id, slot: d.data().slot }))), () => {}), [myPid]);
 
   const redeemedCodes = new Set(mine.map((r) => r.code));
   const redeemedSlots = new Set(mine.map((r) => r.slot));
@@ -62,10 +58,14 @@ function Inbox({ myPid }) {
       <div className="stack">
         {items.map((it) => (
           <Dialogue key={it.id} speaker={speaker(it)} tone={it.kind === "praise" ? "gold" : ""}>
-            <p>{it.message || "마니또가 미션을 했대요. 주변을 살펴보세요!"}</p>
+            {it.hidden
+              ? <p className="muted">운영진이 가린 쪽지예요.</p>
+              : <p>{it.message || "마니또가 미션을 했대요. 주변을 살펴보세요!"}</p>}
+            {it.card && <p className="small">마니또가 고른 카드: {LEVEL_LABEL[it.card.level] || it.card.level} · {it.card.text}</p>}
             {it.code && (
               <p className="small">인증 코드 <strong className="mono">{it.code}</strong>{redeemedCodes.has(it.code) ? " (인증 완료)" : ""}</p>
             )}
+            {it.message && !it.hidden && <FlagNote id={it.id} />}
           </Dialogue>
         ))}
       </div>
@@ -76,14 +76,30 @@ function Inbox({ myPid }) {
 
 // 받은 게 없어요: 마니또가 완료를 알렸는데 찾아봐도 받은 것이 없을 때 주차별로 운영진에게 알린다.
 // 운영진이 두 사람에게 확인한 뒤 "받았음"(마니또의 미션 인정) 또는 "못 받음"(나에게 그 주차 보상)으로 정한다.
+// 쪽지 신고: 기분 나쁜 쪽지를 받았을 때 운영진에게 알린다. 운영진은 누가 보냈는지 알 수 있고 쪽지를 가릴 수 있다.
+// 보낸 마니또에게는 신고했다는 사실이 보이지 않는다.
+function FlagNote({ id }) {
+  const [flagged, setFlagged] = useState(undefined);
+  useEffect(() => onSnapshot(doc(db, "noteFlags", id), (s) => setFlagged(s.exists()), () => setFlagged(false)), [id]);
+  async function flag() {
+    if (!window.confirm("이 쪽지를 운영진에게 신고할까요?\n\n불쾌하거나 괴롭히는 내용일 때 써 주세요. 운영진이 확인하고 가릴 수 있어요. 마니또에게는 알려지지 않아요.")) return;
+    await setDoc(doc(db, "noteFlags", id), { at: serverTimestamp() }).catch(() => {});
+  }
+  if (flagged === undefined) return null;
+  return flagged
+    ? <p className="small muted">운영진에게 신고한 쪽지예요.</p>
+    : <button type="button" className="text-btn small" onClick={flag}>이 쪽지 신고</button>;
+}
+
 function ReportBox({ myPid, slot, phase }) {
   const [reported, setReported] = useState(false);
+  const [reportDoc, setReportDoc] = useState(false); // 신고 문서가 있는지(취소한 신고는 active = false로 남는다)
   const [verdict, setVerdict] = useState(null);
   const [error, setError] = useState("");
   const rid = `${myPid}_${slot}`;
   useEffect(() => {
     const offs = [
-      onSnapshot(doc(db, "reports", rid), (s) => setReported(s.exists()), () => {}),
+      onSnapshot(doc(db, "reports", rid), (s) => { setReportDoc(s.exists()); setReported(s.exists() && s.data().active !== false); }, () => {}),
       onSnapshot(doc(db, "verdicts", rid), (s) => setVerdict(s.exists() ? s.data().verdict : null), () => {}),
     ];
     return () => offs.forEach((o) => o());
@@ -93,10 +109,12 @@ function ReportBox({ myPid, slot, phase }) {
   async function report() {
     setError("");
     if (!window.confirm(`${slot}주차에 받은 게 없다고 운영진에게 알릴까요?\n\n주변(책상, 서랍, 자리 근처)과 위 쪽지를 한 번 더 확인해 주세요. 운영진이 마니또에게도 확인해요.`)) return;
-    await setDoc(doc(db, "reports", rid), { receiverPid: myPid, slot, createdAt: serverTimestamp() })
-      .catch(() => setError("알리지 못했어요. 잠시 뒤 다시 눌러 주세요."));
+    const write = reportDoc
+      ? updateDoc(doc(db, "reports", rid), { active: true, createdAt: serverTimestamp(), ...bump() })
+      : setDoc(doc(db, "reports", rid), { receiverPid: myPid, slot, active: true, createdAt: serverTimestamp(), ...bump() });
+    await write.catch(() => setError("알리지 못했어요. 잠시 뒤 다시 눌러 주세요."));
   }
-  const cancel = () => deleteDoc(doc(db, "reports", rid)).catch(() => setError("취소하지 못했어요."));
+  const cancel = () => updateDoc(doc(db, "reports", rid), { active: false, ...bump() }).catch(() => setError("취소하지 못했어요."));
 
   return (
     <div className="report-box">
@@ -119,13 +137,26 @@ function ReportBox({ myPid, slot, phase }) {
   );
 }
 
-function CodeEntry({ myPid }) {
+function CodeEntry({ myPid, items }) {
   const { config } = useApp();
   const [code, setCode] = useState("");
   const [review, setReview] = useState("");
   const [msg, setMsg] = useState({ type: "", text: "" });
   const [busy, setBusy] = useState(false);
+  const [slotOf, setSlotOf] = useState(null); // 입력한 코드의 주차(나에게 온 코드일 때)
+  const [cardMatch, setCardMatch] = useState(true);
   const running = config.phase === PHASE.RUNNING;
+  // 4자리를 다 넣으면 어느 주차 코드인지 확인하고, 그 주차에 마니또가 고른 카드를 보여 준다(받은 것과 맞는지 확인)
+  const typed = normalizeCode(code);
+  useEffect(() => {
+    setSlotOf(null);
+    setCardMatch(true);
+    if (typed.length !== 4) return;
+    let alive = true;
+    getDoc(doc(db, "codes", typed)).then((s) => alive && setSlotOf(s.exists() ? s.data().slot : null)).catch(() => {});
+    return () => { alive = false; };
+  }, [typed]);
+  const card = slotOf ? items.find((it) => it.kind === "mission" && it.slot === slotOf && it.card)?.card : null;
 
   async function submit(e) {
     e.preventDefault();
@@ -145,7 +176,10 @@ function CodeEntry({ myPid }) {
       // 보안 규칙은 둘이 같이 있을 때만 받는다(인증 없이 피드 글만, 또는 그 반대는 거부).
       const feedId = doc(collection(db, "feed")).id;
       const batch = writeBatch(db);
-      batch.set(doc(db, "redemptions", c), { receiverPid: myPid, slot, review: review.trim(), voided: false, feedId, createdAt: serverTimestamp() });
+      batch.set(doc(db, "redemptions", c), {
+        receiverPid: myPid, slot, review: review.trim(), voided: false, feedId, createdAt: serverTimestamp(),
+        ...(card ? { cardMatch } : {}),
+      });
       batch.set(doc(db, "feed", feedId), { slot, review: review.trim(), voided: false, createdAt: serverTimestamp() });
       await batch.commit();
       setCode("");
@@ -172,6 +206,15 @@ function CodeEntry({ myPid }) {
             placeholder="무엇을 받았고 어땠는지 적어 주세요" />
           <span className="counter">{review.trim().length}자</span>
         </label>
+        {card && (
+          <div className="card-check">
+            <p className="small">마니또가 고른 카드: <b>{LEVEL_LABEL[card.level] || card.level}</b> · {card.text}</p>
+            <label className="check">
+              <input type="checkbox" checked={cardMatch} onChange={(e) => setCardMatch(e.target.checked)} />
+              받은 것이 이 카드 내용과 같아요 (다르면 체크를 풀어 주세요. 도전 카드일 때 추가 응모권에 영향이 있어요)
+            </label>
+          </div>
+        )}
         {msg.text && <p className={msg.type === "error" ? "error" : "note"} role="status">{msg.text}</p>}
         <button className="pk-btn main" disabled={busy || !running}>인증하기</button>
       </form>
@@ -292,16 +335,16 @@ function Suspects({ myPid, hintPart }) {
   }, [myPid]);
 
   async function toggle(pid) {
-    await updateDoc(doc(db, "users", user.uid), { eliminated: eliminated.has(pid) ? arrayRemove(pid) : arrayUnion(pid) });
+    await updateDoc(doc(db, "users", user.uid), { eliminated: eliminated.has(pid) ? arrayRemove(pid) : arrayUnion(pid), ...bump() });
   }
 
   async function submitGuess(e) {
     e.preventDefault();
     if (!pick) return;
     try {
-      await setDoc(doc(db, "guesses", myPid), { guessPid: pick, createdAt: serverTimestamp() });
+      await setDoc(doc(db, "guesses", myPid), { guessPid: pick, createdAt: serverTimestamp(), ...bump() }, { merge: true });
       // 운영자가 지목 안 한 사람을 알 수 있게 "지목함"만 표시한다(누구를 지목했는지는 남기지 않음).
-      await setDoc(doc(db, "progress", myPid), { guessed: true }, { merge: true });
+      await setDoc(doc(db, "progress", myPid), { guessed: true, ...bump() }, { merge: true });
       setGuess(pick);
       setMsg("지목했어요. 마감 전까지는 바꿀 수 있어요.");
     } catch {

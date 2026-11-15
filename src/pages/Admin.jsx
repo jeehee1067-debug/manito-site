@@ -6,7 +6,7 @@ import { db } from "../firebase.js";
 import { useApp } from "../App.jsx";
 import { Panel } from "../ui.jsx";
 import { PHASE, PHASES, CLUE_COUNT, LEVEL_LABEL, LOCS, PART_HINT_IDX, RULES_VERSION } from "../lib/constants.js";
-import { SLOT_STATUS_LABEL, pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../lib/pairs.js";
+import { SLOT_STATUS_LABEL, clueAnswers, cluesDoneSet, pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../lib/pairs.js";
 import { assignManito, assignmentMemo, generateCodes, makeInviteCode } from "../lib/assign.js";
 import { computeTickets, partStandings, pickMostTickets, rankBestManito, weeklyPartBoard } from "../lib/scoring.js";
 import { PRIZES } from "../config/prizes.js";
@@ -49,12 +49,15 @@ function usePairs() {
   const reports = useColl("reports");
   const verdicts = useColl("verdicts");
   const guesses = useColl("guesses");
-  const ready = [assignments, giverCodes, missions, redemptions, reports, verdicts, guesses].every(Boolean);
-  const rows = useMemo(
-    () => (ready ? pairRows({ assignments, giverCodes, missions, redemptions, reports, verdicts, guesses }) : []),
-    [ready, assignments, giverCodes, missions, redemptions, reports, verdicts, guesses]
-  );
-  return { ready, rows, assignments, giverCodes };
+  const deliveries = useColl("deliveries");
+  const ready = [assignments, giverCodes, missions, redemptions, reports, verdicts, guesses, deliveries].every(Boolean);
+  const rows = useMemo(() => {
+    if (!ready) return [];
+    // 완료 알림 문서가 있는 주차도 "완료를 알린 주차"로 본다(집계 scoring.js와 같은 기준)
+    const delivered = new Set(Object.values(deliveries).filter((d) => d.kind !== "note").map((d) => `${d.receiverPid}_${d.slot}`));
+    return pairRows({ assignments, giverCodes, missions, redemptions, reports, verdicts, guesses, delivered });
+  }, [ready, assignments, giverCodes, missions, redemptions, reports, verdicts, guesses, deliveries]);
+  return { ready, rows, assignments, giverCodes, missions, guesses };
 }
 
 // 운영 화면은 명단 전체(가입 여부·수상 제외 포함)를 쓴다. 참여자 화면은 public/roster 요약만 읽는다.
@@ -89,11 +92,25 @@ function useAccountEmails() {
 // 그 사람의 프로필·미션·인증 기록은 명단 번호(pid)에 붙어 있어서, 새 코드로 다시 연결하면 그대로 이어진다.
 async function unlinkPerson(r, oldCode, email) {
   if (!r.uid) return null;
-  if (!window.confirm(`${r.name}님의 계정 연결을 풀까요?\n연결된 메일: ${email || "(모름)"}\n\n이 계정은 더 이상 ${r.name}님으로 들어올 수 없고, 초대 코드가 새로 바뀌어요. 새 코드를 본인에게 전달하면 새 계정(또는 같은 계정)으로 다시 연결할 수 있어요. 기록(프로필·미션·인증)은 그대로 남아요.`)) return null;
+  if (!window.confirm(`${r.name}님의 계정 연결을 풀까요?\n연결된 메일: ${email || "(모름)"}\n\n요청한 사람이 정말 ${r.name}님인지 직접(대면·본인 메신저) 확인했나요? 다른 사람이 "비밀번호를 잊었다"며 요청해 새 초대 코드를 받아 가면 ${r.name}님 행세를 할 수 있어요.\n\n이 계정은 더 이상 ${r.name}님으로 들어올 수 없고, 초대 코드가 새로 바뀌어요. 새 코드는 본인에게만 전달하세요. 기록(프로필·미션·인증)은 그대로 남아요.`)) return null;
   const code = makeInviteCode();
+  // 그 계정의 연결 문서가 이 사람을 가리킬 때만 지운다(다른 이름에 연결된 계정의 연결까지 지우지 않게)
+  const linked = await getDoc(doc(db, "users", r.uid)).catch(() => null);
   const b = writeBatch(db);
   b.update(doc(db, "roster", r.pid), { uid: null });
-  b.delete(doc(db, "users", r.uid));
+  if (linked?.exists() && linked.data().personId === r.pid) b.delete(doc(db, "users", r.uid));
+  if (oldCode) b.delete(doc(db, "invites", oldCode));
+  b.set(doc(db, "invites", code), { personId: r.pid });
+  await b.commit();
+  return code;
+}
+
+// 초대 코드 새로 만들기(아직 연결 안 한 사람): 예전 코드를 지우고 새 코드를 만든다. 코드가 새어 나갔을 때 쓴다.
+async function renewInvite(r, oldCode) {
+  if (r.uid) return null;
+  if (!window.confirm(`${r.name}님의 초대 코드를 새로 만들까요?\n\n예전 코드(${oldCode || "없음"})는 더 이상 쓸 수 없어요. 새 코드를 본인에게만 전달해 주세요.`)) return null;
+  const code = makeInviteCode();
+  const b = writeBatch(db);
   if (oldCode) b.delete(doc(db, "invites", oldCode));
   b.set(doc(db, "invites", code), { personId: r.pid });
   await b.commit();
@@ -103,11 +120,13 @@ async function unlinkPerson(r, oldCode, email) {
 // 명단이 요약과 다르면 요약 문서를 다시 쓴다(명단 추가·삭제·근무지·파트 변경 후 자동).
 // 파트 순위 발표(public/board). 실시간으로 올리지 않고 운영자가 누를 때만 쓴다
 // (실시간이면 미션을 받은 직후 어느 파트 숫자가 올랐는지로 마니또의 파트가 드러난다).
-// roster: 명단 전체, progress: { pid: { doneCount } }, week: 열린 주차. 반환: 순위에 든 파트 수
-async function publishPartBoard(roster, progress, week) {
+// 완료 수는 각자 쓰는 progress.doneCount가 아니라 완료 표시(giverMissions.done)로 센다(완료 알림과 한 묶음으로만 켜지는 값).
+// roster: 명단 전체, missions: { pid: { done } }, week: 열린 주차. 반환: 순위에 든 파트 수
+const doneCountOf = (m) => Object.values(m?.done || {}).filter(Boolean).length;
+async function publishPartBoard(roster, missions, week) {
   const w = Math.min(3, Math.max(1, week || 1));
   const people = roster.map((r) => ({ pid: r.pid, part: (r.part || "").trim() || null, joined: Boolean(r.uid), dropout: Boolean(r.dropout) }));
-  const doneCounts = Object.fromEntries(Object.entries(progress).map(([pid, p]) => [pid, p.doneCount || 0]));
+  const doneCounts = Object.fromEntries(roster.map((r) => [r.pid, doneCountOf(missions[r.pid])]));
   const parts = weeklyPartBoard(people, doneCounts, w).map(({ part, members, done, max }) => ({ part, members, done, max }));
   await setDoc(doc(db, "public", "board"), { week: w, at: serverTimestamp(), parts });
   return parts.length;
@@ -144,7 +163,7 @@ export default function Admin() {
     if (!window.confirm(`${PHASES[phase]} → ${PHASES[phase + 1]}\n\n${NEXT_PHASE_NOTE[phase]}${warn}\n\n되돌릴 수 없어요. 진행할까요?`)) return;
     if (phase === PHASE.SETUP && fullRoster) await publishRoster(fullRoster);
     // 미션을 마감할 때 파트 순위를 마지막으로 한 번 더 발표한다(마감 뒤에는 숫자가 더 바뀌지 않는다). 실패해도 단계는 넘긴다.
-    if (phase === PHASE.RUNNING && fullRoster) await readAll("progress").then((pr) => publishPartBoard(fullRoster, pr, config.week)).catch(() => {});
+    if (phase === PHASE.RUNNING && fullRoster) await readAll("giverMissions").then((gm) => publishPartBoard(fullRoster, gm, config.week)).catch(() => {});
     try {
       await updateDoc(doc(db, "config", "app"), { phase: phase + 1 });
     } catch {
@@ -174,6 +193,7 @@ export default function Admin() {
       {phase === PHASE.VOTING && <VotingAdmin />}
       {phase === PHASE.SCORING && <Scoring />}
       {phase >= PHASE.RUNNING && <Accounts />}
+      {phase >= PHASE.RUNNING && <WriteCounts />}
       <CoAdmins />
       {phase === PHASE.REVEAL && <Panel title="공개"><p>결과 탭에서 추첨을 진행하세요.</p></Panel>}
     </>
@@ -195,6 +215,14 @@ function RulesCheck() {
     </p>
   );
 }
+
+// 처음 운영자(admins[0])인지. 명단 추가·삭제, 초대 코드, 연결 해제, 운영자 목록은 처음 운영자만 한다(보안 규칙).
+function useIsOwner() {
+  const { config, user } = useApp();
+  return user.uid === (config.admins || [])[0];
+}
+// 초대 코드·메일은 처음에 가려 둔다(사무실에서 화면을 보면 아직 연결 안 한 사람의 코드로 그 사람 행세를 할 수 있어서).
+const mask = (v, on) => (on ? v : v ? "●●●●●●" : v);
 
 // 공지: 모든 참여자 화면 위쪽에 보인다. 마감 날짜, 이번 주 할 일 같은 안내에 쓴다.
 function Notice() {
@@ -233,6 +261,9 @@ function CoAdmins() {
   const [msg, setMsg] = useState("");
   // 예전 방식(참여자를 공동 운영자로 지정)으로 남아 있는 계정. 참여자가 짝을 볼 수 있게 되므로 정리해야 한다.
   const linkedAdmins = roster.filter((r) => r.uid && admins.includes(r.uid));
+  // 운영자 목록은 처음 운영자(admins[0])만 바꾼다(보안 규칙). 공동 운영자가 처음 운영자를 내보내거나 계정을 늘릴 수 없다.
+  const founder = admins[0];
+  const isFounder = user.uid === founder;
 
   async function add(e) {
     e.preventDefault();
@@ -254,7 +285,7 @@ function CoAdmins() {
   }
 
   async function remove(id) {
-    if (id === user.uid) return window.alert("내 운영자 권한은 여기서 뺄 수 없어요. 다른 운영자에게 부탁하세요.");
+    if (id === founder) return window.alert("처음 운영자의 권한은 뺄 수 없어요.");
     if (!window.confirm(`${notes[id] || "이 계정"}의 운영자 권한을 뺄까요?`)) return;
     await updateDoc(doc(db, "config", "app"), { admins: arrayRemove(id), [`adminNotes.${id}`]: deleteField() });
     setMsg("운영자 권한을 뺐어요.");
@@ -266,6 +297,7 @@ function CoAdmins() {
         운영자가 자리를 비워도 진행이 멈추지 않게 한 명 이상 더 지정해 두는 것을 권해요. 운영자와 공동 운영자는 <b>마니또에 참여하지 않는 계정</b>이에요
         (짝과 진행 상황을 볼 수 있어서요). 지정할 사람이 사이트 주소 끝에 <code>?setup</code>을 붙여 들어가 "운영자 계정 만들기"로 계정을 만들면
         화면에 <b>계정 번호</b>가 나와요. 그 번호를 받아 아래에 넣어 주세요.
+        운영자 목록은 <b>처음 운영자만</b> 바꿀 수 있고, 처음 운영자는 아무도 뺄 수 없어요.
       </p>
       {linkedAdmins.length > 0 && (
         <p className="error" role="alert">
@@ -279,15 +311,16 @@ function CoAdmins() {
           return (
             <li key={id} className="row-item">
               <span>
-                <strong>{notes[id] || (linked ? `${linked.name} (참여자)` : "운영자")}</strong>{id === user.uid && " (나)"}
+                <strong>{notes[id] || (linked ? `${linked.name} (참여자)` : "운영자")}</strong>{id === founder && " · 처음 운영자"}{id === user.uid && " (나)"}
                 <span className="small muted account-id"> 계정 번호 {id}</span>
               </span>
-              {id !== user.uid && <button className="text-btn" onClick={() => remove(id)}>권한 빼기</button>}
+              {isFounder && id !== founder && <button className="text-btn" onClick={() => remove(id)}>권한 빼기</button>}
             </li>
           );
         })}
       </ul>
-      <form className="stack" onSubmit={add}>
+      {!isFounder && <p className="small muted">공동 운영자는 운영자 목록을 바꿀 수 없어요. 처음 운영자에게 부탁하세요.</p>}
+      {isFounder && <form className="stack" onSubmit={add}>
         <label>
           <span className="panel-label">계정 번호</span>
           <input className="pk-input mono" value={uid} onChange={(e) => setUid(e.target.value)} autoComplete="off" placeholder="연결 전 화면에 나오는 계정 번호" aria-label="공동 운영자 계정 번호" />
@@ -297,7 +330,7 @@ function CoAdmins() {
           <input className="pk-input" value={memo} maxLength={20} onChange={(e) => setMemo(e.target.value)} placeholder="예: PL님" aria-label="공동 운영자 메모" />
         </label>
         <button className="pk-btn main sm" disabled={!uid.trim()}>공동 운영자로 지정</button>
-      </form>
+      </form>}
       {msg && <p className="note" role="status">{msg}</p>}
     </Panel>
   );
@@ -305,6 +338,8 @@ function CoAdmins() {
 
 function Setup() {
   const { config } = useApp();
+  const isOwner = useIsOwner();
+  const [showSecret, setShowSecret] = useState(false);
   const full = useFullRoster();
   const roster = full || [];
   const loaded = full !== null; // 명단을 다 읽기 전에 추가하면 번호(p001…)가 겹칠 수 있다
@@ -442,7 +477,8 @@ function Setup() {
           최종 지목이 열릴 때 "내 마니또는 ○○ 소속" 단서가 자동으로 나가요. 파트 순위도 이 파트로 매겨요.
         </p>
         <textarea className="pk-input" rows={6} value={text} onChange={(e) => setText(e.target.value)} placeholder={"홍길동,SR3,공정파트\n김철수,S1L,소자파트"} />
-        <button className="pk-btn main" onClick={addPeople} disabled={busy || !loaded}>명단에 추가</button>
+        <button className="pk-btn main" onClick={addPeople} disabled={busy || !loaded || !isOwner}>명단에 추가</button>
+        {!isOwner && <p className="small muted">명단 추가·삭제와 초대 코드는 처음 운영자만 할 수 있어요.</p>}
       </Panel>
 
       <Panel title="2. 마니또 배정">
@@ -469,7 +505,10 @@ function Setup() {
       {msg && <p className="note banner" role="status">{msg}</p>}
 
       <Panel title={`명단 ${roster.length}명`}>
-        <button className="pk-btn sm" onClick={() => navigator.clipboard.writeText(inviteText)}>이름과 초대 코드 복사</button>
+        <div className="reveal-row">
+          <button className="pk-btn sm" aria-pressed={showSecret} onClick={() => setShowSecret(!showSecret)}>{showSecret ? "초대 코드·메일 가리기" : "초대 코드·메일 보기"}</button>
+          <button className="pk-btn sm" onClick={() => navigator.clipboard.writeText(inviteText)}>이름과 초대 코드 복사</button>
+        </div>
         <div className="table-wrap">
           <table className="pk-table">
             <thead><tr><th>이름</th><th>근무지</th><th>파트</th><th>초대 코드</th><th>연결된 메일</th><th></th></tr></thead>
@@ -479,12 +518,12 @@ function Setup() {
                   <td>{r.name}</td>
                   <td><button className="text-btn" onClick={() => cycleLoc(r)} title="눌러서 근무지 바꾸기">{r.loc || "미정"}</button></td>
                   <td><button className="text-btn" onClick={() => editPart(r)} title="눌러서 파트 바꾸기">{r.part || "미정"}</button></td>
-                  <td className="mono">{invites[r.pid] || "-"}</td>
-                  <td className="email">{r.uid ? emails[r.uid] || "연결됨" : "-"}</td>
+                  <td className="mono">{mask(invites[r.pid], showSecret) || "-"}</td>
+                  <td className="email">{r.uid ? mask(emails[r.uid], showSecret) || "연결됨" : "-"}</td>
                   <td>
-                    {r.uid
+                    {isOwner && (r.uid
                       ? <button className="text-btn" onClick={async () => { const c = await unlinkPerson(r, invites[r.pid], emails[r.uid]); if (c) setMsg(`${r.name}님 연결을 풀었어요. 새 초대 코드: ${c}`); }}>연결 해제</button>
-                      : <button className="text-btn" onClick={() => removePerson(r)}>삭제</button>}
+                      : <button className="text-btn" onClick={() => removePerson(r)}>삭제</button>)}
                   </td>
                 </tr>
               ))}
@@ -508,6 +547,7 @@ function seenText(ts) {
 function Running() {
   const { config } = useApp();
   const roster = useFullRoster() || [];
+  const missions = useColl("giverMissions") || {};
   const [progress, setProgress] = useState({});
   const [received, setReceived] = useState({});
   const [nudges, setNudges] = useState(new Set());
@@ -545,7 +585,7 @@ function Running() {
   const clueCap = Math.min(CLUE_COUNT, 2 * (config.week || 1));
   const canRelease = released < clueCap;
 
-  const publishBoard = () => publishPartBoard(roster, progress, config.week);
+  const publishBoard = () => publishPartBoard(roster, missions, config.week);
   async function releaseClues() {
     if (!canRelease) return;
     try {
@@ -626,7 +666,7 @@ function Running() {
                   <td>{r.uid ? "O" : "-"}</td>
                   <td>{seenText(progress[r.pid]?.lastSeen)}</td>
                   <td>{progress[r.pid]?.profileDone ? "O" : "-"}</td>
-                  <td>{progress[r.pid]?.doneCount || 0}</td>
+                  <td>{doneCountOf(missions[r.pid])}</td>
                   <td>{received[r.pid] || 0}</td>
                   <td><button className="text-btn" onClick={() => toggleNudge(r.pid)}>{nudges.has(r.pid) ? "끄기" : "켜기"}</button></td>
                 </tr>
@@ -641,6 +681,8 @@ function Running() {
 
 // 계정 연결 관리(미션 시작 후). 엉뚱한 사람이 연결됐거나, 메일을 잘못 적었거나, 비밀번호를 못 찾을 때 연결을 푼다.
 function Accounts() {
+  const isOwner = useIsOwner();
+  const [showSecret, setShowSecret] = useState(false);
   const roster = useFullRoster() || [];
   const invites = useInvites();
   const emails = useAccountEmails();
@@ -650,7 +692,10 @@ function Accounts() {
     <Panel title="계정 연결">
       <p className="small">
         이름마다 연결된 메일이 보여요. 다른 사람이 연결됐거나 메일·비밀번호 문제로 새 계정을 써야 하면 "연결 해제"를 누르고, 새로 나온 초대 코드를 본인에게 전달하세요. 기록은 그대로 이어져요.
+        아직 연결하지 않은 사람의 초대 코드가 다른 사람에게 알려졌을 수 있으면 "코드 새로 만들기"로 바꾸세요(먼저 연결하는 사람이 그 이름을 가져가요).
       </p>
+      {!isOwner && <p className="small muted">연결 해제와 초대 코드 새로 만들기는 처음 운영자만 할 수 있어요.</p>}
+      <button className="pk-btn sm" aria-pressed={showSecret} onClick={() => setShowSecret(!showSecret)}>{showSecret ? "초대 코드·메일 가리기" : "초대 코드·메일 보기"}</button>
       {msg && <p className="note" role="status">{msg}</p>}
       <div className="table-wrap">
         <table className="pk-table">
@@ -660,11 +705,11 @@ function Accounts() {
               <tr key={r.pid} className={r.uid ? "" : "warn"}>
                 <td>{r.part || "-"}</td>
                 <td>{r.name}</td>
-                <td className="mono">{invites[r.pid] || "-"}</td>
-                <td className="email">{r.uid ? emails[r.uid] || "연결됨" : "미연결"}</td>
-                <td>{r.uid && (
-                  <button className="text-btn" onClick={async () => { const c = await unlinkPerson(r, invites[r.pid], emails[r.uid]); if (c) setMsg(`${r.name}님 연결을 풀었어요. 새 초대 코드: ${c}`); }}>연결 해제</button>
-                )}</td>
+                <td className="mono">{mask(invites[r.pid], showSecret) || "-"}</td>
+                <td className="email">{r.uid ? mask(emails[r.uid], showSecret) || "연결됨" : "미연결"}</td>
+                <td>{isOwner && (r.uid
+                  ? <button className="text-btn" onClick={async () => { const c = await unlinkPerson(r, invites[r.pid], emails[r.uid]); if (c) setMsg(`${r.name}님 연결을 풀었어요. 새 초대 코드: ${c}`); }}>연결 해제</button>
+                  : <button className="text-btn" onClick={async () => { const c = await renewInvite(r, invites[r.pid]); if (c) setMsg(`${r.name}님 초대 코드를 새로 만들었어요: ${c} (예전 코드는 못 써요)`); }}>코드 새로 만들기</button>)}</td>
               </tr>
             ))}
           </tbody>
@@ -678,10 +723,10 @@ function Accounts() {
 // 지목을 안 하면 그 사람의 마니또가 은신 응모권 2장을 자동으로 받는다.
 function GuessStatus() {
   const roster = useFullRoster() || [];
-  const [progress, setProgress] = useState({});
-  useEffect(() => onSnapshot(collection(db, "progress"), (s) => setProgress(Object.fromEntries(s.docs.map((d) => [d.id, d.data()])))), []);
+  const guesses = useColl("guesses") || {};
   const rows = [...roster].filter((r) => r.uid).sort(byPartThenName);
-  const notYet = rows.filter((r) => !progress[r.pid]?.guessed);
+  const did = (pid) => Boolean(guesses[pid]?.guessPid);
+  const notYet = rows.filter((r) => !did(r.pid));
   return (
     <Panel title={`최종 지목 중 (안 한 사람 ${notYet.length}명)`}>
       <p className="small">누구를 지목했는지와 정답 여부는 아래 "짝 현황" 표에서 볼 수 있어요. 지목을 안 하면 그 사람의 마니또가 은신 응모권 2장을 받아요(미션이 1건 이상 인증된 마니또만).</p>
@@ -691,8 +736,8 @@ function GuessStatus() {
           <thead><tr><th>파트</th><th>이름</th><th>지목</th></tr></thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.pid} className={progress[r.pid]?.guessed ? "" : "warn"}>
-                <td>{r.part || "-"}</td><td>{r.name}</td><td>{progress[r.pid]?.guessed ? "O" : "-"}</td>
+              <tr key={r.pid} className={did(r.pid) ? "" : "warn"}>
+                <td>{r.part || "-"}</td><td>{r.name}</td><td>{did(r.pid) ? "O" : "-"}</td>
               </tr>
             ))}
           </tbody>
@@ -705,6 +750,7 @@ function GuessStatus() {
 function Moderation() {
   const { nameOf } = useApp();
   const roster = useFullRoster() || [];
+  const feed = useColl("feed") || {};
   const [items, setItems] = useState([]);
   useEffect(() => onSnapshot(collection(db, "redemptions"), (s) =>
     setItems(s.docs.map((d) => ({ code: d.id, ...d.data() })).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)))
@@ -717,6 +763,14 @@ function Moderation() {
     if (r.feedId) b.update(doc(db, "feed", r.feedId), { voided: !r.voided });
     await b.commit();
   };
+  // 피드에서만 가리기(응모권과 무관): 막말 후기로 마니또의 응모권을 깎으려는 경우에도 쓸 수 있게 무효 처리와 따로 둔다
+  const toggleHide = (r) => updateDoc(doc(db, "feed", r.feedId), { hidden: !feed[r.feedId]?.hidden });
+  const removeThanks = (r) => {
+    if (!window.confirm("이 감사 답장을 지울까요? 받는 사람은 다시 쓸 수 없어요.")) return;
+    return updateDoc(doc(db, "feed", r.feedId), { thanks: deleteField() });
+  };
+  // 받는 사람이 "카드와 달라요"로 인증한 것: 두 사람에게 확인한 뒤 되돌릴 수 있다(도전 추가분)
+  const toggleCard = (r) => updateDoc(doc(db, "redemptions", r.code), { cardMatch: r.cardMatch === false });
   const toggleDq = (r) => {
     if (!r.disqualified && !window.confirm(`${r.name}님을 응모권·수상에서 제외할까요?`)) return;
     return updateDoc(doc(db, "roster", r.pid), { disqualified: !r.disqualified });
@@ -729,17 +783,33 @@ function Moderation() {
   return (
     <>
       <Panel title="인증 검토">
-        <p className="small">내용 없는 인증은 무효 처리하세요. 무효 처리된 인증은 피드와 응모권에서 빠져요.</p>
+        <p className="small">
+          내용 없는 인증은 무효 처리하세요. 무효 처리된 인증은 피드와 응모권에서 빠져요.
+          미션은 제대로 했는데 후기나 답장만 문제라면 "피드에서 가리기"·"답장 지우기"를 쓰세요(응모권은 그대로예요).
+          "카드와 다름"은 받는 사람이 받은 것이 마니또가 고른 카드와 다르다고 한 것이에요(도전 카드면 추가 응모권이 빠져요).
+        </p>
         <ul className="plain">
-          {items.map((r) => (
-            <li key={r.code} className={r.voided ? "row-item voided" : "row-item"}>
-              <p>{r.review}</p>
-              <span className="small muted">{nameOf(r.receiverPid)} · {r.slot}주차</span>
-              <button className="text-btn" onClick={() => toggleVoid(r)}>{r.voided ? "무효 취소" : "무효 처리"}</button>
-            </li>
-          ))}
+          {items.map((r) => {
+            const f = r.feedId ? feed[r.feedId] : null;
+            return (
+              <li key={r.code} className={r.voided ? "row-item voided" : "row-item"}>
+                <p>{r.review}</p>
+                {f?.thanks && <p className="small">감사 답장: {f.thanks}</p>}
+                <span className="small muted">
+                  {nameOf(r.receiverPid)} · {r.slot}주차{f?.hidden ? " · 피드에서 가림" : ""}{r.cardMatch === false ? " · 카드와 다름" : ""}
+                </span>
+                <span className="inline">
+                  <button className="text-btn" onClick={() => toggleVoid(r)}>{r.voided ? "무효 취소" : "무효 처리"}</button>
+                  {f && <button className="text-btn" onClick={() => toggleHide(r)}>{f.hidden ? "피드에 다시 보이기" : "피드에서 가리기"}</button>}
+                  {f?.thanks && <button className="text-btn" onClick={() => removeThanks(r)}>답장 지우기</button>}
+                  {r.cardMatch === false && <button className="text-btn" onClick={() => toggleCard(r)}>카드와 같다고 고치기</button>}
+                </span>
+              </li>
+            );
+          })}
         </ul>
       </Panel>
+      <NotesReview />
       <Panel title="수상 제외">
         <p className="small">정체를 미리 알려준 사실 등 규칙 위반이 확인된 경우에만 사용하세요. 줄이 그어진 사람이 제외된 사람이에요.</p>
         <div className="name-chips">
@@ -760,6 +830,94 @@ function Moderation() {
         </div>
       </Panel>
     </>
+  );
+}
+
+// 쪽지 검토: 익명 쪽지로 괴롭히는 일이 없게 운영자가 미션 중에도 쪽지를 본다(운영자는 참여하지 않는다).
+// 받는 사람이 신고한 쪽지(noteFlags)가 먼저 보이고, 가리면 받는 사람 화면에서 내용이 안 보인다.
+function NotesReview() {
+  const { nameOf } = useApp();
+  const deliveries = useColl("deliveries");
+  const flags = useColl("noteFlags");
+  const assignments = useColl("assignments");
+  const [open, setOpen] = useState(false);
+  if (!deliveries || !flags || !assignments) return null;
+  const giverOf = Object.fromEntries(Object.entries(assignments).map(([g, a]) => [a.receiverPid, g]));
+  const list = Object.entries(deliveries)
+    .map(([id, d]) => ({ id, ...d, flagged: Boolean(flags[id]) }))
+    .filter((d) => d.message)
+    .sort((a, b) => Number(b.flagged) - Number(a.flagged) || (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+  const flaggedN = list.filter((d) => d.flagged && !d.hidden).length;
+  const toggleHide = (d) => updateDoc(doc(db, "deliveries", d.id), { hidden: !d.hidden });
+  const resolve = (d) => deleteDoc(doc(db, "noteFlags", d.id));
+  return (
+    <Panel title={`쪽지 검토 (신고 ${flaggedN}건)`}>
+      <p className="small">
+        마니또가 보낸 쪽지예요. 받는 사람이 신고한 쪽지가 먼저 나와요. 불쾌한 쪽지는 "가리기"를 누르면 받는 사람 화면에서 내용이 안 보여요.
+        보낸 사람이 함께 보이니 화면을 다른 사람이 보지 않게 주의해 주세요.
+      </p>
+      <button type="button" className="pk-btn sm" onClick={() => setOpen(!open)}>{open ? "쪽지 접기" : `쪽지 ${list.length}건 보기`}</button>
+      {open && (
+        <ul className="plain">
+          {list.map((d) => (
+            <li key={d.id} className={d.hidden ? "row-item voided" : d.flagged ? "row-item picked" : "row-item"}>
+              <p>{d.message}</p>
+              <span className="small muted">
+                {nameOf(giverOf[d.receiverPid])} → {nameOf(d.receiverPid)} · {d.slot}주차 {d.kind === "note" ? "추가 쪽지" : d.kind === "praise" ? "칭찬 카드" : "완료 알림"}
+                {d.flagged && " · 받는 사람이 신고함"}
+              </span>
+              <span className="inline">
+                <button className="text-btn" onClick={() => toggleHide(d)}>{d.hidden ? "다시 보이기" : "가리기"}</button>
+                {d.kind === "note" && <button className="text-btn" onClick={() => window.confirm("이 추가 쪽지를 지울까요? 응모권과는 관계없어요.") && deleteDoc(doc(db, "deliveries", d.id))}>지우기</button>}
+                {d.flagged && <button className="text-btn" onClick={() => resolve(d)}>신고 확인함</button>}
+              </span>
+            </li>
+          ))}
+          {list.length === 0 && <li className="muted small">내용이 있는 쪽지가 없어요.</li>}
+        </ul>
+      )}
+    </Panel>
+  );
+}
+
+// 쓰기 횟수: 참여자가 고칠 수 있는 문서마다 쓴 횟수(n)가 남는다(보안 규칙이 1씩 올리게 한다).
+// 무료 한도(하루 쓰기 2만 건)가 갑자기 차면 여기서 누구 문서인지 찾는다. 읽기 반복은 기록되지 않는다.
+function WriteCounts() {
+  const { nameOf, config } = useApp();
+  const [rows, setRows] = useState(null);
+  const [busy, setBusy] = useState(false);
+  async function load() {
+    setBusy(true);
+    const names = ["progress", "giverMissions", "profiles", "avatars", "reports", "guesses", "clues", "assignments", "users"];
+    if (config.phase >= PHASE.SCORING) names.push("votes");
+    const data = Object.fromEntries(await Promise.all(names.map(async (n) => [n, await readAll(n).catch(() => ({}))])));
+    const sum = {};
+    const add = (pid, n) => { if (pid && n) sum[pid] = (sum[pid] || 0) + n; };
+    for (const n of ["progress", "giverMissions", "profiles", "avatars", "guesses", "votes"]) {
+      Object.entries(data[n] || {}).forEach(([pid, d]) => add(pid, d.n));
+    }
+    Object.entries(data.reports).forEach(([id, d]) => add(id.split("_")[0], d.n));
+    Object.values(data.users).forEach((d) => add(d.personId, d.n));
+    // 단서는 받는 사람 앞으로 저장되지만 쓰는 사람은 그 사람의 마니또다
+    const giverOf = Object.fromEntries(Object.entries(data.assignments).map(([g, a]) => [a.receiverPid, g]));
+    Object.entries(data.clues).forEach(([id, d]) => add(giverOf[id.split("_")[0]], d.n));
+    setRows(Object.entries(sum).sort((a, b) => b[1] - a[1]).slice(0, 10));
+    setBusy(false);
+  }
+  return (
+    <Panel title="쓰기 횟수 (많은 순)">
+      <p className="small">
+        사이트가 갑자기 "저장하지 못했어요"로 멈추면(무료 한도 소진) 눌러 보세요. 사람마다 자기 문서를 고친 횟수예요.
+        보통은 수십 번 안쪽이에요. 수천 번이 넘는 사람이 있으면 일부러 반복한 것이라 연결 해제·수상 제외를 검토하세요. 읽기 반복은 기록되지 않아요.
+      </p>
+      <button type="button" className="pk-btn sm" onClick={load} disabled={busy}>{rows ? "다시 세기" : "쓰기 횟수 보기"}</button>
+      {rows && (
+        <ol className="plain">
+          {rows.map(([pid, n]) => <li key={pid}>{nameOf(pid)}: {n.toLocaleString()}번</li>)}
+          {rows.length === 0 && <li className="muted small">기록이 없어요.</li>}
+        </ol>
+      )}
+    </Panel>
   );
 }
 
@@ -786,8 +944,10 @@ function VotingAdmin() {
   async function buildCards() {
     if (cards.length && !window.confirm("투표 카드를 다시 만들까요? 이미 받은 투표와 평가는 무효가 돼요.")) return;
     setBusy(true);
-    const [giverCodes, redemptions] = await Promise.all([readAll("giverCodes"), readAll("redemptions")]);
+    const [giverCodes, redemptions, oldViews] = await Promise.all([readAll("giverCodes"), readAll("redemptions"), readAll("voteViews")]);
     const ops = cards.map((c) => (b) => { b.delete(doc(db, "voteCards", c.id)); b.delete(doc(db, "cardOwners", c.id)); });
+    Object.keys(oldViews).forEach((id) => ops.push((b) => b.delete(doc(db, "voteViews", id))));
+    const made2 = []; // [{ cardId, part }] 카드 주인의 파트(카드 문서에는 넣지 않는다)
     // 수상 대상이 아닌 마니또(가입 안 함·중도 이탈·수상 제외)는 카드를 만들지 않는다. 뽑힐 수 없는 카드에 표가 가지 않게.
     const byPid = Object.fromEntries(fullRoster.map((r) => [r.pid, r]));
     const eligible = (pid) => Boolean(byPid[pid]?.uid) && !byPid[pid].dropout && !byPid[pid].disqualified;
@@ -797,9 +957,18 @@ function VotingAdmin() {
       if (!eligible(giverPid)) { skipped++; continue; }
       const reviews = Object.values(codes).map((c) => redemptions[c]).filter((r) => r && !r.voided).map((r) => r.review);
       const cardId = doc(collection(db, "voteCards")).id;
-      ops.push((b) => b.set(doc(db, "voteCards", cardId), { reviews, part: (byPid[giverPid].part || "").trim() || null }));
+      // 카드에는 후기만 넣는다(주인의 파트가 있으면 참여자가 카드 주인을 좁힐 수 있다)
+      ops.push((b) => b.set(doc(db, "voteCards", cardId), { reviews }));
       ops.push((b) => b.set(doc(db, "cardOwners", cardId), { giverPid }));
+      made2.push({ cardId, part: byPid[giverPid].part || null });
       made++;
+    }
+    // 파트별로 보이는 카드 목록: 내 파트 카드는 빼고. 참여자는 자기 파트의 목록만 읽는다(보안 규칙).
+    // 파트 이름은 참여자 화면의 명단 요약(public/roster)과 같은 값을 쓴다.
+    const partsInUse = [...new Set(fullRoster.map((r) => r.part).filter(Boolean))];
+    for (const part of partsInUse) {
+      const viewId = doc(collection(db, "voteViews")).id;
+      ops.push((b) => b.set(doc(db, "voteViews", viewId), { part, cardIds: made2.filter((c) => c.part !== part).map((c) => c.cardId) }));
     }
     await commitInChunks(ops);
     setMsg(`투표 카드 ${made}장을 만들었어요.${skipped ? ` 수상 대상이 아닌 마니또 ${skipped}명(가입 안 함·중도 이탈·수상 제외)은 뺐어요.` : ""}`);
@@ -907,6 +1076,8 @@ function Pairs() {
   const { ready, rows, assignments, giverCodes } = usePairs();
   const receiverCodes = useColl("receiverCodes");
   const phase = config.phase;
+  const [shown, setShown] = useState(false); // 사무실에서 화면이 보일 수 있어서 처음에는 접어 둔다
+  const [clues, setClues] = useState(null); // 단서 확인(누를 때만 읽는다)
 
   // 예전 방식으로 배정된 자료에는 "받는 사람 기준 코드"가 없어서 인증(피드 글 확인)이 거부된다. 미션이 시작된 뒤에는 여기서 채워 넣는다.
   // (준비 단계에서는 배정할 때 같이 쓰므로 건드리지 않는다. 다시 배정하는 중간 상태를 덮어쓰지 않게)
@@ -939,17 +1110,41 @@ function Pairs() {
     );
   };
 
+  const ver = config.assignVer ?? 0;
+  const clueCell = (r) => {
+    const a = clueAnswers(clues, r.receiverPid, ver);
+    const n = a.filter(Boolean).length;
+    return (
+      <td className={n === 6 ? "" : "st-sent"}>
+        <details>
+          <summary>{n} / 6</summary>
+          <ol className="clue-list">{a.map((x, i) => <li key={i}>{x ?? "(빈 칸)"}</li>)}</ol>
+        </details>
+      </td>
+    );
+  };
+
   return (
     <Panel title={`짝 현황 (${rows.length}쌍)`}>
       <p className="small">
-        누가 누구의 마니또인지와 주차별 진행이에요. 운영자 화면에만 보여요(운영자·공동 운영자는 참여하지 않는 계정이에요). 화면을 다른 사람이 보지 않게 주의해 주세요.
+        누가 누구의 마니또인지와 주차별 진행이에요. 운영자 화면에만 보여요(운영자·공동 운영자는 참여하지 않는 계정이에요).
         {" "}인증됨 {count("redeemed")} · 인증 대기 {count("sent")} · 신고 {count("reported")} · 받았음 확인 {count("confirmed")} · 못 받음 확인 {count("missing")}
         {count("voided") > 0 && ` · 인증 무효 ${count("voided")}`}
       </p>
-      <div className="table-wrap">
+      <div className="reveal-row">
+        <button type="button" className="pk-btn sm" aria-pressed={shown} onClick={() => setShown(!shown)}>{shown ? "짝 현황 가리기" : "짝 현황 보기"}</button>
+        {shown && (
+          <button type="button" className="pk-btn sm" onClick={() => readAll("clues").then(setClues).catch(() => setClues({}))}>
+            {clues ? "단서 다시 불러오기" : "마니또가 낸 단서 보기"}
+          </button>
+        )}
+      </div>
+      {!shown && <p className="small muted">사무실에서 옆 사람이 볼 수 있어서 접어 뒀어요. 볼 때만 펼치세요.</p>}
+      {shown && clues && <p className="small">단서: 마니또가 대상에게 낸 프로필 답이에요. 사실과 다르면(거짓 단서) 수상 제외를 검토하세요. 6칸을 다 내지 않은 마니또는 은신 응모권이 없어요.</p>}
+      {shown && <div className="table-wrap">
         <table className="pk-table pair-table">
           <thead>
-            <tr><th>마니또</th><th>대상</th><th>1주차</th><th>2주차</th><th>3주차</th>{showGuess && <th>대상의 지목</th>}</tr>
+            <tr><th>마니또</th><th>대상</th><th>1주차</th><th>2주차</th><th>3주차</th>{showGuess && <th>대상의 지목</th>}{clues && <th>단서</th>}</tr>
           </thead>
           <tbody>
             {sorted.map((r) => (
@@ -962,22 +1157,49 @@ function Pairs() {
                     {r.guessPid ? `${nameOf(r.guessPid)} (${r.correct ? "정답" : "오답"})` : "지목 안 함"}
                   </td>
                 )}
+                {clues && clueCell(r)}
               </tr>
             ))}
           </tbody>
         </table>
-      </div>
+      </div>}
     </Panel>
   );
 }
 
+// 응모권 계산에 필요한 자료를 모두 읽어 계산한다. 집계하기와 검산이 같이 쓴다.
+async function calcAll(roster, assignVer) {
+  const [assignments, giverCodes, redemptions, missions, guesses, votes, owners, evals, deliveries, verdicts, clues] = await Promise.all(
+    ["assignments", "giverCodes", "redemptions", "giverMissions", "guesses", "votes", "cardOwners", "adminEval", "deliveries", "verdicts", "clues"].map(readAll)
+  );
+  const people = roster.map((r) => ({
+    pid: r.pid, part: (r.part || "").trim() || null,
+    disqualified: Boolean(r.disqualified), joined: Boolean(r.uid), dropout: Boolean(r.dropout),
+  }));
+  const tickets = computeTickets({
+    deliveries: Object.values(deliveries).map((d) => ({ receiverPid: d.receiverPid, slot: d.slot })),
+    people,
+    assignments: Object.fromEntries(Object.entries(assignments).map(([g, a]) => [g, a.receiverPid])),
+    giverCodes: Object.fromEntries(Object.entries(giverCodes).map(([g, c]) => [g, c.codes])),
+    redemptions,
+    missions,
+    guesses: Object.fromEntries(Object.entries(guesses).map(([r, g]) => [r, g.guessPid])),
+    // 운영자의 주차별 확인 결과: 받았음 → 마니또의 미션 인정, 못 받음 → 받는 사람 보상
+    verdicts: Object.fromEntries(Object.entries(verdicts).map(([id, v]) => [id, v.verdict])),
+    // 단서 6개를 다 낸 마니또만 은신 응모권
+    cluesDone: cluesDoneSet(assignments, clues, assignVer ?? 0),
+  });
+  return { assignments, votes, owners, evals, deliveries, people, tickets };
+}
+
 function Scoring() {
-  const { nameOf } = useApp();
+  const { nameOf, config } = useApp();
   const fullRoster = useFullRoster();
   const roster = fullRoster || [];
   const [result, setResult] = useState(null);
   const [reviews, setReviews] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [audit, setAudit] = useState(null); // 검산 결과
 
   useEffect(() => {
     const offs = [
@@ -987,38 +1209,40 @@ function Scoring() {
     return () => offs.forEach((o) => o());
   }, []);
 
+  const [error, setError] = useState("");
   async function compute() {
     setBusy(true);
-    const [assignments, giverCodes, redemptions, missions, guesses, votes, owners, evals, deliveries, verdicts] = await Promise.all(
-      ["assignments", "giverCodes", "redemptions", "giverMissions", "guesses", "votes", "cardOwners", "adminEval", "deliveries", "verdicts"].map(readAll)
-    );
-    const people = roster.map((r) => ({
-      pid: r.pid, part: (r.part || "").trim() || null,
-      disqualified: Boolean(r.disqualified), joined: Boolean(r.uid), dropout: Boolean(r.dropout),
-    }));
-    const tickets = computeTickets({
-      deliveries: Object.values(deliveries).map((d) => ({ receiverPid: d.receiverPid, slot: d.slot })),
-      people,
-      assignments: Object.fromEntries(Object.entries(assignments).map(([g, a]) => [g, a.receiverPid])),
-      giverCodes: Object.fromEntries(Object.entries(giverCodes).map(([g, c]) => [g, c.codes])),
-      redemptions,
-      missions,
-      guesses: Object.fromEntries(Object.entries(guesses).map(([r, g]) => [r, g.guessPid])),
-      // 운영자의 주차별 확인 결과: 받았음 → 마니또의 미션 인정, 못 받음 → 받는 사람 보상
-      verdicts: Object.fromEntries(Object.entries(verdicts).map(([id, v]) => [id, v.verdict])),
-    });
+    setAudit(null);
+    setError("");
+    try {
+      await computeAndSave();
+    } catch (err) {
+      setError(`집계를 저장하지 못했어요(${err?.code || err?.message || "알 수 없는 오류"}). 쪽지가 비정상적으로 많으면 "쪽지 검토"에서 정리한 뒤 다시 눌러 주세요.`);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function computeAndSave() {
+    const { assignments, votes, owners, evals, deliveries, people, tickets } = await calcAll(roster, config.assignVer);
     // 수상 제외·불참(가입 안 함, 중도 이탈)은 베스트 마니또에서도 뺀다
     const disqualified = new Set(people.filter((p) => p.disqualified || !p.joined || p.dropout).map((p) => p.pid));
     const ranked = rankBestManito({
       cards: Object.entries(owners).map(([cardId, o]) => ({ cardId, giverPid: o.giverPid })),
-      votes: Object.fromEntries(Object.entries(votes).map(([v, x]) => [v, x.cardIds || []])),
+      // 수상 대상이 아닌 사람(가입 안 함·중도 이탈·수상 제외)의 표는 세지 않는다
+      votes: Object.fromEntries(Object.entries(votes).filter(([v]) => !disqualified.has(v)).map(([v, x]) => [v, x.cardIds || []])),
       adminEval: Object.fromEntries(Object.entries(evals).map(([c, e]) => [c, e.score])),
       tickets,
       disqualified,
       partOf: Object.fromEntries(people.map((p) => [p.pid, p.part])), // 내 파트 카드는 못 보므로 파트 인원 차이를 보정한다
     });
     const most = pickMostTickets(tickets);
-    const praises = Object.values(deliveries).filter((d) => d.kind === "praise").map((d) => ({ receiverPid: d.receiverPid, message: d.message }));
+    // 칭찬 벽: 받는 사람마다 1건(예전 방식으로 여러 건이 쌓였어도), 운영진이 가린 것은 빼고, 너무 길면 자른다
+    const praiseBy = {};
+    Object.values(deliveries)
+      .filter((d) => d.kind === "praise" && !d.hidden && d.message)
+      .sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0))
+      .forEach((d) => { praiseBy[d.receiverPid] ||= { receiverPid: d.receiverPid, message: String(d.message).slice(0, 500) }; });
+    const praises = Object.values(praiseBy);
 
     // 추첨은 공개 단계에서만 한다(보안 규칙: 집계 단계의 결과에는 추첨 결과가 비어 있어야 한다).
     await setDoc(doc(db, "results", "public"), {
@@ -1033,10 +1257,22 @@ function Scoring() {
       draws: {},
       computedAt: serverTimestamp(),
     });
-    setBusy(false);
   }
 
   const pickReview = (r) => updateDoc(doc(db, "results", "public"), { bestReview: { code: r.code, review: r.review, receiverPid: r.receiverPid } });
+
+  // 검산: 저장된 결과의 응모권을 지금 자료로 다시 계산해 비교한다(저장하지 않음).
+  // 다른 운영자가 집계했거나 집계 뒤에 결과가 바뀌었는지 확인할 때 쓴다. 공개 단계에서도 결과 탭에서 볼 수 있다.
+  async function check() {
+    setBusy(true);
+    const { tickets } = await calcAll(roster, config.assignVer);
+    const saved = result?.tickets || {};
+    const diff = [...new Set([...Object.keys(saved), ...Object.keys(tickets)])]
+      .filter((pid) => (saved[pid] ?? 0) !== (tickets[pid]?.total ?? 0))
+      .map((pid) => ({ pid, saved: saved[pid] ?? 0, now: tickets[pid]?.total ?? 0 }));
+    setAudit(diff);
+    setBusy(false);
+  }
 
   return (
     <>
@@ -1046,7 +1282,14 @@ function Scoring() {
           응모권, 베스트 마니또 순위, 최다 응모권상, 칭찬 벽을 계산해요. 위 "집계 전 확인"과 수상 제외·중도 이탈 표시를 먼저 끝내고 누르세요.
           다시 누르면 다시 계산돼요(동점을 무작위로 가른 것도 다시 뽑아요). 집계해야 공개 단계로 넘어갈 수 있고, 공개 단계로 넘어간 뒤에는 다시 집계할 수 없어요.
         </p>
-        <button className="pk-btn main" onClick={compute} disabled={busy || !fullRoster}>{result ? "다시 집계" : "집계하기"}</button>
+        <div className="reveal-row">
+          <button className="pk-btn main" onClick={compute} disabled={busy || !fullRoster}>{result ? "다시 집계" : "집계하기"}</button>
+          {result && <button className="pk-btn sm" onClick={check} disabled={busy || !fullRoster}>검산(다시 계산해 비교)</button>}
+        </div>
+        {error && <p className="error" role="alert">{error}</p>}
+        {audit && (audit.length === 0
+          ? <p className="note" role="status">검산: 저장된 응모권이 지금 자료로 다시 계산한 값과 모두 같아요.</p>
+          : <p className="error" role="alert">검산: {audit.length}명이 달라요 — {audit.map((x) => `${nameOf(x.pid)} 저장 ${x.saved}장/다시 계산 ${x.now}장`).join(", ")}. 집계 뒤에 확인·제외 표시가 바뀌었으면 다시 집계하세요.</p>)}
         {result && (
           <ul className="plain">
             <li>베스트 마니또: {result.bestManito.map((b, i) => `${i + 1}위 ${nameOf(b.pid)}(${b.score})`).join(", ")}</li>

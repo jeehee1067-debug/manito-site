@@ -8,11 +8,19 @@ import {
 } from "firebase/auth";
 import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
 import { auth, db } from "../firebase.js";
+import { bump } from "./writes.js";
 
 // 로그인은 실제 메일 주소로 한다. 비밀번호를 잊으면 이 주소로 Firebase가 재설정 메일을 보낸다.
-// 메일 주소는 Firebase Authentication에만 있고 Firestore에는 저장하지 않는다(다른 참여자는 볼 수 없음).
+// 메일 주소는 Firebase Authentication과 내 연결 문서(users/{uid}.email, 본인과 운영자만 읽음)에만 있다.
 export function normalizeEmail(input) {
   return (input || "").trim().toLowerCase();
+}
+
+// 새 비밀번호 규칙: 8자 이상, 글자와 숫자를 섞어서. (Firebase는 6자만 요구한다. 계정이 털리면 그 사람의 대상이 보이므로 더 세게)
+export function validatePassword(pw) {
+  if ((pw || "").length < 8) return "비밀번호는 8자 이상으로 정해 주세요.";
+  if (!/[A-Za-z가-힣]/.test(pw) || !/[0-9]/.test(pw)) return "비밀번호에 글자와 숫자를 섞어 주세요.";
+  return null;
 }
 
 export function validateEmail(input) {
@@ -57,7 +65,7 @@ export async function claimWithInvite(inviteInput) {
   }
   try {
     // email: 운영 화면 "연결된 메일"용(본인과 운영자만 읽음). 규칙이 로그인한 계정의 메일과 같은지 확인한다.
-    await setDoc(doc(db, "users", uid), { personId, eliminated: [], email: auth.currentUser.email });
+    await setDoc(doc(db, "users", uid), { personId, eliminated: [], email: auth.currentUser.email, ...bump() }, { merge: true });
   } catch (err) {
     if (err?.code === "permission-denied") throw new Error("이미 다른 계정에 연결된 초대 코드예요. 운영진에게 알려 주세요.");
     throw err;
