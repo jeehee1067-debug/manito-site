@@ -80,7 +80,7 @@ async function advance(admin, to) {
 const step = (s) => console.log("▶", s);
 
 (async () => {
-  const { PROFILE_QUESTIONS } = await import("/home/user/manito-site/src/lib/constants.js");
+  const { PROFILE_QUESTIONS } = await import(require("node:url").pathToFileURL(require("node:path").join(__dirname, "../src/lib/constants.js")).href);
   // i번째 사람이 q번 문항에 넣는 답: 고르기는 보기를 돌려 가며, 직접 쓰기는 "이름의답N"
   const answerOf = (i, q) => (PROFILE_QUESTIONS[q].options ? PROFILE_QUESTIONS[q].options[(i + q) % PROFILE_QUESTIONS[q].options.length] : `${PEOPLE[i].name}의답${q + 1}`);
   const answersOf = (name) => PROFILE_QUESTIONS.map((_, q) => answerOf(PEOPLE.findIndex((p) => p.name === name), q));
@@ -168,7 +168,7 @@ const step = (s) => console.log("▶", s);
     const qs = page.locator(".profile-q");
     if (i === 0) {
       // 형식 검사: 고르기를 안 고르면, 직접 쓰기가 한 글자면 저장되지 않는다
-      await page.getByRole("button", { name: "저장" }).click();
+      await page.getByRole("button", { name: "저장", exact: true }).click();
       await page.getByText("1번은 보기 중에서 골라 주세요.").waitFor();
     }
     for (let q = 0; q < 6; q++) {
@@ -176,12 +176,12 @@ const step = (s) => console.log("▶", s);
       else await qs.nth(q).locator("input").fill(i === 0 && q === 3 ? "." : answerOf(i, q));
     }
     if (i === 0) {
-      await page.getByRole("button", { name: "저장" }).click();
+      await page.getByRole("button", { name: "저장", exact: true }).click();
       await page.getByText("4번은 2자 이상 적어 주세요.").waitFor();
       console.log("  프로필 형식 검사: 안 고른 보기·한 글자 답은 저장 안 됨");
       await qs.nth(3).locator("input").fill(answerOf(i, 3));
     }
-    await page.getByRole("button", { name: "저장" }).click();
+    await page.getByRole("button", { name: "저장", exact: true }).click();
     await page.getByText("저장했어요. 내 대상에게 갈 단서도 준비됐어요.").waitFor();
     if (i === 0) await shot(page, "profile");
   }
@@ -230,7 +230,7 @@ const step = (s) => console.log("▶", s);
   {
     const page = users["다라"];
     await tab(page, "규칙");
-    await panel(page, "응모권 받는 법 (최대 12장)").waitFor();
+    await panel(page, "응모권 받는 법 (최대 14장)").waitFor();
     await panel(page, "파트 대항전").getByText("같은 파트끼리는 마니또가 되지 않아요.").waitFor();
     await panel(page, "응모권 받는 법").getByText("마지막 집계에서 미션 완수율 1위").waitFor();
     await panel(page, "상품과 추첨").getByText("자기 파트 카드는 안 보여요").waitFor();
@@ -298,11 +298,11 @@ const step = (s) => console.log("▶", s);
   {
     const g = users["가나"];
     const t = panel(g, "내 응모권");
-    await t.getByText("마니또로서: 인증된 미션 1 / 3 + 도전 1 / 2").waitFor();
+    await t.getByText("마니또로서: 인증된 미션 1 / 3 + 카드 추가분 2 / 4(보통 +1, 도전 +2)").waitFor();
     await t.getByText("받는 사람으로서: 인증 입력 1 / 3").waitFor();
     await t.getByText("우리 파트가 완수율 1위면 +1").waitFor();
-    assert.equal((await t.locator(".ticket-count").innerText()).replace(/\s/g, ""), "3장");
-    console.log("  가나 내 응모권(지금까지): 3장 = 미션 1 + 도전 1 + 인증 입력 1");
+    assert.equal((await t.locator(".ticket-count").innerText()).replace(/\s/g, ""), "4장");
+    console.log("  가나 내 응모권(지금까지): 4장 = 미션 1 + 카드 추가분 2(도전) + 인증 입력 1");
     await shot(g, "my-mission");
   }
 
@@ -748,16 +748,68 @@ const step = (s) => console.log("▶", s);
   console.log("  ", scoreText);
   await panel(admin, "베스트 후기상 고르기").locator("li").first().getByRole("button", { name: "이 후기 선택" }).click();
   await advance(admin, "공개");
+  step("송년회 발표 화면: 넘긴 장면까지만 참여자 결과 탭에 열린다, 짝은 원을 따라 공개, 추첨도 발표 화면에서");
+  for (const p of PEOPLE) await tab(users[p.name], "결과");
+  {
+    const g = users["가나"];
+    await g.getByText("무대에서 공개돼요").waitFor();
+    await g.getByText(/지금 무대에서 결과를 발표하고 있어요/).waitFor();
+    assert.equal(await panel(g, "누가 누구의 마니또였을까").count(), 0);
+    assert.equal(await panel(g, "시상").count(), 0);
+    assert.equal(await panel(g, "파트 대항전 최종 순위").count(), 0);
+    console.log("  발표 전 참여자 결과 탭: '무대에서 공개돼요', 짝·시상·파트 순위 없음");
+  }
   await tab(admin, "결과");
-  // 숫자 없이 누르면 안내만 나온다
-  await panel(admin, "추첨").getByRole("button", { name: "추첨하기" }).first().click();
-  await panel(admin, "추첨").getByText("현장에서 정한 숫자를 먼저 넣어 주세요").waitFor();
+  await panel(admin, "발표 화면").getByRole("button", { name: "발표 화면 열기" }).click();
+  const pres = admin.locator(".presenter");
+  await pres.waitFor();
+  const next = async () => { await pres.getByRole("button", { name: "다음 ▶" }).click(); await admin.waitForTimeout(150); };
+  await pres.locator(".pres-title", { hasText: "결과 발표" }).waitFor();
+  console.log("  1장(숫자):", (await pres.locator(".pres-stats").innerText()).replace(/\s+/g, " "));
+  await next(); await pres.getByText("파트 대항전 최종 순위").waitFor();
+  await next(); await pres.getByText("우승 파트는…").waitFor(); await pres.locator(".pres-title", { hasText: "가파트" }).waitFor();
+  await next(); await pres.getByText("이제 정체를 공개합니다").waitFor();
+  const chain = [];
+  for (let k = 0; k < N; k++) {
+    await next();
+    const ask = await pres.locator(".pres-title").innerText();
+    const rName = ask.replace(/님의 마니또는…\?$/, "").trim();
+    if (k > 0) assert.equal(rName, chain[k - 1][1], "공개된 마니또가 다음 차례의 주인공");
+    await next();
+    await pres.locator(".pres-kicker", { hasText: `${rName}님의 마니또는` }).waitFor();
+    const gName = (await pres.locator(".pres-title").innerText()).trim();
+    assert.equal(gName, giverOf[rName], `${rName}의 마니또`);
+    chain.push([rName, gName]);
+    if (k === 0) {
+      await users[rName].locator(".target .target-name", { hasText: gName }).waitFor();
+      assert.equal(await users[gName].locator(".target .target-name").innerText(), "무대에서 공개돼요");
+      console.log(`  첫 짝 공개 → ${rName}의 휴대폰에만 마니또(${gName})가 열리고, ${gName}의 휴대폰은 아직 가려져 있음`);
+    }
+  }
+  console.log("  짝 공개 순서:", chain.map(([r, g]) => `${r}←${g}`).join(" → "));
+  await next(); await pres.getByText("명탐정").waitFor();
+  console.log("  명탐정:", (await pres.locator(".pres-center").innerText()).replace(/\s+/g, " "));
+  await next(); await pres.getByText(/베스트 후기상/).waitFor();
+  await next(); await pres.getByText(/최다 응모권상/).waitFor();
+  for (const rank of [3, 2, 1]) { await next(); await pres.getByText(new RegExp(`베스트 마니또 ${rank}위`)).waitFor(); }
+  await next(); await pres.getByText("칭찬 벽").waitFor();
   const SEEDS = ["4821", "77", "1225", "9"];
   for (let i = 0; i < 4; i++) {
-    await panel(admin, "추첨").locator(".seed-input").first().fill(SEEDS[i]);
-    await panel(admin, "추첨").getByRole("button", { name: "추첨하기" }).first().click();
+    await next();
+    if (i === 0) {
+      await pres.getByRole("button", { name: "추첨하기" }).click(); // 숫자 없이 누르면 안내만 나온다
+      await pres.getByText("현장에서 정한 숫자를 먼저 넣어 주세요").waitFor();
+    }
+    await pres.locator(".seed-input").fill(SEEDS[i]);
+    await pres.getByRole("button", { name: "추첨하기" }).click();
+    await pres.locator(".pres-spin").waitFor(); // 이름이 돌아가는 연출
+    await pres.getByText(`현장에서 정한 숫자 ${SEEDS[i]}`).waitFor({ timeout: 8000 });
     await panel(admin, "추첨").getByText(`현장에서 정한 숫자: ${SEEDS[i]}`).waitFor();
   }
+  await next(); await pres.getByText("모두 수고하셨어요!").waitFor();
+  await pres.getByRole("button", { name: "닫기" }).click();
+  const stepNow = fields(await readDoc("results/public")).step;
+  console.log(`  발표 화면 마지막 장면까지 진행(step ${stepNow}), 추첨 4번은 발표 화면에서 숫자를 넣어 진행`);
   await panel(admin, "추첨").locator(".winner").first().waitFor();
   // 누구나 추첨 검증: 숫자와 응모권으로 다시 계산한 결과와 같아야 한다
   {
@@ -792,12 +844,12 @@ const step = (s) => console.log("▶", s);
   // 받는 사람이 직접 인증한 주차 / 완료를 알린 주차 / 운영자 확인(받았음·못 받음)
   const realSlots = { 가나: [1, 2], 다라: [1, 3], 마바: [1], 사아: [1], 자차: [1], 카타: [1] };
   const sentSlots = { 가나: [1, 2], 다라: [1, 3], 마바: [1, 3], 사아: [1], 자차: [1, 2], 카타: [1] };
-  const confirmed = { 마바: [3] }; // 받았음: 마니또의 미션으로 인정(도전 추가분 없음)
+  const confirmed = { 마바: [3] }; // 받았음: 마니또의 미션으로 인정(카드 추가분 없음)
   const missingV = { 자차: [2] }; // 못 받음: 인정하지 않고 받는 사람에게 보상
   // 인증·인정된 미션 수
   const redeemed = Object.fromEntries(PEOPLE.map((p) => [p.name, realSlots[p.name].length + (confirmed[p.name] || []).length]));
   assert.deepEqual(redeemed, { 가나: 2, 다라: 2, 마바: 2, 사아: 1, 자차: 1, 카타: 1 });
-  const hardCnt = { 가나: 1 };
+  const cardBonus = { 가나: 2 }; // 가나 1주차 도전 카드(직접 인증) +2, 나머지는 쉬움 카드
   // 파트 대항전 최종: 인증된 미션 합 ÷ (인원 × 3)
   const finalBoard = PARTS.map((part) => {
     const mem = PEOPLE.filter((p) => p.part === part);
@@ -815,22 +867,22 @@ const step = (s) => console.log("▶", s);
     await page.locator(".target .target-name").waitFor();
     assert.equal(await page.locator(".target .target-name").innerText(), giverOf[p.name], `${p.name}의 마니또 공개`);
     const text = (await page.locator(".target .small").innerText()).replace(/\s+/g, " ");
-    const m = text.match(/내 응모권 (\d+)장: 미션 (\d+) \+ 도전 (\d+) \+ 인증 입력 (\d+)(?: \+ 못 받은 주차 보상 (\d+))? \+ 은신 (\d+) \+ 정답 지목 (\d+)(?: \+ 우승 파트 (\d+))?/);
+    const m = text.match(/내 응모권 (\d+)장: 미션 (\d+) \+ 카드 (\d+) \+ 인증 입력 (\d+)(?: \+ 못 받은 주차 보상 (\d+))? \+ 은신 (\d+) \+ 정답 지목 (\d+)(?: \+ 우승 파트 (\d+))?/);
     assert.ok(m, text);
-    const shown = { total: +m[1], mission: +m[2], hard: +m[3], entries: +m[4], comp: +(m[5] || 0), hidden: +m[6], guess: +m[7], partBonus: +(m[8] || 0) };
+    const shown = { total: +m[1], mission: +m[2], card: +m[3], entries: +m[4], comp: +(m[5] || 0), hidden: +m[6], guess: +m[7], partBonus: +(m[8] || 0) };
     const gv = giverOf[p.name];
     const entries = realSlots[gv].length; // 내가 입력한 인증
     // 보상: 인증이 없는 주차 중, 마니또가 완료를 알리지 않았거나 운영자가 '못 받음'으로 확인한 주차 (인증 입력과 합쳐 3장까지)
     const missed = [1, 2, 3].filter((sl) => !realSlots[gv].includes(sl) && (!sentSlots[gv].includes(sl) || (missingV[gv] || []).includes(sl))).length;
     const want = {
-      mission: redeemed[p.name], hard: hardCnt[p.name] || 0, entries,
+      mission: redeemed[p.name], card: cardBonus[p.name] || 0, entries,
       comp: redeemed[p.name] >= 1 ? Math.min(3 - entries, missed) : 0,
       hidden: correct.has(target[p.name]) ? 0 : 2, // 내 대상이 나를 맞혔으면 0
       guess: correct.has(p.name) ? 1 : 0,
       partBonus: winParts.has(p.part) && redeemed[p.name] >= 1 ? 1 : 0,
     };
-    want.total = want.mission + want.hard + want.entries + want.comp + want.hidden + want.guess + want.partBonus;
-    const ok = JSON.stringify(shown) === JSON.stringify({ total: want.total, mission: want.mission, hard: want.hard, entries: want.entries, comp: want.comp, hidden: want.hidden, guess: want.guess, partBonus: want.partBonus });
+    want.total = want.mission + want.card + want.entries + want.comp + want.hidden + want.guess + want.partBonus;
+    const ok = JSON.stringify(shown) === JSON.stringify({ total: want.total, mission: want.mission, card: want.card, entries: want.entries, comp: want.comp, hidden: want.hidden, guess: want.guess, partBonus: want.partBonus });
     allOk = allOk && ok;
     console.log(`  ${p.name}: ${text} → 손계산 ${want.total}장 ${ok ? "일치" : "불일치 " + JSON.stringify(want)}`);
   }

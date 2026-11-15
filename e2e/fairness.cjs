@@ -20,7 +20,7 @@ const rest = async (path) => (await fetch(`${FS}/${path}`, { headers: { Authoriz
 const val = (v) => v.stringValue ?? (v.integerValue !== undefined ? Number(v.integerValue) : v.booleanValue ?? (v.mapValue ? Object.fromEntries(Object.entries(v.mapValue.fields || {}).map(([k, x]) => [k, val(x)])) : null));
 
 (async () => {
-  const { PROFILE_QUESTIONS: PQ } = await import("/home/user/manito-site/src/lib/constants.js");
+  const { PROFILE_QUESTIONS: PQ } = await import(require("node:url").pathToFileURL(require("node:path").join(__dirname, "../src/lib/constants.js")).href);
   await fetch(`http://127.0.0.1:8080/emulator/v1/projects/${P}/databases/(default)/documents`, { method: "DELETE" });
   await fetch(`http://127.0.0.1:9099/emulator/v1/projects/${P}/accounts`, { method: "DELETE" });
   const browser = await chromium.launch();
@@ -149,9 +149,9 @@ const val = (v) => v.stringValue ?? (v.integerValue !== undefined ? Number(v.int
       const comp = credited(p) >= 1 ? Math.min(3 - entries, missed) : 0;
       const assumed = delivered(p) && credit.has(target[p]) && !redeemedDoc(target[p]) ? 1 : 0;
       const partBonus = winners.has(PART[p]) && !absent.has(p) && credited(p) >= 1 ? 1 : 0;
-      const e = { mission, hard: 0, entries, comp, hidden, guess: 0, partBonus, assumed, total: absent.has(p) ? 0 : mission + entries + comp + hidden + partBonus };
+      const e = { mission, card: 0, entries, comp, hidden, guess: 0, partBonus, assumed, total: absent.has(p) ? 0 : mission + entries + comp + hidden + partBonus };
       const d = detail[pidOf[p]];
-      const same = tickets[pidOf[p]] === e.total && ["mission", "hard", "entries", "comp", "hidden", "guess", "partBonus", "assumed"].every((k) => d[k] === e[k]);
+      const same = tickets[pidOf[p]] === e.total && ["mission", "card", "entries", "comp", "hidden", "guess", "partBonus", "assumed"].every((k) => d[k] === e[k]);
       ok = ok && same;
       const kind = p === "자차" ? "가입 안 함" : p === "사아" ? "중도 이탈" : p === lazy ? "받고도 인증 안 함" : p === "마바" ? "아무것도 안 함" : "참여";
       console.log(`    ${p}(${kind}${p === "마바" && lazy === "마바" ? ", 아무것도 안 함" : ""}): 저장된 응모권 ${tickets[pidOf[p]]}장 [미션 ${d.mission} 입력 ${d.entries} 보상 ${d.comp} 은신 ${d.hidden} 우승파트 ${d.partBonus} 인정 ${d.assumed}] → 손계산 ${e.total}장 ${same ? "일치" : "불일치 " + JSON.stringify(e)}`);
@@ -198,7 +198,10 @@ const val = (v) => v.stringValue ?? (v.integerValue !== undefined ? Number(v.int
   const bestPids = (res.bestManito.arrayValue.values || []).map((v) => v.mapValue.fields.pid.stringValue);
   assert.ok(!bestPids.includes(pidOf["자차"]) && !bestPids.includes(pidOf["사아"]), "불참자는 베스트 마니또에서 제외");
 
-  step("결과 화면");
+  step("결과 화면 (발표 화면 없이 '모두 공개')");
+  await tab(admin, "결과");
+  await panel(admin, "발표 화면").getByRole("button", { name: "발표 없이 모두 공개" }).click();
+  await panel(admin, "발표 화면").getByText(/지금 참여자에게 열린 장면: (\d+) \/ \1/).waitFor();
   for (const name of JOIN) {
     const page = users[name];
     await page.reload();
@@ -207,8 +210,13 @@ const val = (v) => v.stringValue ?? (v.integerValue !== undefined ? Number(v.int
     console.log(`  ${name}:`, (await page.locator(".target .small").innerText()).replace(/\s+/g, " "));
   }
   await tab(admin, "결과");
-  for (let i = 0; i < 4; i++) { await panel(admin, "추첨").getByRole("button", { name: "추첨하기" }).first().click(); await admin.waitForTimeout(400); }
+  for (const seed of ["11", "22", "33", "44"]) {
+    await panel(admin, "추첨").locator(".seed-input").first().fill(seed);
+    await panel(admin, "추첨").getByRole("button", { name: "추첨하기" }).first().click();
+    await panel(admin, "추첨").getByText(`현장에서 정한 숫자: ${seed}`).waitFor();
+  }
   const winners = await panel(admin, "추첨").locator(".winner span").allInnerTexts();
+  assert.ok(winners.length > 0, "당첨자가 있어야 한다");
   assert.ok(!winners.includes("자차") && !winners.includes("사아"), "0장인 사람은 당첨되지 않음");
   console.log("  추첨 당첨자(자차·사아 없음 확인):", [...new Set(winners)].join(", "));
   await browser.close();

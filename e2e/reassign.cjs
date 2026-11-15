@@ -7,7 +7,7 @@ const readTarget = async (p) => { const b = p.locator(".target-toggle"); await b
 const showSecrets = async (p) => { for (const b of await p.getByRole("button", { name: "초대 코드·메일 보기" }).all()) await b.click(); };
 const H = require("./helpers.cjs");
 (async () => {
-  const { PROFILE_QUESTIONS: PQ } = await import("/home/user/manito-site/src/lib/constants.js");
+  const { PROFILE_QUESTIONS: PQ } = await import(require("node:url").pathToFileURL(require("node:path").join(__dirname, "../src/lib/constants.js")).href);
   await H.reset();
   const b = await chromium.launch(); const errs = []; const mk = H.maker(b, errs);
   const PEOPLE = [["가나", "가파트"], ["다라", "나파트"], ["마바", "다파트"], ["사아", "라파트"]]; // 파트를 모두 다르게: 파트 단서로 마니또가 누구인지 확인

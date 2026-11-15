@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { doc, getDoc, onSnapshot, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
+import { collection, doc, getDoc, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
 import { auth, db, configured } from "./firebase.js";
 import { bump } from "./lib/writes.js";
 import { AVATARS, PHASE, PHASES } from "./lib/constants.js";
@@ -63,6 +63,25 @@ function watch(ref, onNext, onFail, tries = 3, options = {}) {
     off();
   };
 }
+
+// 안 읽은 표시: 이 기기에서 본 쪽지·한마디의 ID를 사람별로 기억한다(다른 기기에서는 처음에 모두 새 것으로 보인다).
+const seenKey = (uid) => `manito:seen:${uid}`;
+function loadSeen(uid) {
+  try {
+    const v = JSON.parse(localStorage.getItem(seenKey(uid)) || "{}");
+    return { inbox: v.inbox || [], manito: v.manito || [] };
+  } catch {
+    return { inbox: [], manito: [] };
+  }
+}
+function saveSeen(uid, seen) {
+  try {
+    localStorage.setItem(seenKey(uid), JSON.stringify(seen));
+  } catch {
+    /* 저장소를 못 쓰는 기기: 표시만 다시 뜬다 */
+  }
+}
+const BASE_TITLE = document.title;
 
 // 해시(#mission 등)를 지워 다음 사람이 기본 탭에서 시작하게 한다.
 function clearHash() {
@@ -154,6 +173,55 @@ function Session({ user, logout }) {
     if (myPidForSeen) setDoc(doc(db, "progress", myPidForSeen), { lastSeen: serverTimestamp(), ...bump() }, { merge: true }).catch(() => {});
   }, [myPidForSeen]);
 
+  // 내 대상(내가 마니또로서 챙길 사람). 대상이 보낸 한마디를 받으려고 읽는다. 다시 배정하면(회차) 다시 읽는다.
+  const [myReceiver, setMyReceiver] = useState(null);
+  const assignVer = config && config !== LOCKED ? config.assignVer ?? 0 : null;
+  useEffect(() => {
+    if (!myPidForSeen) return setMyReceiver(null);
+    getDoc(doc(db, "assignments", myPidForSeen))
+      .then((s) => setMyReceiver(s.exists() ? s.data().receiverPid : null))
+      .catch(() => setMyReceiver(null));
+  }, [myPidForSeen, assignVer]);
+
+  // 마니또에게서 온 것(완료 알림·쪽지): 내 미션(인증 안 한 미션 알림), 추리 보드, 안 읽은 표시가 같이 쓴다(한 번만 읽기).
+  const [inbox, setInbox] = useState([]);
+  useEffect(() => {
+    if (!myPidForSeen) return setInbox([]);
+    return onSnapshot(query(collection(db, "deliveries"), where("receiverPid", "==", myPidForSeen)), (s) =>
+      setInbox(s.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0))), () => {});
+  }, [myPidForSeen]);
+  // 내 대상이 나(마니또)에게 보낸 한마디
+  const [fromReceiver, setFromReceiver] = useState([]);
+  useEffect(() => {
+    if (!myReceiver) return setFromReceiver([]);
+    return onSnapshot(query(collection(db, "toManito"), where("receiverPid", "==", myReceiver)), (s) =>
+      setFromReceiver(s.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => a.slot - b.slot)), () => setFromReceiver([]));
+  }, [myReceiver]);
+
+  const [seen, setSeen] = useState(() => loadSeen(user.uid));
+  const markSeen = useCallback((kind, ids) => {
+    setSeen((prev) => {
+      if (ids.every((id) => prev[kind].includes(id))) return prev;
+      const next = { ...prev, [kind]: [...new Set([...prev[kind], ...ids])] };
+      saveSeen(user.uid, next);
+      return next;
+    });
+  }, [user.uid]);
+  const unread = {
+    detective: inbox.filter((d) => !seen.inbox.includes(d.id)).length,
+    mission: fromReceiver.filter((m) => !seen.manito.includes(m.id)).length,
+  };
+  const unreadTotal = unread.detective + unread.mission;
+  // 그 탭을 열어 두면 본 것으로 친다(추리 보드 맨 위가 받은 쪽지, 내 미션에 대상의 한마디)
+  useEffect(() => {
+    if (tab === "detective" && inbox.length) markSeen("inbox", inbox.map((d) => d.id));
+    if ((tab === "mission" || !tab) && fromReceiver.length) markSeen("manito", fromReceiver.map((m) => m.id));
+  }, [tab, inbox, fromReceiver, markSeen]);
+  useEffect(() => {
+    document.title = unreadTotal > 0 ? `(${unreadTotal}) ${BASE_TITLE}` : BASE_TITLE;
+    return () => { document.title = BASE_TITLE; };
+  }, [unreadTotal]);
+
   // 명단은 초대 코드로 연결된 참여자와 운영자만 읽을 수 있다(보안 규칙). 연결되면 그때 구독한다.
   // 읽기 줄이기: 명단 54건 대신 요약 문서 1건 (운영 화면이 명단과 맞춰 둔다)
   const member = Boolean(me?.personId) || Boolean(config?.admins?.includes(user.uid));
@@ -201,8 +269,11 @@ function Session({ user, logout }) {
       loadAvatar,
       setAvatarLocal,
       isAdmin: Boolean(user && config?.admins?.includes(user.uid)),
+      myReceiver,
+      inbox,
+      fromReceiver,
     };
-  }, [user, config, me, roster, avatars, loadAvatar, setAvatarLocal]);
+  }, [user, config, me, roster, avatars, loadAvatar, setAvatarLocal, myReceiver, inbox, fromReceiver]);
 
   if (config === undefined || me === undefined || roster === undefined) return <Loading />;
   if (config === null) return <Login bootstrap />;
@@ -271,6 +342,7 @@ function Session({ user, logout }) {
               {tabs.map(([k, label]) => (
                 <button key={k} className={k === current ? "chip is-on" : "chip"} aria-current={k === current ? "page" : undefined} onClick={() => setTab(k)}>
                   {label}
+                  {unread[k] > 0 && <span className="tab-badge" aria-label={`새 소식 ${unread[k]}건`}>{unread[k]}</span>}
                 </button>
               ))}
             </nav>

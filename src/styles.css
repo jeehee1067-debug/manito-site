@@ -380,3 +380,60 @@ textarea.pk-input { resize: vertical; line-height: 1.6; }
   .loading-bar i { animation: none; width: 100%; }
   .pk-btn, .card { transition: none; }
 }
+
+/* 안 읽은 표시(탭 숫자) */
+.tab-badge { display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 5px; border: 2px solid var(--ink); border-radius: 9px; background: var(--red); color: #fff; font-size: 11px; line-height: 14px; text-align: center; }
+
+/* 이번 주 할 일 */
+.todo-list { margin: 4px 0 6px; padding-left: 20px; display: grid; gap: 4px; }
+.todo-list li::marker { content: "□ "; }
+
+/* 대상이 알려 준 것: 알레르기는 눈에 띄게 */
+.warn-line { margin: 4px 0; padding: 6px 8px; border: 2px solid var(--red); border-radius: 6px; background: #fff3f1; }
+
+/* 피드 공감 */
+.like-row { margin: 6px 0 0; }
+.like-btn { border: 2px solid var(--ink); border-radius: 12px; background: #fff; padding: 1px 10px; font: inherit; font-size: 13px; cursor: pointer; }
+.like-btn.is-on, .like-btn:disabled { background: #ffe3e3; color: var(--red); cursor: default; }
+.like-btn.static { cursor: default; }
+
+/* 결과: 우승 파트 강조, 발표 화면용 큰 순위표 */
+.board li.win { border-color: var(--gold); background: #fff8e1; }
+.board.big { gap: 14px; }
+.board.big li { font-size: 22px; padding: 12px 16px; }
+.board.big .board-bar { height: 26px; }
+.board.big .board-bar i { animation: grow 1.2s ease-out; }
+@keyframes grow { from { width: 0 !important; } }
+
+/* 발표 화면(송년회 큰 화면) */
+.presenter { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; background: var(--paper); overflow: hidden; }
+.pres-stage { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; overflow: auto; animation: fade-in 0.35s ease-out; }
+.pres-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; padding: 10px; border-top: 3px solid var(--ink); background: var(--paper-2); }
+.pres-center { display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; max-width: 900px; width: 100%; }
+.pres-center.wide { max-width: 1100px; }
+.pres-kicker { margin: 0; font-size: clamp(18px, 2.6vw, 30px); color: var(--blue-dark); }
+.pres-title { margin: 0; font-size: clamp(34px, 6vw, 76px); line-height: 1.15; }
+.pres-h2 { margin: 0; font-size: clamp(28px, 4.5vw, 56px); }
+.pres-sub { margin: 0; font-size: clamp(16px, 2.2vw, 26px); color: var(--ink-soft); }
+.pres-stats { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 24px; font-size: clamp(16px, 2.2vw, 26px); }
+.pres-stats b { font-size: 1.5em; color: var(--red); margin-right: 4px; }
+.pres-badge { margin: 0; padding: 6px 16px; border: 3px solid var(--ink); border-radius: 10px; background: #fff; font-size: clamp(16px, 2.2vw, 26px); }
+.pres-badge.ok { background: var(--gold); }
+.pres-story { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: clamp(14px, 1.8vw, 22px); color: var(--ink-soft); }
+.pres-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 18px; }
+.pres-row.winners { gap: 12px 18px; max-height: 55vh; overflow: auto; }
+.pres-person { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: clamp(16px, 2vw, 24px); }
+.pres-quote { margin: 0; padding: 16px 22px; border: 3px solid var(--ink); border-radius: 10px; background: #fff; font-size: clamp(18px, 2.6vw, 30px); line-height: 1.5; }
+.pres-spin { margin: 0; font-size: clamp(30px, 5vw, 64px); color: var(--red); }
+.pres-wall { width: 100%; height: 60vh; overflow: hidden; border: 3px solid var(--ink); border-radius: 10px; background: #fff; }
+.pres-wall-inner { display: grid; gap: 10px; padding: 12px; animation: scroll-up 40s linear infinite; }
+@keyframes scroll-up { from { transform: translateY(0); } to { transform: translateY(-60%); } }
+@keyframes fade-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes pop { 0% { opacity: 0; transform: scale(0.6); } 70% { transform: scale(1.08); } 100% { opacity: 1; transform: scale(1); } }
+.pop { animation: pop 0.5s ease-out both; }
+.pop.delay, .delay { animation-delay: 1.4s; }
+.delay2 { animation: fade-in 0.4s ease-out 2s both; }
+.drum { animation: fade-in 0.3s ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .pres-stage, .pop, .delay, .delay2, .drum, .pres-wall-inner, .board.big .board-bar i { animation: none !important; }
+}
