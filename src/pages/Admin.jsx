@@ -22,11 +22,11 @@ async function commitInChunks(ops) {
 }
 
 const NEXT_PHASE_NOTE = {
-  0: "미션 진행을 시작합니다. 시작 후에는 명단 수정과 재배정을 할 수 없어요.",
+  0: "미션 진행을 시작합니다. 시작 후에는 명단 추가·삭제와 재배정을 할 수 없어요.",
   1: "미션 진행을 마감하고 최종 지목을 받습니다. 이후 인증·미션 완료는 막혀요. 파트 순위도 지금 숫자로 마지막 발표를 해요.",
   2: "지목을 마감하고 투표를 엽니다. 넘어간 뒤 '투표 카드 만들기'를 눌러 주세요.",
   3: "투표를 마감하고 집계 단계로 넘어갑니다.",
-  4: "결과를 전원에게 공개합니다. 넘어간 뒤에는 다시 집계할 수 없어요.",
+  4: "공개 단계로 넘어갑니다. 참여자 결과 탭은 결과 탭의 '발표 화면'에서 넘긴 장면까지만 열려요(한 번에 열려면 '발표 없이 모두 공개'). 넘어간 뒤에는 다시 집계할 수 없어요.",
 };
 
 // 컬렉션 전체를 구독해 { 문서ID: 값 }으로 돌려준다(불러오기 전에는 null). 운영 화면 전용.
@@ -195,7 +195,7 @@ export default function Admin() {
       {phase >= PHASE.RUNNING && <Accounts />}
       {phase >= PHASE.RUNNING && <WriteCounts />}
       <CoAdmins />
-      {phase === PHASE.REVEAL && <Panel title="공개"><p>결과 탭에서 추첨을 진행하세요.</p></Panel>}
+      {phase === PHASE.REVEAL && <Panel title="공개"><p><a href="#reveal">결과 탭</a>에서 "발표 화면 열기"로 발표하고 추첨을 진행하세요. 참여자 결과 탭은 발표 화면에서 넘긴 장면까지만 열려요.</p></Panel>}
     </>
   );
 }
@@ -236,7 +236,7 @@ function Notice() {
   };
   return (
     <Panel title="공지">
-      <p className="small">모든 참여자 화면 위쪽에 보여요. 예: "1주차 미션은 금요일까지! 받은 미션은 추리 보드에서 인증해 주세요."</p>
+      <p className="small">모든 참여자 화면 위쪽에 보여요. 예: "12/8(화) 오전 9시 미션 마감! 받은 미션은 추리 보드에서 인증해 주세요."</p>
       <textarea className="pk-input" rows={2} maxLength={200} value={text} onChange={(e) => { setText(e.target.value); setSaved(false); }} placeholder="공지 내용 (200자까지)" aria-label="공지 내용" />
       <div className="inline">
         <button className="pk-btn main sm" onClick={() => save(text)}>공지 올리기</button>
@@ -278,7 +278,7 @@ function CoAdmins() {
       await updateDoc(doc(db, "config", "app"), { admins: arrayUnion(id), [`adminNotes.${id}`]: label });
       setUid("");
       setMemo("");
-      setMsg(`공동 운영자로 지정했어요(${label}). 그 계정 화면이 운영 화면으로 바뀌어요.`);
+      setMsg(`공동 운영자로 지정했어요(${label}). 그 사람이 "지정됐는지 다시 확인"을 누르면 운영 화면으로 바뀌어요.`);
     } catch {
       setMsg("지정하지 못했어요. 명단에 연결된 계정은 운영자가 될 수 없어요.");
     }
@@ -729,7 +729,7 @@ function GuessStatus() {
   const notYet = rows.filter((r) => !did(r.pid));
   return (
     <Panel title={`최종 지목 중 (안 한 사람 ${notYet.length}명)`}>
-      <p className="small">누구를 지목했는지와 정답 여부는 아래 "짝 현황" 표에서 볼 수 있어요. 지목을 안 하면 그 사람의 마니또가 은신 응모권 2장을 받아요(미션이 1건 이상 인증된 마니또만).</p>
+      <p className="small">누구를 지목했는지와 정답 여부는 아래 "짝 현황" 표에서 볼 수 있어요. 지목을 안 하면 그 사람의 마니또가 은신 응모권 2장을 받아요(미션이 1건 이상 인증되고 단서 6칸을 다 낸 마니또만).</p>
       {notYet.length > 0 && <p className="note">아직 안 한 사람: {notYet.map((r) => r.name).join(", ")}</p>}
       <div className="table-wrap">
         <table className="pk-table">
@@ -792,7 +792,7 @@ function Moderation() {
     return updateDoc(doc(db, "roster", r.pid), { disqualified: !r.disqualified });
   };
   const toggleDropout = (r) => {
-    if (!r.dropout && !window.confirm(`${r.name}님을 중도 이탈로 표시할까요?\n\n· ${r.name}님은 응모권 0장(추첨 제외)\n· ${r.name}님의 마니또가 완료를 알린 미션은 인증된 것으로 인정(도전 추가분은 없음)\n· ${r.name}님이 맡은 사람은 못 받은 주차만큼 응모권 보상\n\n집계 전에는 언제든 되돌릴 수 있어요.`)) return;
+    if (!r.dropout && !window.confirm(`${r.name}님을 중도 이탈로 표시할까요?\n\n· ${r.name}님은 응모권 0장(추첨 제외)\n· ${r.name}님의 마니또가 완료를 알린 미션은 인증된 것으로 인정(카드 추가분은 없음)\n· ${r.name}님이 맡은 사람은 못 받은 주차만큼 응모권 보상\n\n집계 전에는 언제든 되돌릴 수 있어요.`)) return;
     return updateDoc(doc(db, "roster", r.pid), { dropout: !r.dropout });
   };
 

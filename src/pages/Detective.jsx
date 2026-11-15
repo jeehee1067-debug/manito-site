@@ -5,7 +5,7 @@ import {
 import { db } from "../firebase.js";
 import { useApp } from "../App.jsx";
 import { Avatar, Dialogue, Panel } from "../ui.jsx";
-import { LEVEL_LABEL, PHASE, PRAISE_SLOT, PROFILE_QUESTIONS, REVIEW_MIN, CLUE_COUNT, PART_HINT_IDX } from "../lib/constants.js";
+import { LEVEL_LABEL, PHASE, PRAISE_SLOT, PROFILE_QUESTIONS, REVIEW_MIN, CLUE_COUNT, PART_HINT_IDX, clueScheduleText } from "../lib/constants.js";
 import { normalizeCode } from "../lib/random.js";
 import { bump } from "../lib/writes.js";
 
@@ -334,7 +334,7 @@ function Clues({ myPid, partsInUse, hintOpen, hintPart }) {
   return (
     <Panel title={`단서 ${released} / ${CLUE_COUNT}`}>
       <p className="small">
-        내 마니또의 프로필 답변이에요. 매주 금요일 2개씩 공개돼요.
+        내 마니또의 프로필 답변이에요. 매주 금요일 2개씩 공개돼요({clueScheduleText()}).
         {partsInUse && " 최종 지목이 열리면 마지막 단서로 마니또의 파트가 공개돼요."}
       </p>
       <ol className="clues">

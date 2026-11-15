@@ -80,7 +80,7 @@ export default function Login({ bootstrap = false }) {
       <div className="logo-plate">
         <div className="logo-sub">분석기술팀</div>
         <h1 className="logo-title">S1FA 마니또</h1>
-        <div className="logo-tag">4주 동안 몰래 챙기고, 송년회에서 정체를 밝혀라!</div>
+        <div className="logo-tag">3주 동안 몰래 챙기고, 12월 9일 송년회에서 정체를 밝혀라!</div>
         <div><span className="logo-xmas">MERRY CHRISTMAS &amp; HAPPY NEW YEAR</span></div>
       </div>
       <div className="lineup" aria-hidden="true">

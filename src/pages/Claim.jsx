@@ -50,7 +50,7 @@ export default function Claim() {
       <Panel title="공동 운영자로 지정받을 계정이라면" className="narrow">
         <p className="small">
           운영자와 공동 운영자는 마니또에 참여하지 않는 계정이라 초대 코드를 입력하지 않아요.
-          아래 <b>계정 번호</b>를 운영자에게 알려 주세요. 운영자가 지정하면 이 화면이 운영 화면으로 바뀌어요.
+          아래 <b>계정 번호</b>를 운영자에게 직접 보여 주세요. 운영자가 지정한 뒤 "지정됐는지 다시 확인"을 누르면 운영 화면으로 바뀌어요.
         </p>
         <div className="account-no" aria-label="계정 번호">
           <span>계정 번호</span>
