@@ -6,7 +6,7 @@ import { pairChain, buildSlides, revealedUpTo } from "../src/lib/reveal.js";
 import { readFileSync } from "node:fs";
 import { seededRandom } from "../src/lib/random.js";
 import { parseRosterLine, rosterSummary, summaryToList, sameSummary } from "../src/lib/roster.js";
-import { MISSION_CARDS, PROFILE_QUESTIONS, CLUE_COUNT, EXTRA_NOTES_MAX, profileAnswerError } from "../src/lib/constants.js";
+import { MISSION_CARDS, PROFILE_QUESTIONS, CLUE_COUNT, EXTRA_NOTES_MAX, CLUE_DATES, SCHEDULE, profileAnswerError } from "../src/lib/constants.js";
 import { pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../src/lib/pairs.js";
 
 // 참여자 54명(부서 56명 중 운영자·PL님 제외). 파트 크기를 주면 { pid, part } 목록을 만든다.
@@ -729,4 +729,11 @@ test("발표 화면: 짝은 원을 따라 잇고(공개된 마니또가 다음 �
   assert.equal(revealedUpTo({ step: 0 }, slides), 1);
   assert.equal(revealedUpTo({ step: 999 }, slides), slides.length);
   assert.equal(revealedUpTo({}, slides), slides.length);
+});
+
+test("일정: 단서 공개 날이 단서 수 ÷ 2번(주차마다 2개)이고 날짜 순서대로, 모두 금요일", () => {
+  assert.equal(CLUE_DATES.length, CLUE_COUNT / 2);
+  assert.ok(CLUE_DATES.every((d) => d.endsWith("(금)")), CLUE_DATES.join(", "));
+  const dates = SCHEDULE.map((e) => e.date);
+  assert.deepEqual(dates, [...dates].sort(), "일정은 날짜 순서대로");
 });

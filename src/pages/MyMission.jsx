@@ -80,7 +80,7 @@ export default function MyMission() {
   if (!assignment) {
     return (
       <Panel title="아직 배정 전이에요">
-        <p>운영진이 마니또를 배정하면 여기에 내 대상이 나타나요. 그동안 <a href="#profile">내 프로필</a>에서 캐릭터를 고르고 질문에 답해 주세요.</p>
+        <p>운영진이 마니또를 배정하면 여기에 내 대상이 나타나요. 그동안 <a href="#profile">내 프로필</a>에서 캐릭터를 고르고, 6문항에 답하고, "내 마니또에게 알려 줄 것"(알레르기·좋아하는 간식)을 적어 주세요.</p>
       </Panel>
     );
   }
@@ -278,7 +278,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
           </p>
           <p className="small">
             <span className="cost-tag">소액 비용</span> 표시는 간식·음료처럼 내 돈이 드는 카드예요. 건당 {SPEND_GUIDE_WON.toLocaleString()}원 이하를 권장하고,
-            돈이 안 드는 카드를 골라도 응모권은 똑같아요.
+            같은 난이도라면 돈이 안 드는 카드를 골라도 응모권은 똑같아요.
           </p>
           <div className="cards">
             {LEVELS.map((level) => {

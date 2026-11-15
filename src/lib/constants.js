@@ -59,10 +59,18 @@ const WEEKDAY = ["일", "월", "화", "수", "목", "금", "토"];
 export function todayYmd(now = new Date()) {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
-export function scheduleLabel({ date, text }) {
+export function shortDate(date) {
   const d = new Date(`${date}T00:00:00`);
-  return `${d.getMonth() + 1}/${d.getDate()}(${WEEKDAY[d.getDay()]}) ${text}`;
+  return `${d.getMonth() + 1}/${d.getDate()}(${WEEKDAY[d.getDay()]})`;
 }
+export function scheduleLabel({ date, text }) {
+  return `${shortDate(date)} ${text}`;
+}
+// 단서 공개 날짜 3개(1·2번, 3·4번, 5·6번). 일정에서 "단서"로 시작하는 날을 순서대로 쓴다.
+export const CLUE_DATES = SCHEDULE.filter((e) => e.text.startsWith("단서")).map((e) => shortDate(e.date));
+export const clueScheduleText = () => (CLUE_DATES.length >= 3
+  ? `${CLUE_DATES[0]} 1·2번 → ${CLUE_DATES[1]} 3·4번 → ${CLUE_DATES[2]} 5·6번`
+  : "1·2번 → 3·4번 → 5·6번");
 
 // 게시돼 있어야 하는 보안 규칙 버전. firestore.rules의 rulesVersion과 같아야 한다.
 // 규칙에서 화면이 쓰는 경로·값의 모양을 바꿀 때 양쪽을 같이 올린다. 운영 화면이 이 값으로 "콘솔의 규칙이 예전 것"인지 확인해 알려 준다.
