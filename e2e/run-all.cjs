@@ -12,6 +12,7 @@ const SCRIPTS = [
   ["unlink.cjs", "계정 연결 해제와 다시 연결"],
   ["profile-lock.cjs", "공개된 단서 칸 잠금"],
   ["reassign.cjs", "다시 배정했을 때 단서"],
+  ["fun.cjs", "이번 주 할 일, 알레르기 칸, 안 읽은 표시, 마니또에게 한마디, 주차별 추측, 피드 공감, 발표 화면의 짝 이야기·명탐정·공감 1위"],
 ];
 
 async function main() {

@@ -8,7 +8,7 @@ import { Panel } from "../ui.jsx";
 import { PHASE, PHASES, CLUE_COUNT, LEVEL_LABEL, LOCS, PART_HINT_IDX, RULES_VERSION } from "../lib/constants.js";
 import { SLOT_STATUS_LABEL, clueAnswers, cluesDoneSet, pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../lib/pairs.js";
 import { assignManito, assignmentMemo, generateCodes, makeInviteCode } from "../lib/assign.js";
-import { computeTickets, partStandings, pickMostTickets, rankBestManito, weeklyPartBoard } from "../lib/scoring.js";
+import { computeTickets, noticedWeeks, partStandings, pickMostTickets, rankBestManito, weeklyPartBoard } from "../lib/scoring.js";
 import { PRIZES } from "../config/prizes.js";
 import { parseRosterLine, rosterSummary, sameSummary } from "../lib/roster.js";
 
@@ -785,7 +785,7 @@ function Moderation() {
     if (!window.confirm("이 감사 답장을 지울까요? 받는 사람은 다시 쓸 수 없어요.")) return;
     return updateDoc(doc(db, "feed", r.feedId), { thanks: deleteField() });
   };
-  // 받는 사람이 "카드와 달라요"로 인증한 것: 두 사람에게 확인한 뒤 되돌릴 수 있다(도전 추가분)
+  // 받는 사람이 "카드와 달라요"로 인증한 것: 두 사람에게 확인한 뒤 되돌릴 수 있다(카드 추가분)
   const toggleCard = (r) => updateDoc(doc(db, "redemptions", r.code), { cardMatch: r.cardMatch === false });
   const toggleDq = (r) => {
     if (!r.disqualified && !window.confirm(`${r.name}님을 응모권·수상에서 제외할까요?`)) return;
@@ -802,7 +802,7 @@ function Moderation() {
         <p className="small">
           내용 없는 인증은 무효 처리하세요. 무효 처리된 인증은 피드와 응모권에서 빠져요.
           미션은 제대로 했는데 후기나 답장만 문제라면 "피드에서 가리기"·"답장 지우기"를 쓰세요(응모권은 그대로예요).
-          "카드와 다름"은 받는 사람이 받은 것이 마니또가 고른 카드와 다르다고 한 것이에요(도전 카드면 추가 응모권이 빠져요).
+          "카드와 다름"은 받는 사람이 받은 것이 마니또가 고른 카드와 다르다고 한 것이에요(보통·도전 카드면 추가 응모권이 빠져요).
         </p>
         <ul className="plain">
           {items.map((r) => {
@@ -892,7 +892,34 @@ function NotesReview() {
           {list.length === 0 && <li className="muted small">내용이 있는 쪽지가 없어요.</li>}
         </ul>
       )}
+      <ToManitoReview />
     </Panel>
+  );
+}
+
+// 받는 사람이 마니또에게 보낸 한마디. 불쾌한 내용이면 지운다(받는 사람은 그 주차에 다시 보낼 수 있게 된다).
+function ToManitoReview() {
+  const { nameOf } = useApp();
+  const msgs = useColl("toManito");
+  const [open, setOpen] = useState(false);
+  if (!msgs) return null;
+  const list = Object.entries(msgs).map(([id, m]) => ({ id, ...m })).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+  return (
+    <div className="stack tight">
+      <button type="button" className="pk-btn sm" onClick={() => setOpen(!open)}>{open ? "한마디 접기" : `마니또에게 한마디 ${list.length}건 보기`}</button>
+      {open && (
+        <ul className="plain">
+          {list.map((m) => (
+            <li key={m.id} className="row-item">
+              <p>{m.message}</p>
+              <span className="small muted">{nameOf(m.receiverPid)} → 그 사람의 마니또 · {m.slot}주차</span>
+              <button className="text-btn" onClick={() => window.confirm("이 한마디를 지울까요? 보낸 사람은 그 주차에 다시 보낼 수 있어요.") && deleteDoc(doc(db, "toManito", m.id))}>지우기</button>
+            </li>
+          ))}
+          {list.length === 0 && <li className="muted small">아직 없어요.</li>}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -904,12 +931,12 @@ function WriteCounts() {
   const [busy, setBusy] = useState(false);
   async function load() {
     setBusy(true);
-    const names = ["progress", "giverMissions", "profiles", "avatars", "reports", "guesses", "clues", "assignments", "users"];
+    const names = ["progress", "giverMissions", "profiles", "avatars", "reports", "guesses", "clues", "assignments", "users", "prefs", "midGuesses"];
     if (config.phase >= PHASE.SCORING) names.push("votes");
     const data = Object.fromEntries(await Promise.all(names.map(async (n) => [n, await readAll(n).catch(() => ({}))])));
     const sum = {};
     const add = (pid, n) => { if (pid && n) sum[pid] = (sum[pid] || 0) + n; };
-    for (const n of ["progress", "giverMissions", "profiles", "avatars", "guesses", "votes"]) {
+    for (const n of ["progress", "giverMissions", "profiles", "avatars", "guesses", "votes", "prefs", "midGuesses"]) {
       Object.entries(data[n] || {}).forEach(([pid, d]) => add(pid, d.n));
     }
     Object.entries(data.reports).forEach(([id, d]) => add(id.split("_")[0], d.n));
@@ -1017,7 +1044,7 @@ function VotingAdmin() {
 }
 
 // 받은 게 없어요 확인 / 집계 전 확인: 마니또가 완료를 알렸는데 인증이 없는 주차를 운영자가 주차별로 확인한다.
-//  받았음: 그 마니또의 미션으로 인정한다(도전 추가분은 없음). 받는 사람의 인증 입력 응모권은 생기지 않는다.
+//  받았음: 그 마니또의 미션으로 인정한다(카드 추가분은 없음). 받는 사람의 인증 입력 응모권은 생기지 않는다.
 //  못 받음: 마니또의 미션으로 치지 않고, 받는 사람에게 그 주차 보상 1장을 준다(마니또가 안 보낸 주차와 같게).
 //  확인하지 않으면: 어느 쪽에도 응모권이 생기지 않는다. 단, 대상이 가입 안 함·중도 이탈이면 확인 없이도 마니또의 미션으로 인정된다.
 // all = false(미션 진행~투표 단계): 받는 사람이 "받은 게 없어요"로 신고했거나 이미 확인한 주차만 보인다.
@@ -1051,7 +1078,7 @@ function Unresolved({ all = false }) {
         {all
           ? "마니또가 미션 완료를 알렸는데 받는 사람이 인증하지 않은 주차예요. 집계하기 전에 두 사람에게 확인하고 주차마다 눌러 주세요."
           : "마니또가 완료를 알렸는데 받는 사람이 \"받은 게 없어요\"로 알린 주차예요. 두 사람에게 확인하고 주차마다 눌러 주세요."}
-        {" "}<b>받았음</b>: 마니또의 미션으로 인정해요(도전 추가분은 없고, 받는 사람의 인증 입력 응모권은 생기지 않아요).
+        {" "}<b>받았음</b>: 마니또의 미션으로 인정해요(카드 추가분은 없고, 받는 사람의 인증 입력 응모권은 생기지 않아요).
         {" "}<b>못 받음</b>: 마니또의 미션으로 치지 않고, 받는 사람에게 그 주차 응모권 1장을 보상해요.
         {" "}확인하지 않으면 어느 쪽에도 응모권이 생기지 않아요. 같은 버튼을 다시 누르면 취소돼요.
       </p>
@@ -1185,8 +1212,9 @@ function Pairs() {
 
 // 응모권 계산에 필요한 자료를 모두 읽어 계산한다. 집계하기와 검산이 같이 쓴다.
 async function calcAll(roster, assignVer) {
-  const [assignments, giverCodes, redemptions, missions, guesses, votes, owners, evals, deliveries, verdicts, clues] = await Promise.all(
-    ["assignments", "giverCodes", "redemptions", "giverMissions", "guesses", "votes", "cardOwners", "adminEval", "deliveries", "verdicts", "clues"].map(readAll)
+  const [assignments, giverCodes, redemptions, missions, guesses, votes, owners, evals, deliveries, verdicts, clues, midGuesses, toManito, feed] = await Promise.all(
+    ["assignments", "giverCodes", "redemptions", "giverMissions", "guesses", "votes", "cardOwners", "adminEval", "deliveries", "verdicts", "clues", "midGuesses", "toManito", "feed"]
+      .map((n) => readAll(n).catch(() => ({}))) // 새 기능 컬렉션(중간 추측·한마디)이 비어 있거나 예전 규칙이어도 집계는 되게
   );
   const people = roster.map((r) => ({
     pid: r.pid, part: (r.part || "").trim() || null,
@@ -1205,7 +1233,35 @@ async function calcAll(roster, assignVer) {
     // 단서 6개를 다 낸 마니또만 은신 응모권
     cluesDone: cluesDoneSet(assignments, clues, assignVer ?? 0),
   });
-  return { assignments, votes, owners, evals, deliveries, people, tickets };
+  // 송년회 발표용 자료(응모권과 무관)
+  const finalGuess = Object.fromEntries(Object.entries(guesses).map(([r, g]) => [r, g.guessPid]));
+  const assignMap = Object.fromEntries(Object.entries(assignments).map(([g, a]) => [g, a.receiverPid]));
+  const noticed = noticedWeeks(assignMap, Object.fromEntries(Object.entries(midGuesses).map(([r, m]) => [r, m.guesses || {}])), finalGuess);
+  // 마니또별 미션 이야기: 주차마다 고른 카드와 인증 여부
+  const story = Object.fromEntries(Object.entries(assignments).map(([g]) => {
+    const codes = giverCodes[g]?.codes || {};
+    return [g, [1, 2, 3].map((slot) => {
+      const c = missions[g]?.choices?.[slot];
+      const red = redemptions[codes[slot]];
+      return { slot, level: c?.level || null, text: c?.text || "", done: Boolean(missions[g]?.done?.[slot]), redeemed: Boolean(red && !red.voided) };
+    })];
+  }));
+  const feedList = Object.values(feed).filter((f) => !f.voided && !f.hidden);
+  const top = Object.values(redemptions).filter((r) => !r.voided && feed[r.feedId] && !feed[r.feedId].hidden)
+    .map((r) => ({ receiverPid: r.receiverPid, review: String(r.review).slice(0, 300), likes: feed[r.feedId].likes || 0 }))
+    .sort((a, b) => b.likes - a.likes)[0];
+  const stats = {
+    people: people.filter((p) => p.joined && !p.dropout).length,
+    missions: Object.values(tickets).reduce((s, t) => s + (t.mission || 0), 0),
+    notes: Object.values(deliveries).filter((d) => d.kind === "note").length,
+    reviews: feedList.length,
+    likes: feedList.reduce((s, f) => s + (f.likes || 0), 0),
+    toManito: Object.keys(toManito).length,
+    correct: Object.entries(finalGuess).filter(([r, g]) => assignMap[g] === r).length,
+    guessed: Object.keys(finalGuess).length,
+  };
+  const extras = { guesses: finalGuess, noticed, story, stats, likesTop: top && top.likes > 0 ? top : null };
+  return { assignments, votes, owners, evals, deliveries, people, tickets, extras };
 }
 
 function Scoring() {
@@ -1239,7 +1295,7 @@ function Scoring() {
     }
   }
   async function computeAndSave() {
-    const { assignments, votes, owners, evals, deliveries, people, tickets } = await calcAll(roster, config.assignVer);
+    const { assignments, votes, owners, evals, deliveries, people, tickets, extras } = await calcAll(roster, config.assignVer);
     // 수상 제외·불참(가입 안 함, 중도 이탈)은 베스트 마니또에서도 뺀다
     const disqualified = new Set(people.filter((p) => p.disqualified || !p.joined || p.dropout).map((p) => p.pid));
     const ranked = rankBestManito({
@@ -1270,7 +1326,9 @@ function Scoring() {
       mostTickets: most,
       bestReview: result?.bestReview || null,
       praises,
+      ...extras, // 발표용: 최종 지목, 알아챈 주차, 마니또별 미션 이야기, 숫자, 공감 1위 후기
       draws: {},
+      step: 0, // 발표 화면 진행. 참여자 결과 화면은 운영자가 넘긴 장면까지만 보인다
       computedAt: serverTimestamp(),
     });
   }

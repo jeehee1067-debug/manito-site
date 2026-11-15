@@ -50,7 +50,7 @@ const BASE = "http://localhost:5173/", P = "demo-manito", FS = `http://127.0.0.1
   await signup(wrong, oldCode, "intruder@example.com");
   await wrong.locator(".hud-who", { hasText: "가나님" }).waitFor();
   await wrong.locator("nav.tabs button", { hasText: "내 프로필" }).click();
-  const { PROFILE_QUESTIONS: PQ } = await import("/home/user/manito-site/src/lib/constants.js");
+  const { PROFILE_QUESTIONS: PQ } = await import(require("node:url").pathToFileURL(require("node:path").join(__dirname, "../src/lib/constants.js")).href);
   const H = require("./helpers.cjs");
   const gAns = H.answersFor(PQ, 0, "가나");
   await H.fillProfile(wrong, gAns, PQ);

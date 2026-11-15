@@ -81,7 +81,7 @@ export default function Profile() {
           {released > 0 && " 이미 공개된 단서는 바꿀 수 없어요."}
         </p>
         <form onSubmit={save} className="stack">
-          {PROFILE_QUESTIONS.map(({ q, options, min }, i) => (
+          {PROFILE_QUESTIONS.map(({ q, options, min, hint }, i) => (
             <div key={i} className="profile-q">
               <span className="panel-label" id={`pq-${i}`}>{i + 1}. {q}{locked(i) && <span className="lock-tag">공개됨 · 수정 불가</span>}</span>
               {options ? (
@@ -96,7 +96,7 @@ export default function Profile() {
                 </div>
               ) : (
                 <input className="pk-input" value={answers[i]} maxLength={60} disabled={locked(i)} aria-labelledby={`pq-${i}`}
-                  placeholder={`${min || 1}자 이상`}
+                  placeholder={hint ? `${hint} · ${min || 1}자 이상` : `${min || 1}자 이상`}
                   onChange={(e) => setAnswers(answers.map((a, j) => (j === i ? e.target.value : a)))} />
               )}
             </div>
@@ -105,6 +105,46 @@ export default function Profile() {
           <button className="pk-btn main">저장</button>
         </form>
       </Panel>
+      <PrefsForm myPid={myPid} />
     </>
+  );
+}
+
+// 내 마니또에게 알려 줄 것. 나를 맡은 마니또(누군지는 모름)와 운영진만 볼 수 있다(보안 규칙). 단서로는 공개되지 않는다.
+const PREF_FIELDS = [
+  ["avoid", "못 먹는 음식·알레르기", "예: 땅콩 알레르기, 매운 것 못 먹음"],
+  ["likes", "좋아하는 간식·음료", "예: 초코 과자, 따뜻한 차"],
+  ["nope", "받기 곤란한 것", "예: 향이 강한 것, 부피 큰 것"],
+];
+function PrefsForm({ myPid }) {
+  const [v, setV] = useState({ avoid: "", likes: "", nope: "" });
+  const [status, setStatus] = useState("");
+  useEffect(() => {
+    getDoc(doc(db, "prefs", myPid)).then((s) => s.exists() && setV((x) => ({ ...x, ...s.data() }))).catch(() => {});
+  }, [myPid]);
+  async function save(e) {
+    e.preventDefault();
+    setStatus("저장하는 중");
+    try {
+      await setDoc(doc(db, "prefs", myPid), { avoid: v.avoid.trim(), likes: v.likes.trim(), nope: v.nope.trim(), ...bump() }, { merge: true });
+      setStatus("저장했어요. 내 마니또가 미션을 고를 때 볼 수 있어요.");
+    } catch {
+      setStatus("저장하지 못했어요. 잠시 후 다시 눌러 주세요.");
+    }
+  }
+  return (
+    <Panel title="내 마니또에게 알려 줄 것">
+      <p className="small">나를 맡은 마니또만 볼 수 있어요(단서로 공개되지 않아요). 간식 미션에서 알레르기 사고를 막고, 선물 고르는 데 도움이 돼요. 비워 둬도 돼요.</p>
+      <form className="stack" onSubmit={save}>
+        {PREF_FIELDS.map(([key, label, hint]) => (
+          <label key={key}>
+            <span className="panel-label">{label}</span>
+            <input className="pk-input" maxLength={100} value={v[key] || ""} placeholder={hint} onChange={(e) => setV({ ...v, [key]: e.target.value })} />
+          </label>
+        ))}
+        {status && <p className="note small" role="status">{status}</p>}
+        <button className="pk-btn sm">알려 주기 저장</button>
+      </form>
+    </Panel>
   );
 }

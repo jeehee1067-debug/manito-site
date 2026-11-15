@@ -778,13 +778,14 @@ describe("앱 흐름: 참여자 화면", () => {
     await assertFails(w("p002_2", { receiverPid: "p002", idx: 2, answer: A(2, 1), ver: 1 })); // 다른 회차
     // 고르기 문항은 보기 중 하나만(거짓·장난 답 방지), 직접 쓰기 문항은 2자 이상
     await assertFails(w("p002_2", { receiverPid: "p002", idx: 2, answer: "저는 다파트입니다 ㅋㅋ", ver: 0 }));
-    await assertFails(w("p002_4", { receiverPid: "p002", idx: 4, answer: "헬리콥터", ver: 0 }));
+    await assertFails(w("p002_4", { receiverPid: "p002", idx: 4, answer: " 가 ", ver: 0 })); // TMI(직접 쓰기)도 2자 이상
     await assertFails(w("p002_3", { receiverPid: "p002", idx: 3, answer: " 가 ", ver: 0 }));
     await assertFails(w("p002_2", { receiverPid: "p002", idx: 2, answer: "(답변 없음)", ver: 0 })); // 예전 화면이 빈 답 대신 쓰던 글
     await assertFails(setDoc(doc(db, "clues", "p002_2"), { receiverPid: "p002", idx: 2, answer: A(2, 1), ver: 0 }, { merge: true })); // n 없음
     await assertFails(w("p002_2", { receiverPid: "p002", idx: 2, answer: A(2, 1), ver: 0, extra: "x" }));
     await assertSucceeds(w("p002_2", { receiverPid: "p002", idx: 2, answer: A(2, 1), ver: 0 }));
     await assertSucceeds(w("p002_3", { receiverPid: "p002", idx: 3, answer: "머그컵", ver: 0 }));
+    await assertSucceeds(w("p002_4", { receiverPid: "p002", idx: 4, answer: "헬리콥터 조종 자격증", ver: 0 }));
   });
 
   test("이미 공개된 단서는 답을 바꿀 수 없다 (같은 답 다시 쓰기·안 공개된 칸·비어 있던 칸은 됨)", async () => {
@@ -1322,5 +1323,103 @@ describe("앱 흐름: 운영 화면", () => {
   test("집계 전(3단계)에는 결과를 쓸 수 없다", async () => {
     await seed({ phase: 3 });
     await assertFails(setDoc(doc(admin(), "results", "public"), { pairs: [], draws: {} }));
+  });
+});
+
+describe("참여 재미 기능: 취향·알레르기, 마니또에게 한마디, 중간 추측, 피드 공감, 발표 화면", () => {
+  beforeEach(() => seed());
+
+  test("내 마니또에게 알려 줄 것 (Profile.jsx Prefs, MyMission.jsx TargetPrefs): 본인이 쓰고, 나를 맡은 마니또·운영자만 읽는다", async () => {
+    const mine = doc(p("p002"), "prefs", "p002");
+    await assertSucceeds(setDoc(mine, { likes: "초코 과자", avoid: "땅콩 알레르기", nope: "", n: N }));
+    await assertSucceeds(setDoc(mine, { likes: "초코 과자, 귤", avoid: "땅콩 알레르기", nope: "향 강한 것", n: N }, { merge: true }));
+    await assertFails(setDoc(mine, { likes: "바꿈", n: 5 }, { merge: true })); // 쓴 횟수 건너뛰기
+    await assertFails(setDoc(mine, { likes: "가".repeat(101), n: N }, { merge: true })); // 100자 초과
+    await assertFails(setDoc(mine, { hint: "다른 필드", n: N }, { merge: true }));
+    await assertFails(setDoc(doc(p("p001"), "prefs", "p002"), { likes: "남의 것", n: N })); // 남의 것 쓰기
+    await assertSucceeds(getDoc(doc(p("p001"), "prefs", "p002"))); // p001은 p002의 마니또
+    await assertSucceeds(getDoc(mine));
+    await assertFails(getDoc(doc(p("p003"), "prefs", "p002"))); // p003은 p002의 대상(마니또가 아님)
+    await assertFails(getDoc(doc(p("p004"), "prefs", "p002")));
+    await assertFails(getDocs(collection(p("p001"), "prefs"))); // 목록은 운영자만
+    await assertSucceeds(getDocs(collection(admin(), "prefs")));
+    await assertFails(getDoc(doc(as("stranger"), "prefs", "p002")));
+  });
+
+  test("마니또에게 한마디 (Detective.jsx ToManito, MyMission.jsx FromReceiver): 주차마다 한 번, 열린 주차까지, 받는 사람과 그 마니또만 읽는다", async () => {
+    const msg = (slot, more = {}) => ({ receiverPid: "p002", slot, message: "혹시 커피 좋아하세요?", createdAt: serverTimestamp(), ...more });
+    const db = p("p002"); // p002의 마니또는 p001
+    await assertFails(setDoc(doc(db, "toManito", "p002_2"), msg(2))); // 아직 안 열린 주차
+    await assertFails(setDoc(doc(db, "toManito", "p002_1"), msg(1, { message: "  " }))); // 빈 말
+    await assertFails(setDoc(doc(db, "toManito", "p002_1"), msg(1, { message: "가".repeat(201) })));
+    await assertFails(setDoc(doc(db, "toManito", "p002_1"), msg(1, { createdAt: new Date(2020, 0, 1) })));
+    await assertFails(setDoc(doc(db, "toManito", "p002_x"), msg(1))); // 문서 ID 규칙
+    await assertFails(setDoc(doc(p("p003"), "toManito", "p002_1"), msg(1))); // 남의 이름으로
+    await assertSucceeds(setDoc(doc(db, "toManito", "p002_1"), msg(1)));
+    await assertFails(setDoc(doc(db, "toManito", "p002_1"), msg(1, { message: "다시 씀" }))); // 한 번만(고칠 수 없음)
+    await assertFails(deleteDoc(doc(db, "toManito", "p002_1")));
+    // 읽기: 마니또(p001)는 내 대상 앞으로 온 것만, 받는 사람은 자기가 보낸 것만
+    await assertSucceeds(getDocs(query(collection(p("p001"), "toManito"), where("receiverPid", "==", "p002"))));
+    await assertSucceeds(getDocs(query(collection(db, "toManito"), where("receiverPid", "==", "p002"))));
+    await assertFails(getDocs(query(collection(p("p003"), "toManito"), where("receiverPid", "==", "p002"))));
+    await assertFails(getDocs(collection(p("p001"), "toManito")));
+    await assertSucceeds(getDocs(collection(admin(), "toManito")));
+    await assertSucceeds(deleteDoc(doc(admin(), "toManito", "p002_1"))); // 운영자는 지울 수 있다
+    await setPhase(3);
+    await assertFails(setDoc(doc(p("p004"), "toManito", "p004_1"), { ...msg(1), receiverPid: "p004" })); // 투표 단계부터는 못 보냄
+  });
+
+  test("주차별 중간 추측 (Detective.jsx MidGuess): 열린 주차 칸만, 명단에 있는 다른 사람만, 본인·운영자만 읽는다", async () => {
+    const mine = doc(p("p002"), "midGuesses", "p002");
+    await assertFails(setDoc(mine, { guesses: { 1: "p002" }, n: N })); // 나 자신
+    await assertFails(setDoc(mine, { guesses: { 1: "nobody" }, n: N })); // 명단에 없는 사람
+    await assertFails(setDoc(mine, { guesses: { 2: "p004" }, n: N })); // 아직 안 열린 주차
+    await assertFails(setDoc(mine, { guesses: { 1: "p004" } })); // 쓴 횟수 없음
+    await assertSucceeds(setDoc(mine, { guesses: { 1: "p004" }, n: N }));
+    await assertSucceeds(setDoc(mine, { guesses: { 1: "p001" }, n: N }, { merge: true })); // 그 주 안에는 바꿀 수 있다
+    await assertSucceeds(getDoc(mine));
+    await assertFails(getDoc(doc(p("p001"), "midGuesses", "p002"))); // 마니또도 못 본다(맞혔는지 드러남)
+    await assertSucceeds(getDoc(doc(admin(), "midGuesses", "p002")));
+    await setPhase(1, { week: 2 });
+    await assertFails(setDoc(mine, { guesses: { 1: "p003" }, n: N }, { merge: true })); // 지난 주차는 그대로
+    await assertSucceeds(setDoc(mine, { guesses: { 2: "p001" }, n: N }, { merge: true }));
+    await setPhase(2);
+    await assertFails(setDoc(mine, { guesses: { 2: "p004" }, n: N }, { merge: true })); // 최종 지목 단계에는 중간 추측 없음
+  });
+
+  test("피드 공감 (Feed.jsx): 글마다 한 번, 공감 표시와 한 묶음으로만, 누가 공감했는지는 본인만", async () => {
+    const like = (pid, feedId = FEED_B1, more = {}) => {
+      const db = p(pid);
+      const b = writeBatch(db);
+      b.update(doc(db, "feed", feedId), { likes: increment(1), ...more.feed });
+      if (!more.noMark) b.set(doc(db, "feedLikes", `${feedId}_${pid}`), { pid, feedId, at: serverTimestamp(), ...more.mark });
+      return b.commit();
+    };
+    await assertFails(like("p001", FEED_B1, { noMark: true })); // 공감 표시 없이 숫자만
+    await assertFails(like("p001", FEED_B1, { feed: { likes: 5 } })); // 숫자를 마음대로
+    await assertFails(like("p001", FEED_B1, { mark: { pid: "p004" } })); // 남의 이름으로
+    await assertSucceeds(like("p001"));
+    await assertFails(like("p001")); // 같은 글에 두 번
+    await assertSucceeds(like("p004"));
+    const f = await getDoc(doc(p("p003"), "feed", FEED_B1));
+    if (f.data().likes !== 2) throw new Error(`공감 수가 2가 아님: ${f.data().likes}`);
+    await assertSucceeds(getDocs(query(collection(p("p001"), "feedLikes"), where("pid", "==", "p001"))));
+    await assertFails(getDocs(query(collection(p("p003"), "feedLikes"), where("pid", "==", "p001")))); // 남이 누구에게 공감했는지
+    await assertFails(deleteDoc(doc(p("p001"), "feedLikes", `${FEED_B1}_p001`))); // 취소 없음
+    // 가린 글·무효 글에는 공감할 수 없다
+    await put(`feed/${FEED_B1}`, { slot: 1, review: "", voided: false, hidden: true, likes: 2, createdAt: new Date(2026, 10, 1) });
+    await assertFails(like("p002"));
+  });
+
+  test("발표 화면 (Reveal.jsx Presenter): 공개 단계에 운영자만 진행 단계(step)를 바꾸고, 추첨 결과는 그대로 지켜진다", async () => {
+    await seed({ phase: 5, results: true });
+    const ref = doc(admin(), "results", "public");
+    await assertSucceeds(updateDoc(ref, { step: 3 }));
+    await assertSucceeds(updateDoc(ref, { step: 1 })); // 앞 장면으로 돌아가기
+    await assertFails(updateDoc(ref, { step: "다음" }));
+    await assertFails(updateDoc(ref, { step: 4, tickets: { p001: 99 } })); // 진행하면서 다른 값 바꾸기
+    await assertFails(updateDoc(doc(p("p001"), "results", "public"), { step: 9 })); // 참여자
+    await assertSucceeds(updateDoc(ref, { "draws.t4": { seed: "1234", winners: ["p001"] } }));
+    await assertFails(updateDoc(ref, { step: 5, "draws.t4": { seed: "9", winners: ["p002"] } })); // 진행하면서 추첨 결과 바꾸기
   });
 });

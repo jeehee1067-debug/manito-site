@@ -13,7 +13,7 @@ export const PRIZES = {
 
 export const TICKET_RULES = {
   perRedeemedMission: 1, // 마니또: 미션이 인증될 때마다
-  perHardMission: 1, // 마니또: 도전 미션으로 인증되면 추가
+  cardBonus: { normal: 1, hard: 2 }, // 마니또: 보통·도전 카드 미션이 받는 사람에게 직접 인증되면 추가 (쉬움·칭찬 카드는 없음)
   perReceiverEntry: 1, // 받는 사람: 인증 입력할 때마다
   hidden: 2, // 마니또: 끝까지 안 들킴
   hiddenMinMissions: 1, // 은신 응모권은 내 미션이 이만큼 이상 인증된 마니또만 (아무것도 안 하고 받는 것 방지)
@@ -24,7 +24,7 @@ export const TICKET_RULES = {
   partBonus: 1, // 파트 대항전: 마지막 집계에서 미션 완수율 1위 파트원에게 (동률이면 모두)
   partBonusMinMissions: 1, // 위 응모권은 내 미션이 이만큼 이상 인증된 사람만 (아무것도 안 하고 받는 것 방지)
   maxMissions: 3,
-  maxHard: 2,
+  maxCardBonus: 4, // 카드 추가분 합계 상한 (1·2주차 모두 도전이면 2 + 2)
   maxReceiverEntries: 3,
 };
 

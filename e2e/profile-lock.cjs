@@ -7,7 +7,7 @@ const readTarget = async (p) => { const b = p.locator(".target-toggle"); await b
 const showSecrets = async (p) => { for (const b of await p.getByRole("button", { name: "초대 코드·메일 보기" }).all()) await b.click(); };
 const H = require("./helpers.cjs");
 (async () => {
-  const { PROFILE_QUESTIONS: PQ } = await import("/home/user/manito-site/src/lib/constants.js");
+  const { PROFILE_QUESTIONS: PQ } = await import(require("node:url").pathToFileURL(require("node:path").join(__dirname, "../src/lib/constants.js")).href);
   await H.reset();
   const b = await chromium.launch(); const errs = []; const mk = H.maker(b, errs);
   const NAMES = ["가나", "다라", "마바"];

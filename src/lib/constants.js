@@ -17,7 +17,7 @@ export const PROFILE_QUESTIONS = [
   { q: "점심은 주로?", options: ["구내식당에서 먹음", "구내식당 테이크아웃", "밖에서·도시락", "자주 거름"] },
   { q: "평소 출근 시간은?", options: ["8시 전", "8~9시", "9시 이후"] },
   { q: "내 책상에 늘 있는 물건 하나는?", min: 2 },
-  { q: "출퇴근은 주로?", options: ["자가용", "통근버스", "대중교통", "걸어서·자전거"] },
+  { q: "나만 아는 의외의 TMI 하나는?", min: 2, hint: "예: 숨은 특기, 어릴 때 별명 (바로 누군지 드러나는 건 빼고)" },
   { q: "요즘 빠져 있는 것은? (드라마, 게임, 운동 등)", min: 2 },
 ];
 
@@ -42,9 +42,31 @@ export const SPEND_GUIDE_WON = 5000;
 // firestore.rules에도 같은 숫자(5)가 적혀 있다(giverMissions.notes와 쪽지 문서 ID 순번으로 센다). 바꾸면 규칙도 같이 고칠 것 — npm test가 같은지 확인한다.
 export const EXTRA_NOTES_MAX = 5;
 
+// 행사 일정(참여자 화면 "이번 주 할 일"과 규칙 탭에 보인다). 바꾸면 화면에 바로 반영된다.
+// 주차를 올리고 단서를 공개하는 것은 운영자가 그날 운영 탭에서 직접 누른다(자동으로 바뀌지 않음).
+export const SCHEDULE = [
+  { date: "2026-11-17", text: "1주차 미션 시작" },
+  { date: "2026-11-20", text: "단서 2개 공개" },
+  { date: "2026-11-24", text: "2주차 미션 시작" },
+  { date: "2026-11-27", text: "단서 2개 공개" },
+  { date: "2026-12-01", text: "3주차 시작 (전원 칭찬 카드)" },
+  { date: "2026-12-04", text: "단서 2개 공개" },
+  { date: "2026-12-08", text: "미션 마감 · 최종 지목(마지막 단서: 파트) · 베스트 마니또 투표" },
+  { date: "2026-12-09", text: "송년회: 응모권 집계, 정체 공개, 시상, 추첨" },
+];
+const WEEKDAY = ["일", "월", "화", "수", "목", "금", "토"];
+// 이 기기의 오늘 날짜 "YYYY-MM-DD"(한국 시간 기기 기준)
+export function todayYmd(now = new Date()) {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+export function scheduleLabel({ date, text }) {
+  const d = new Date(`${date}T00:00:00`);
+  return `${d.getMonth() + 1}/${d.getDate()}(${WEEKDAY[d.getDay()]}) ${text}`;
+}
+
 // 게시돼 있어야 하는 보안 규칙 버전. firestore.rules의 rulesVersion과 같아야 한다.
 // 규칙에서 화면이 쓰는 경로·값의 모양을 바꿀 때 양쪽을 같이 올린다. 운영 화면이 이 값으로 "콘솔의 규칙이 예전 것"인지 확인해 알려 준다.
-export const RULES_VERSION = "20261116";
+export const RULES_VERSION = "20261117";
 
 // remote: 다른 근무지에 있는 대상에게도 할 수 있는 미션인지.
 // 대상이 다른 근무지면 remote 카드만 제시한다. 쉬움 카드는 모두 사이트 쪽지로 하는 무비용 미션.

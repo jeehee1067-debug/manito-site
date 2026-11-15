@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { collection, doc, getDoc, increment, onSnapshot, query, serverTimestamp, setDoc, where, writeBatch } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp, Loading } from "../App.jsx";
-import { EXTRA_NOTES_MAX, LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT, SPEND_GUIDE_WON } from "../lib/constants.js";
+import { EXTRA_NOTES_MAX, LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT, SCHEDULE, SPEND_GUIDE_WON, scheduleLabel, todayYmd } from "../lib/constants.js";
 import { seededRandom, shuffle } from "../lib/random.js";
 import { syncClues } from "../lib/sync.js";
 import { Avatar, Dialogue, Panel } from "../ui.jsx";
@@ -24,14 +24,15 @@ function cardDeck(pid, slot, level, remoteOnly) {
 }
 
 export default function MyMission() {
-  const { myPid, nameOf, config, byPid } = useApp();
+  const { myPid, nameOf, config, byPid, inbox, fromReceiver } = useApp();
   const [assignment, setAssignment] = useState(undefined);
   const [codes, setCodes] = useState(null);
   const [missions, setMissions] = useState({});
   const [progress, setProgress] = useState({});
   const [nudge, setNudge] = useState(false);
-  const [inboxSlots, setInboxSlots] = useState([]); // 내 마니또가 완료를 알린 주차
-  const [mine, setMine] = useState([]); // 내가 받는 사람으로서 입력한 인증
+  const inboxSlots = inbox.filter((d) => d.kind !== "note").map((d) => d.slot); // 내 마니또가 완료를 알린 주차(App이 구독)
+  const [mine, setMine] = useState(null); // 내가 받는 사람으로서 입력한 인증(null = 불러오는 중)
+  const [extra, setExtra] = useState({}); // 이번 주 할 일에 쓰는 것: 내 취향 칸, 이번 주 추측, 투표 여부
   const [shown, setShown] = useState(false); // 대상 이름을 보이는지(기본은 가림)
   useEffect(() => {
     if (!shown) return undefined;
@@ -40,13 +41,13 @@ export default function MyMission() {
   }, [shown]);
 
   // 받는 사람으로서: 마니또가 보냈는데 아직 인증하지 않은 미션이 있으면 알려 준다(인증해야 둘 다 응모권을 받는다).
+  useEffect(() => onSnapshot(query(collection(db, "redemptions"), where("receiverPid", "==", myPid)), (s) => setMine(s.docs.map((d) => d.data())), () => setMine([])), [myPid]);
   useEffect(() => {
-    const offs = [
-      onSnapshot(query(collection(db, "deliveries"), where("receiverPid", "==", myPid)), (s) => setInboxSlots(s.docs.map((d) => d.data().slot)), () => {}),
-      onSnapshot(query(collection(db, "redemptions"), where("receiverPid", "==", myPid)), (s) => setMine(s.docs.map((d) => d.data())), () => {}),
-    ];
-    return () => offs.forEach((o) => o());
-  }, [myPid]);
+    const get = (path, key, pick) => getDoc(doc(db, ...path)).then((s) => setExtra((x) => ({ ...x, [key]: pick(s) }))).catch(() => setExtra((x) => ({ ...x, [key]: null })));
+    get(["prefs", myPid], "prefs", (s) => s.exists());
+    if (config.phase === PHASE.RUNNING) get(["midGuesses", myPid], "mid", (s) => (s.exists() ? s.data().guesses || {} : {}));
+    if (config.phase === PHASE.VOTING) get(["votes", myPid], "voted", (s) => s.exists() && (s.data().cardIds || []).length > 0);
+  }, [myPid, config.phase, config.week]);
 
   useEffect(() => {
     getDoc(doc(db, "assignments", myPid))
@@ -89,15 +90,38 @@ export default function MyMission() {
   const myLoc = byPid[myPid]?.loc;
   const theirLoc = byPid[receiverPid]?.loc;
   const remote = Boolean(myLoc && theirLoc && myLoc !== theirLoc);
-  const pending = [...new Set(inboxSlots)].filter((slot) => !mine.some((r) => r.slot === slot));
-  const myEntries = Math.min(TICKET_RULES.maxReceiverEntries, mine.filter((r) => !r.voided).length);
+  // 인증 목록이 오기 전에는 "인증 안 한 미션"으로 세지 않는다(잠깐 잘못 보이지 않게)
+  const pending = mine ? [...new Set(inboxSlots)].filter((slot) => !mine.some((r) => r.slot === slot)) : [];
+  const myEntries = Math.min(TICKET_RULES.maxReceiverEntries, (mine || []).filter((r) => !r.voided).length);
 
   // 가려 둔 동안에는 화면 어디에도 대상 이름을 쓰지 않는다
   // 존칭까지 붙인 이름("홍길동님"). 가려 둔 동안에는 "내 대상".
   const targetName = shown ? `${nameOf(receiverPid)}님` : "내 대상";
 
+  const week = config.week || 1;
+  const nextEvent = SCHEDULE.find((e) => e.date >= todayYmd());
+  // 이번 주 할 일: 지금 단계에서 아직 안 한 것만
+  const todo = [];
+  if (!progress.unknown && !progress.profileDone) todo.push({ text: "내 프로필 6문항 채우기 (단서가 돼요. 안 채우면 은신 응모권 없음)", href: "#profile" });
+  if (extra.prefs === false) todo.push({ text: "내 마니또에게 알려 줄 것(좋아하는 간식, 못 먹는 음식) 적기", href: "#profile" });
+  if (running) {
+    if (!missions.done?.[week]) todo.push({ text: week === PRAISE_SLOT ? `${week}주차 칭찬 카드 보내기` : missions.choices?.[week] ? `${week}주차 미션 하고 "완료 알리기"` : `${week}주차 미션 카드 고르기`, href: null });
+    if (pending.length > 0) todo.push({ text: `받은 미션 ${pending.length}건 인증하기`, href: "#detective" });
+    if (extra.mid && !extra.mid[week]) todo.push({ text: `${week}주차 추측 남기기 (용의자 보드)`, href: "#detective" });
+  }
+  if (config.phase === PHASE.GUESSING && !progress.unknown && !progress.guessed) todo.push({ text: "최종 지목하기 (마지막 단서: 마니또의 파트 공개)", href: "#detective" });
+  if (config.phase === PHASE.VOTING && extra.voted === false) todo.push({ text: "베스트 마니또 투표하기", href: "#vote" });
+
   return (
     <>
+      {config.phase < PHASE.SCORING && (
+        <Panel title="이번 주 할 일">
+          {todo.length === 0
+            ? <p className="small">지금 할 일은 다 했어요! 마니또의 다음 미션을 기다려 보세요.</p>
+            : <ul className="todo-list">{todo.map((t) => <li key={t.text}>{t.href ? <a href={t.href}>{t.text}</a> : t.text}</li>)}</ul>}
+          {nextEvent && <p className="small muted">다음 일정: {scheduleLabel(nextEvent)}</p>}
+        </Panel>
+      )}
       <section className="panel target">
         {shown ? <Avatar pid={receiverPid} size={140} /> : <div className="avatar-mask" aria-hidden="true">?</div>}
         <div>
@@ -120,6 +144,16 @@ export default function MyMission() {
           찾아봐도 받은 게 없으면 추리 보드에서 "받은 게 없어요"로 알려 주세요.
         </Dialogue>
       )}
+      <TargetPrefs receiverPid={receiverPid} targetName={targetName} />
+      {fromReceiver.length > 0 && (
+        <Panel title={`${targetName}이 보낸 한마디`}>
+          {fromReceiver.map((m) => (
+            <Dialogue key={m.id} speaker={`내 대상 · ${m.slot}주차`} tone="gold"><p>{m.message}</p></Dialogue>
+          ))}
+          <p className="small muted">답하고 싶으면 완료한 주차의 "쪽지 더 보내기"를 써 보세요. 정체가 들키지 않게 조심!</p>
+        </Panel>
+      )}
+
       {nudge && running && (
         <Dialogue speaker="운영진" tone="warn">{targetName}이 아직 받은 미션이 없어요. 이번 주 미션을 먼저 해 주세요!</Dialogue>
       )}
@@ -209,7 +243,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
       const update = { done: { [slot]: true }, ...bump() };
       if (isPraise) update.choices = { [slot]: { cardId: "praise", level: "praise", text: "올해의 칭찬 한 줄" } };
       const batch = writeBatch(db);
-      // 1·2주차 알림에는 고른 카드(난이도·내용)를 같이 보낸다. 대상이 받은 것과 맞는지 확인하고, 다르면 도전 추가분이 빠진다.
+      // 1·2주차 알림에는 고른 카드(난이도·내용)를 같이 보낸다. 대상이 받은 것과 맞는지 확인하고, 다르면 카드 추가분이 빠진다.
       batch.set(doc(db, "deliveries", `${receiverPid}_${slot}`), {
         receiverPid,
         slot,
@@ -239,7 +273,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
       {open && !done && !isPraise && !choice && (
         <>
           <p className="small">
-            세 장 중 하나를 골라 주세요. 도전 미션은 인증되면 응모권을 1장 더 받아요.
+            세 장 중 하나를 골라 주세요. 대상이 인증하면 보통은 응모권 {TICKET_RULES.cardBonus.normal}장, 도전은 {TICKET_RULES.cardBonus.hard}장을 더 받아요.
             마음에 안 들면 "다른 카드 보기"로 같은 난이도의 다른 카드를 볼 수 있어요.
           </p>
           <p className="small">
@@ -297,7 +331,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
             {isPraise
               ? "칭찬 카드는 사이트 쪽지로 전달되고, 인증 코드도 함께 보내져요."
               : "실물 미션이면 이 코드를 메모에 적어 함께 두면 좋아요. 아래에서 코드를 쪽지로도 함께 보내면 메모를 잃어버려도 인증할 수 있어요."}
-            {!isPraise && " 고른 카드 내용은 대상에게 같이 보여요(받은 것이 카드와 다르면 도전 추가분이 빠져요)."}
+            {!isPraise && " 고른 카드 내용은 대상에게 같이 보여요(받은 것이 카드와 다르면 카드 추가분이 빠져요)."}
           </p>
           <label>
             <span className="panel-label">{isPraise ? `${receiverName}에게 보내는 칭찬 (익명)` : "쪽지 (선택, 익명으로 전달)"}</span>
@@ -326,7 +360,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
           <p className={redeemed && !redeemed.voided ? "note" : "small"}>
             {redeemed
               ? redeemed.voided ? "운영진이 이 인증을 무효 처리했어요." : `${receiverName}이 인증했어요.`
-              : verdict === "received" ? "운영진이 전달된 것으로 확인했어요. 미션으로 인정돼요(도전 추가분은 직접 인증된 경우에만 있어요)."
+              : verdict === "received" ? "운영진이 전달된 것으로 확인했어요. 미션으로 인정돼요(카드 추가분은 직접 인증된 경우에만 있어요)."
                 : verdict === "missing" ? "운영진이 전달되지 않은 것으로 확인했어요. 이 주차는 미션으로 인정되지 않아요."
                   : `${receiverName}의 인증을 기다리는 중이에요.`}
           </p>
@@ -410,26 +444,50 @@ function MoreNotes({ slot, myPid, receiverPid, receiverName, code, sent, showCod
   );
 }
 
+// 내 대상이 알려 준 것(좋아하는 간식, 못 먹는 음식·알레르기, 받기 곤란한 것). 대상 본인과 나(마니또), 운영진만 읽는다.
+function TargetPrefs({ receiverPid, targetName }) {
+  const [p, setP] = useState(undefined);
+  useEffect(() => {
+    getDoc(doc(db, "prefs", receiverPid)).then((s) => setP(s.exists() ? s.data() : null)).catch(() => setP(null));
+  }, [receiverPid]);
+  if (p === undefined) return null;
+  const any = p && (p.likes || p.avoid || p.nope);
+  return (
+    <Panel title={`${targetName}이 알려 준 것`}>
+      {!any && <p className="small muted">아직 적지 않았어요. 간식을 줄 때는 못 먹는 게 있는지 조심해 주세요.</p>}
+      {p?.avoid && <p className="warn-line"><b>못 먹는 음식·알레르기</b> {p.avoid}</p>}
+      {p?.likes && <p className="small"><b>좋아하는 간식·음료</b> {p.likes}</p>}
+      {p?.nope && <p className="small"><b>받기 곤란한 것</b> {p.nope}</p>}
+    </Panel>
+  );
+}
+
 function TicketSummary({ codes, missions, entries }) {
   const { myPart } = useApp();
   const [redeemedSlots, setRedeemedSlots] = useState({});
   useEffect(() => {
     if (!codes) return;
     const offs = Object.entries(codes).map(([slot, code]) =>
-      onSnapshot(doc(db, "redemptions", code), (s) => setRedeemedSlots((prev) => ({ ...prev, [slot]: s.exists() && !s.data().voided })), () => {})
+      // 인증 안 됨: null, 인증됨: "match"(받은 것이 카드와 같음) 또는 "diff"(대상이 "카드와 달라요"로 인증 → 카드 추가분 없음)
+      onSnapshot(doc(db, "redemptions", code), (s) => setRedeemedSlots((prev) => ({
+        ...prev, [slot]: s.exists() && !s.data().voided ? (s.data().cardMatch === false ? "diff" : "match") : null,
+      })), () => {})
     );
     return () => offs.forEach((o) => o());
   }, [codes]);
 
   const R = TICKET_RULES;
   const mission = Object.values(redeemedSlots).filter(Boolean).length;
-  const hard = Math.min(R.maxHard, Object.entries(redeemedSlots).filter(([slot, ok]) => ok && missions.choices?.[slot]?.level === "hard").length);
+  // 카드 추가분: 보통 +1, 도전 +2 (scoring.js computeTickets와 같은 기준)
+  const card = Math.min(R.maxCardBonus, Object.entries(redeemedSlots)
+    .filter(([, st]) => st === "match")
+    .reduce((sum, [slot]) => sum + (R.cardBonus[missions.choices?.[slot]?.level] || 0), 0));
 
   return (
     <Panel title="내 응모권 (지금까지)">
-      <p className="ticket-count"><strong>{mission + hard + entries}</strong>장</p>
+      <p className="ticket-count"><strong>{mission + card + entries}</strong>장</p>
       <ul className="plain tickets">
-        <li>마니또로서: 인증된 미션 {mission} / {R.maxMissions} + 도전 {hard} / {R.maxHard}</li>
+        <li>마니또로서: 인증된 미션 {mission} / {R.maxMissions} + 카드 추가분 {card} / {R.maxCardBonus}(보통 +{R.cardBonus.normal}, 도전 +{R.cardBonus.hard})</li>
         <li>받는 사람으로서: 인증 입력 {entries} / {R.maxReceiverEntries}</li>
         <li className="muted">
           마지막에 더해지는 것: 끝까지 안 들키면 +{R.hidden}
@@ -440,7 +498,7 @@ function TicketSummary({ codes, missions, entries }) {
       </ul>
       <p className="small">
         내 마니또가 미션을 안 보낸 주차(운영진이 "못 받음"으로 확인한 주차 포함)는 마지막에 인증 입력 대신 1장씩 채워져요(내 미션이 {R.compMinMissions}건 이상 인증된 경우).
-        도전 추가분은 대상이 직접 인증한 미션에만 붙어요. <a href="#rules">규칙 전체 보기</a>
+        카드 추가분은 대상이 직접 인증한 미션에만 붙어요. <a href="#rules">규칙 전체 보기</a>
       </p>
     </Panel>
   );

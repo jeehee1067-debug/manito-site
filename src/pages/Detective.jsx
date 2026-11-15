@@ -10,7 +10,7 @@ import { normalizeCode } from "../lib/random.js";
 import { bump } from "../lib/writes.js";
 
 export default function Detective() {
-  const { myPid, config, roster } = useApp();
+  const { myPid, config, roster, inbox: items } = useApp();
   // 파트 단서: 최종 지목 단계부터 읽을 수 있다(보안 규칙). undefined = 아직 안 읽음, null = 없음
   const partsInUse = roster.some((r) => r.part);
   const hintOpen = partsInUse && config.phase >= PHASE.GUESSING;
@@ -22,15 +22,13 @@ export default function Detective() {
       .catch(() => setHintPart(null));
   }, [myPid, hintOpen, config.assignVer]);
 
-  // 마니또에게서 온 것(완료 알림·쪽지): 받은 것 목록과 인증하기(고른 카드 확인)가 같이 쓴다
-  const [items, setItems] = useState([]);
-  useEffect(() => onSnapshot(query(collection(db, "deliveries"), where("receiverPid", "==", myPid)), (s) =>
-    setItems(s.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0))), () => {}), [myPid]);
+  // 마니또에게서 온 것(완료 알림·쪽지)은 App이 한 번 구독해 둔 것을 쓴다(안 읽은 표시와 같이)
 
   return (
     <>
       <Inbox myPid={myPid} items={items} />
       <CodeEntry myPid={myPid} items={items} />
+      <ToManito myPid={myPid} />
       <MyRedemptions myPid={myPid} />
       <Clues myPid={myPid} partsInUse={partsInUse} hintOpen={hintOpen} hintPart={hintPart} />
       <Suspects myPid={myPid} hintPart={hintOpen ? hintPart : null} />
@@ -40,12 +38,12 @@ export default function Detective() {
 
 function Inbox({ myPid, items }) {
   const { config } = useApp();
-  const [mine, setMine] = useState([]); // 내가 입력한 인증 [{ code, slot }]
+  const [mine, setMine] = useState(null); // 내가 입력한 인증 [{ code, slot }]. null = 아직 불러오는 중
   useEffect(() => onSnapshot(query(collection(db, "redemptions"), where("receiverPid", "==", myPid)), (s) =>
-    setMine(s.docs.map((d) => ({ code: d.id, slot: d.data().slot }))), () => {}), [myPid]);
+    setMine(s.docs.map((d) => ({ code: d.id, slot: d.data().slot }))), () => setMine([])), [myPid]);
 
-  const redeemedCodes = new Set(mine.map((r) => r.code));
-  const redeemedSlots = new Set(mine.map((r) => r.slot));
+  const redeemedCodes = new Set((mine || []).map((r) => r.code));
+  const redeemedSlots = new Set((mine || []).map((r) => r.slot));
   // 마니또가 완료를 알렸는데 내가 아직 인증하지 않은 1·2주차(3주차 칭찬 카드는 사이트로 바로 오므로 "받은 게 없어요"가 없다)
   const waiting = [...new Set(items.filter((it) => it.slot !== PRAISE_SLOT).map((it) => it.slot))]
     .filter((slot) => !redeemedSlots.has(slot))
@@ -69,7 +67,57 @@ function Inbox({ myPid, items }) {
           </Dialogue>
         ))}
       </div>
-      {waiting.map((slot) => <ReportBox key={slot} myPid={myPid} slot={slot} phase={config.phase} />)}
+      {/* 내 인증 목록이 오기 전에는 띄우지 않는다(이미 인증한 주차에 "받은 게 없어요"가 잠깐 보이지 않게) */}
+      {mine && waiting.map((slot) => <ReportBox key={slot} myPid={myPid} slot={slot} phase={config.phase} />)}
+    </Panel>
+  );
+}
+
+// 마니또에게 한마디: 받는 사람이 내 마니또에게 주차마다 한 번 익명으로 말을 건다(고칠 수 없음).
+// "혹시 ○○파트세요?"처럼 찔러보기도 된다. 마니또는 "쪽지 더 보내기"로 답할 수 있다.
+function ToManito({ myPid }) {
+  const { config } = useApp();
+  const [sent, setSent] = useState(undefined); // { slot: message }
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => onSnapshot(query(collection(db, "toManito"), where("receiverPid", "==", myPid)), (s) =>
+    setSent(Object.fromEntries(s.docs.map((d) => [d.data().slot, d.data().message]))), () => setSent({})), [myPid]);
+  const open = config.phase === PHASE.RUNNING || config.phase === PHASE.GUESSING;
+  const week = config.week || 1;
+  if (sent === undefined || (!open && Object.keys(sent).length === 0)) return null;
+
+  async function send(e) {
+    e.preventDefault();
+    const message = text.trim();
+    if (!message) return;
+    if (!window.confirm(`${week}주차 한마디는 한 번만 보낼 수 있어요. 보낼까요?\n\n"${message}"`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      await setDoc(doc(db, "toManito", `${myPid}_${week}`), { receiverPid: myPid, slot: week, message, createdAt: serverTimestamp() });
+      setText("");
+    } catch {
+      setError("보내지 못했어요. 이번 주에 이미 보냈거나 보낼 수 없는 단계예요.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Panel title="마니또에게 한마디">
+      <p className="small">내 마니또에게만 보여요. 주차마다 한 번, 200자까지. 고맙다는 말도, "혹시 ○○파트세요?" 같은 찔러보기도 좋아요. 마니또는 쪽지로 답할 수 있어요.</p>
+      {Object.entries(sent).sort(([a], [b]) => a - b).map(([slot, m]) => (
+        <Dialogue key={slot} speaker={`나 → 마니또 · ${slot}주차`}><p>{m}</p></Dialogue>
+      ))}
+      {open && !sent[week] && (
+        <form className="stack" onSubmit={send}>
+          <textarea className="pk-input" rows={2} maxLength={200} value={text} onChange={(e) => setText(e.target.value)} placeholder={`${week}주차 한마디`} aria-label={`${week}주차 마니또에게 한마디`} />
+          <button className="pk-btn sm" disabled={busy || !text.trim()}>보내기</button>
+        </form>
+      )}
+      {open && sent[week] && <p className="small muted">{week}주차 한마디는 보냈어요. 다음 주차에 또 보낼 수 있어요.</p>}
+      {error && <p className="error small" role="alert">{error}</p>}
     </Panel>
   );
 }
@@ -211,7 +259,7 @@ function CodeEntry({ myPid, items }) {
             <p className="small">마니또가 고른 카드: <b>{LEVEL_LABEL[card.level] || card.level}</b> · {card.text}</p>
             <label className="check">
               <input type="checkbox" checked={cardMatch} onChange={(e) => setCardMatch(e.target.checked)} />
-              받은 것이 이 카드 내용과 같아요 (다르면 체크를 풀어 주세요. 도전 카드일 때 추가 응모권에 영향이 있어요)
+              받은 것이 이 카드 내용과 같아요 (다르면 체크를 풀어 주세요. 보통·도전 카드일 때 마니또의 추가 응모권에 영향이 있어요)
             </label>
           </div>
         )}
@@ -334,6 +382,24 @@ function Suspects({ myPid, hintPart }) {
     getDoc(doc(db, "guesses", myPid)).then((s) => setGuess(s.exists() ? s.data().guessPid : null)).catch(() => {});
   }, [myPid]);
 
+  // 주차별 중간 추측: 맞았는지는 알려 주지 않는다. 송년회에서 "몇 주차부터 알아챘나"가 공개된다(응모권과는 상관없음).
+  const [mid, setMid] = useState({});
+  const [midPick, setMidPick] = useState("");
+  const [midMsg, setMidMsg] = useState("");
+  useEffect(() => onSnapshot(doc(db, "midGuesses", myPid), (s) => setMid(s.exists() ? s.data().guesses || {} : {}), () => {}), [myPid]);
+  const week = config.week || 1;
+  async function saveMid(e) {
+    e.preventDefault();
+    if (!midPick) return;
+    try {
+      await setDoc(doc(db, "midGuesses", myPid), { guesses: { [week]: midPick }, ...bump() }, { merge: true });
+      setMidMsg(`${week}주차 추측을 남겼어요. 이번 주 안에는 바꿀 수 있어요.`);
+      setMidPick("");
+    } catch {
+      setMidMsg("지금은 남길 수 없어요.");
+    }
+  }
+
   async function toggle(pid) {
     await updateDoc(doc(db, "users", user.uid), { eliminated: eliminated.has(pid) ? arrayRemove(pid) : arrayUnion(pid), ...bump() });
   }
@@ -368,6 +434,24 @@ function Suspects({ myPid, hintPart }) {
           </button>
         ))}
       </div>
+
+      {config.phase === PHASE.RUNNING && (
+        <form className="stack guess" onSubmit={saveMid}>
+          <label>
+            <span className="panel-label">{week}주차 추측 (맞았는지는 송년회에서 공개)</span>
+            <select className="pk-input" value={midPick} onChange={(e) => setMidPick(e.target.value)}>
+              <option value="">지금 가장 의심되는 사람</option>
+              {remaining.map((s) => <option key={s.pid} value={s.pid}>{s.name}</option>)}
+            </select>
+          </label>
+          <button className="pk-btn sm" disabled={!midPick}>이번 주 추측 남기기</button>
+          <p className="small muted">응모권과는 상관없어요. 일찍부터 계속 맞힌 사람은 송년회에서 "가장 먼저 알아챈 사람"으로 발표돼요.</p>
+        </form>
+      )}
+      {Object.keys(mid).length > 0 && (
+        <p className="small">내 추측: {Object.entries(mid).sort(([a], [b]) => a - b).map(([w, pid]) => `${w}주차 ${byPid[pid]?.name || "?"}`).join(" · ")}</p>
+      )}
+      {midMsg && <p className="note small" role="status">{midMsg}</p>}
 
       {config.phase === PHASE.GUESSING && (
         <form className="stack guess" onSubmit={submitGuess}>

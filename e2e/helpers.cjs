@@ -57,7 +57,7 @@ async function fillProfile(page, answers, PQ) {
     if (PQ[q].options) await qs.nth(q).getByRole("radio", { name: answers[q], exact: true }).click();
     else await qs.nth(q).locator("input").fill(answers[q]);
   }
-  await page.getByRole("button", { name: "저장" }).click();
+  await page.getByRole("button", { name: "저장", exact: true }).click();
   await page.getByText(/저장했어요/).waitFor();
 }
 const answersFor = (PQ, i, name) => PQ.map((x, q) => (x.options ? x.options[(i + q) % x.options.length] : `${name}의답${q + 1}`));

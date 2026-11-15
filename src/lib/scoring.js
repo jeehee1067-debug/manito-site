@@ -10,7 +10,7 @@ import { secureRandom, seededRandom } from "./random.js";
  * assignments: { giverPid: receiverPid }
  * giverCodes: { giverPid: { 1: code, 2: code, 3: code } }
  * redemptions: { code: { receiverPid, slot, voided, cardMatch } }
- *   cardMatch = false: 받는 사람이 "받은 것이 마니또가 고른 카드와 달라요"로 인증함 → 도전 추가분 없음
+ *   cardMatch = false: 받는 사람이 "받은 것이 마니또가 고른 카드와 달라요"로 인증함 → 카드 추가분 없음
  * missions: { giverPid: { choices: { slot: { level } } } }
  * guesses: { receiverPid: guessPid }
  * deliveries: [{ receiverPid, slot }]  마니또가 "완료 알리기"(또는 쪽지 더 보내기)를 누를 때마다 1건
@@ -20,10 +20,10 @@ import { secureRandom, seededRandom } from "./random.js";
  *   마니또가 완료를 알렸는데 인증이 없는 주차를 운영자가 확인한 결과(받는 사람이 "받은 게 없어요"로 신고한 주차 포함).
  *
  * 규칙
- *  - 마니또: 인증된 미션 1장씩(최대 3), 도전 +1(최대 2), 끝까지 안 들키면 은신 2장.
+ *  - 마니또: 인증된 미션 1장씩(최대 3), 카드 추가분(보통 +1, 도전 +2, 합계 최대 4), 끝까지 안 들키면 은신 2장.
  *    은신은 내 미션이 1건 이상 인증된 마니또만 받는다(아무것도 안 한 사람이 가장 안 들키는 문제).
  *    그리고 단서 6개를 낸 마니또만 받는다(프로필을 안 채워 단서를 안 내면 덜 들키는 문제).
- *    도전 추가분은 받는 사람이 직접 인증한 미션에만 준다(아래 ②로 인정된 미션에는 주지 않는다).
+ *    카드 추가분은 받는 사람이 직접 인증한 미션에만 준다(아래 ②로 인정된 미션에는 주지 않는다).
  *  - 받는 사람: 인증 입력 1장씩(최대 3), 정답 지목 1장.
  *  - 상대방 때문에 손해 보지 않게:
  *    ① 내 마니또가 미션을 안 보낸 주차, 그리고 완료를 알렸지만 운영자가 "못 받음"으로 확인한 주차는 인증 입력 대신 1장(보상).
@@ -38,7 +38,7 @@ export function computeTickets({ people, assignments, giverCodes, redemptions, m
   const out = {};
   const absent = new Set(); // 불참: 가입 안 함 또는 중도 이탈
   for (const p of people) {
-    out[p.pid] = { mission: 0, hard: 0, entries: 0, comp: 0, hidden: 0, guess: 0, partBonus: 0, total: 0, completion: 0, assumed: 0 };
+    out[p.pid] = { mission: 0, card: 0, entries: 0, comp: 0, hidden: 0, guess: 0, partBonus: 0, total: 0, completion: 0, assumed: 0 };
     if (p.joined === false || p.dropout) absent.add(p.pid);
   }
   const valid = (code) => redemptions[code] && !redemptions[code].voided;
@@ -54,7 +54,7 @@ export function computeTickets({ people, assignments, giverCodes, redemptions, m
     if (!out[giver]) continue;
     const codes = giverCodes[giver] || {};
     let redeemed = 0;
-    let hard = 0;
+    let card = 0;
     let assumed = 0;
     for (const [slot, code] of Object.entries(codes)) {
       const byReceiver = valid(code);
@@ -64,14 +64,13 @@ export function computeTickets({ people, assignments, giverCodes, redemptions, m
       if (!byReceiver && !byConfirm) continue;
       redeemed++;
       if (byConfirm) assumed++;
-      // 도전 추가분은 받는 사람이 직접 인증했고, 받은 것이 고른 카드와 같다고 한 미션만
-      else if (missions[giver]?.choices?.[slot]?.level === "hard" && redemptions[code].cardMatch !== false) hard++;
+      // 카드 추가분(보통·도전)은 받는 사람이 직접 인증했고, 받은 것이 고른 카드와 같다고 한 미션만
+      else if (redemptions[code].cardMatch !== false) card += R.cardBonus[missions[giver]?.choices?.[slot]?.level] || 0;
     }
     credited[giver] = redeemed;
     redeemed = Math.min(redeemed, R.maxMissions);
-    hard = Math.min(hard, R.maxHard);
     out[giver].mission = redeemed * R.perRedeemedMission;
-    out[giver].hard = hard * R.perHardMission;
+    out[giver].card = Math.min(card, R.maxCardBonus);
     out[giver].completion = redeemed / R.maxMissions;
     out[giver].assumed = assumed;
 
@@ -114,7 +113,7 @@ export function computeTickets({ people, assignments, giverCodes, redemptions, m
   }
 
   for (const [pid, t] of Object.entries(out)) {
-    t.total = zero.has(pid) ? 0 : t.mission + t.hard + t.entries + t.comp + t.hidden + t.guess + t.partBonus;
+    t.total = zero.has(pid) ? 0 : t.mission + t.card + t.entries + t.comp + t.hidden + t.guess + t.partBonus;
   }
   return out;
 }
@@ -275,4 +274,24 @@ export function pickMostTickets(tickets, rand = secureRandom) {
   const max = Math.max(...rows.map(([, t]) => t.total));
   const tied = rows.filter(([, t]) => t.total === max).map(([pid]) => pid);
   return { pid: tied[Math.floor(rand() * tied.length)], total: max, tiedCount: tied.length };
+}
+
+/**
+ * 알아챈 주차: 받는 사람이 최종 지목에서 마니또를 맞혔을 때, 중간 추측(1~3주차)부터 끝까지 계속 맞힌 첫 주차.
+ * assignments: { giverPid: receiverPid }, midGuesses: { receiverPid: { 1: pid, 2: pid, 3: pid } }, guesses: { receiverPid: guessPid }
+ * 반환: { receiverPid: 1 | 2 | 3 | 4 } (4 = 최종 지목에서야 맞힘). 최종 지목이 틀렸거나 없으면 넣지 않는다.
+ * 중간에 다른 사람을 찍었거나 비운 주차가 있으면 그다음 주차부터 센다. 응모권과는 상관없다(송년회 발표용 칭호).
+ */
+export function noticedWeeks(assignments, midGuesses = {}, guesses = {}) {
+  const out = {};
+  for (const [giver, receiver] of Object.entries(assignments)) {
+    if (guesses[receiver] !== giver) continue;
+    let week = 4;
+    for (let w = 3; w >= 1; w--) {
+      if (midGuesses[receiver]?.[w] === giver) week = w;
+      else break;
+    }
+    out[receiver] = week;
+  }
+  return out;
 }

@@ -41,7 +41,7 @@ service cloud.firestore {
     // 게시된 규칙의 버전 확인용. 운영 화면이 이 경로를 읽어 보고, 거부되면 "콘솔의 규칙이 예전 것"이라고 알려 준다.
     // 화면이 쓰는 경로·값의 모양을 바꿀 때 src/lib/constants.js의 RULES_VERSION과 같이 올린다.
     match /rulesVersion/{v} {
-      allow get: if isAdmin() && v == '20261116';
+      allow get: if isAdmin() && v == '20261117';
     }
 
     // ── 설정 ──────────────────────────────────────────────────────────────
@@ -182,6 +182,19 @@ service cloud.firestore {
         && bumped();
     }
 
+    // 내 마니또에게 알려 줄 것: 좋아하는 간식(likes), 못 먹는 음식·알레르기(avoid), 받기 곤란한 것(nope).
+    // 본인·내 마니또(나를 맡은 사람)·운영자만 읽는다. 간식 미션에서 알레르기 사고를 막고 선물 고르는 데 쓴다.
+    match /prefs/{pid} {
+      allow get: if linked() && (myPid() == pid || myReceiver() == pid);
+      allow read: if isAdmin();
+      allow create, update: if linked() && myPid() == pid
+        && request.resource.data.keys().hasOnly(['likes', 'avoid', 'nope', 'n'])
+        && shortStr(request.resource.data.get('likes', ''), 100)
+        && shortStr(request.resource.data.get('avoid', ''), 100)
+        && shortStr(request.resource.data.get('nope', ''), 100)
+        && bumped();
+    }
+
     // ── 짝과 코드 ─────────────────────────────────────────────────────────
     // 짝 정보: 마니또 본인과 운영자만 읽는다. 배정은 준비 단계에만 쓴다.
     match /assignments/{pid} {
@@ -263,6 +276,13 @@ service cloud.firestore {
         && request.resource.data.thanks.size() <= 200
         && myRedemptionAfter(resource.data.slot).feedId == id
         && myRedemptionAfter(resource.data.slot).review == resource.data.review;
+      // 공감: 참여자는 글마다 한 번만(취소 없음, 쓰기 반복 방지). 공감 표시 feedLikes/{글ID}_{내pid}를 같은 묶음으로 만들어야 likes가 1 오른다.
+      allow update: if linked() && phase() >= 1 && phase() <= 4
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes'])
+        && request.resource.data.likes == resource.data.get('likes', 0) + 1
+        && resource.data.voided == false && resource.data.get('hidden', false) == false
+        && !exists(/databases/$(database)/documents/feedLikes/$(id + '_' + myPid()))
+        && existsAfter(/databases/$(database)/documents/feedLikes/$(id + '_' + myPid()));
       // 운영자: 무효 처리(인증 문서와 같이 바꾼다), 피드에서만 가리기(hidden, 응모권과 무관), 감사 답장 지우기
       //  가리기: 후기를 비우고(review == '') 원문은 운영자만 읽는 hiddenFeed/{id}로 옮긴다. 피드 글은 참여자 누구나 읽을 수 있어서,
       //  hidden 표시만 하면 직접 요청으로는 내용이 그대로 보이기 때문이다. 다시 보이기는 hiddenFeed의 원문으로만 되돌린다.
@@ -277,6 +297,19 @@ service cloud.firestore {
                 && getAfter(/databases/$(database)/documents/hiddenFeed/$(id)).data.review == resource.data.review)
             || (resource.data.review == ''
                 && request.resource.data.review == get(/databases/$(database)/documents/hiddenFeed/$(id)).data.review));
+    }
+    // 공감 표시: { pid, feedId, at }, 문서 ID "글ID_내pid". 본인·운영자만 읽는다(누가 어느 글에 공감했는지는 남에게 안 보임).
+    match /feedLikes/{id} {
+      allow list: if linked() && resource.data.pid == myPid();
+      allow read: if isAdmin();
+      allow create: if linked()
+        && request.resource.data.keys().hasOnly(['pid', 'feedId', 'at'])
+        && request.resource.data.pid == myPid()
+        && request.resource.data.feedId is string
+        && id == request.resource.data.feedId + '_' + myPid()
+        && request.resource.data.at == request.time
+        && getAfter(/databases/$(database)/documents/feed/$(request.resource.data.feedId)).data.get('likes', 0)
+           == get(/databases/$(database)/documents/feed/$(request.resource.data.feedId)).data.get('likes', 0) + 1;
     }
     // 가린 피드 글의 원문(운영자만). { review }
     match /hiddenFeed/{id} {
@@ -508,7 +541,7 @@ service cloud.firestore {
         || (i == 1 && a in ["구내식당에서 먹음", "구내식당 테이크아웃", "밖에서·도시락", "자주 거름"])
         || (i == 2 && a in ["8시 전", "8~9시", "9시 이후"])
         || (i == 3 && a.trim().size() >= 2)
-        || (i == 4 && a in ["자가용", "통근버스", "대중교통", "걸어서·자전거"])
+        || (i == 4 && a.trim().size() >= 2)
         || (i == 5 && a.trim().size() >= 2));
     }
     function clueWriteOk(id) {
@@ -539,6 +572,40 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/roster/$(request.resource.data.guessPid))
         && request.resource.data.createdAt == request.time
         && bumped();
+    }
+
+    // 주차별 중간 추측: { guesses: { "1": pid, "2": pid, "3": pid }, n }. 맞았는지는 알려 주지 않고 기록만 한다
+    // (송년회에서 "몇 주차부터 알아챘나"를 공개). 본인·운영자만 읽는다. 미션 진행 단계에, 열린 주차(config.week) 칸만 쓰고 바꾼다.
+    function midGuessOk(before) {
+      let after = request.resource.data.get('guesses', {});
+      let w = string(week());
+      return request.resource.data.keys().hasOnly(['guesses', 'n'])
+        && after is map
+        && after.diff(before.get('guesses', {})).affectedKeys().hasOnly([w])
+        && (!(w in after) || (after[w] is string && after[w] != myPid()
+            && exists(/databases/$(database)/documents/roster/$(after[w]))))
+        && bumped();
+    }
+    match /midGuesses/{pid} {
+      allow get: if linked() && myPid() == pid;
+      allow read: if isAdmin();
+      allow create: if linked() && myPid() == pid && phase() == 1 && midGuessOk({});
+      allow update: if linked() && myPid() == pid && phase() == 1 && midGuessOk(resource.data);
+    }
+
+    // 받는 사람 → 내 마니또 익명 한마디: { receiverPid, slot, message, createdAt }, 문서 ID "받는사람_주차"라 주차마다 한 번(고칠 수 없음).
+    // 받는 사람·그 사람의 마니또·운영자만 읽는다. 보낸 사람(받는 사람)은 마니또가 원래 알고 있는 사람이라 정체가 드러나지 않는다.
+    match /toManito/{id} {
+      allow list: if linked() && (resource.data.receiverPid == myPid() || resource.data.receiverPid == myReceiver());
+      allow read, delete: if isAdmin();
+      allow create: if linked() && phase() >= 1 && phase() <= 2
+        && request.resource.data.keys().hasOnly(['receiverPid', 'slot', 'message', 'createdAt'])
+        && request.resource.data.receiverPid == myPid()
+        && request.resource.data.slot is int && request.resource.data.slot >= 1 && request.resource.data.slot <= week()
+        && id == myPid() + '_' + string(request.resource.data.slot)
+        && request.resource.data.message is string
+        && request.resource.data.message.trim().size() > 0 && request.resource.data.message.size() <= 200
+        && request.resource.data.createdAt == request.time;
     }
 
     // 투표 카드에는 카드 주인을 짐작할 정보(파트)를 넣지 않는다.
@@ -583,8 +650,10 @@ service cloud.firestore {
       allow read: if (linked() && phase() >= 5) || isAdmin();
       allow create, update: if isAdmin() && phase() == 4
         && drawsOf(request.resource.data).size() == 0;
+      // 공개 단계: 추첨 칸 더하기와 발표 화면 진행(step: 몇 번째 장면까지 공개했는지)만
       allow update: if isAdmin() && phase() == 5
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['draws'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['draws', 'step'])
+        && request.resource.data.get('step', 0) is int
         && drawsOf(request.resource.data).diff(drawsOf(resource.data)).removedKeys().size() == 0
         && drawsOf(request.resource.data).diff(drawsOf(resource.data)).changedKeys().size() == 0;
     }
