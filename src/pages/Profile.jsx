@@ -4,6 +4,7 @@ import { db } from "../firebase.js";
 import { useApp } from "../App.jsx";
 import { AVATARS, PROFILE_QUESTIONS, profileAnswerError } from "../lib/constants.js";
 import { syncClues } from "../lib/sync.js";
+import { bump } from "../lib/writes.js";
 import { Panel, avatarSrc } from "../ui.jsx";
 
 export default function Profile() {
@@ -25,7 +26,7 @@ export default function Profile() {
   }, [myPid]);
 
   useEffect(() => loadAvatar(myPid), [myPid, loadAvatar]);
-  const pickAvatar = (i) => setDoc(doc(db, "avatars", myPid), { avatar: i }).then(() => setAvatarLocal(myPid, i));
+  const pickAvatar = (i) => setDoc(doc(db, "avatars", myPid), { avatar: i, ...bump() }, { merge: true }).then(() => setAvatarLocal(myPid, i));
 
   // 이미 공개된 단서 칸은 바꿀 수 없다(대상이 본 단서가 나중에 바뀌지 않게). 비어 있던 칸은 늦게라도 쓸 수 있다.
   // 보안 규칙도 같은 기준으로 막는다(공개된 칸은 같은 답으로만 다시 쓸 수 있음).
@@ -42,9 +43,9 @@ export default function Profile() {
     }
     setStatus("저장하는 중");
     try {
-      await setDoc(doc(db, "profiles", myPid), { answers: next, updatedAt: serverTimestamp() });
+      await setDoc(doc(db, "profiles", myPid), { answers: next, updatedAt: serverTimestamp(), ...bump() }, { merge: true });
       setSaved(next);
-      await setDoc(doc(db, "progress", myPid), { profileDone: true }, { merge: true });
+      await setDoc(doc(db, "progress", myPid), { profileDone: true, ...bump() }, { merge: true });
       const synced = await syncClues(myPid, config.assignVer ?? 0);
       setStatus(synced ? "저장했어요. 내 대상에게 갈 단서도 준비됐어요." : "저장했어요. 마니또 배정이 끝나면 단서가 자동으로 준비돼요.");
     } catch {
@@ -76,6 +77,7 @@ export default function Profile() {
         <p className="small">
           여기 답한 내용은 내가 마니또로 맡은 사람에게 매주 금요일 2개씩(1·2번 → 3·4번 → 5·6번) 단서로 공개돼요. 그 사람이 나를 추리할 때 쓰는 단서예요.
           사실대로 답해 주세요. 직접 쓰는 칸에는 이름·직급처럼 바로 알 수 있는 말은 피해 주세요.
+          프로필을 다 채워야(단서 6개가 대상에게 가야) 끝까지 안 들켰을 때 은신 응모권을 받아요. 운영진은 단서가 사실인지 확인할 수 있어요.
           {released > 0 && " 이미 공개된 단서는 바꿀 수 없어요."}
         </p>
         <form onSubmit={save} className="stack">

@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { assignManito, assignmentMemo, generateCodes } from "../src/lib/assign.js";
-import { computeTickets, weightedDraw, pickMostTickets, rankBestManito, tallyVotes, partStandings, weeklyPartBoard } from "../src/lib/scoring.js";
+import { computeTickets, weightedDraw, pickMostTickets, rankBestManito, tallyVotes, partStandings, weeklyPartBoard, seededDraw, verifyDraws } from "../src/lib/scoring.js";
+import { readFileSync } from "node:fs";
 import { seededRandom } from "../src/lib/random.js";
 import { parseRosterLine, rosterSummary, summaryToList, sameSummary } from "../src/lib/roster.js";
 import { MISSION_CARDS, PROFILE_QUESTIONS, CLUE_COUNT, profileAnswerError } from "../src/lib/constants.js";
@@ -584,4 +585,90 @@ test("받는 사람 기준 코드: 마니또의 코드를 그 대상 앞으로 �
   assert.ok(sameCodes({ 1: "A1", 2: "A2", 3: "A3" }, { 3: "A3", 2: "A2", 1: "A1" }));
   assert.ok(!sameCodes({ 1: "A1", 2: "A2" }, { 1: "A1", 2: "A2", 3: "A3" }));
   assert.ok(!sameCodes(undefined, { 1: "A1", 2: "A2", 3: "A3" }));
+});
+
+test("은신 2장은 단서 6개를 낸 마니또만: 프로필을 안 채워 단서를 안 내면 0장", () => {
+  const people = ["A", "B", "C"].map((pid) => ({ pid }));
+  const base = {
+    people, assignments: { A: "B", B: "C", C: "A" }, guesses: {}, missions: {},
+    giverCodes: { A: { 1: "A1", 2: "A2", 3: "A3" }, B: { 1: "B1", 2: "B2", 3: "B3" }, C: { 1: "C1", 2: "C2", 3: "C3" } },
+    redemptions: { A1: { receiverPid: "B", slot: 1, voided: false }, B1: { receiverPid: "C", slot: 1, voided: false } },
+  };
+  const all = computeTickets({ ...base, cluesDone: new Set(["A", "B"]) });
+  assert.deepEqual([all.A.hidden, all.B.hidden], [2, 2]);
+  const noB = computeTickets({ ...base, cluesDone: new Set(["A"]) });
+  assert.deepEqual([noB.A.hidden, noB.B.hidden], [2, 0], "B는 단서를 다 안 내서 은신 없음");
+  assert.equal(noB.B.mission, 1, "미션 응모권은 그대로");
+  assert.deepEqual([computeTickets(base).B.hidden], [2], "단서 정보를 주지 않으면(예전 호출) 조건을 보지 않는다");
+});
+
+test("완료 알림은 알림 문서와 완료 표시 둘 다 본다(어느 한쪽만 있는 예전 자료도 같은 기준)", () => {
+  const people = ["A", "B", "C"].map((pid) => ({ pid }));
+  const giverCodes = { A: { 1: "A1", 2: "A2", 3: "A3" }, B: { 1: "B1", 2: "B2", 3: "B3" }, C: { 1: "C1", 2: "C2", 3: "C3" } };
+  const base = { people, assignments: { A: "B", B: "C", C: "A" }, giverCodes, guesses: {}, redemptions: { B1: { receiverPid: "C", slot: 1, voided: false } } };
+  // A는 1주차에 완료 표시만 있고 알림 문서는 없다 → B는 1주차를 "받았는데 인증 안 함"으로 본다(보상 없음), 운영자가 확인할 수 있다
+  const doneOnly = computeTickets({ ...base, missions: { A: { done: { 1: true } } }, deliveries: [] });
+  const none = computeTickets({ ...base, missions: {}, deliveries: [] });
+  assert.deepEqual([none.B.comp, doneOnly.B.comp], [3, 2]);
+  const confirmed = computeTickets({ ...base, missions: { A: { done: { 1: true } } }, deliveries: [], verdicts: { B_1: "received" } });
+  assert.deepEqual([confirmed.A.mission, confirmed.A.assumed], [1, 1], "완료 표시만 있어도 운영자 확인으로 인정된다");
+  // 짝 현황(운영 화면)도 알림 문서만 있는 주차를 "완료를 알린 주차"로 보여 준다
+  const rows = pairRows({
+    assignments: { A: { receiverPid: "B" } }, giverCodes: { A: { codes: giverCodes.A } }, missions: {}, redemptions: {},
+    reports: { B_1: { active: true }, B_2: { active: false } }, verdicts: {}, guesses: {}, delivered: new Set(["B_1", "B_2"]),
+  });
+  assert.deepEqual([rows[0].slots[1].status, rows[0].slots[2].status], ["reported", "sent"], "취소한 신고(active=false)는 신고가 아님");
+  assert.equal(unresolvedSlots(rows, { onlyReported: true }).length, 1);
+});
+
+test("투표: 내 카드에 준 표는 세지 않는다(파트가 비어 있어 내 카드가 보이는 사람도)", () => {
+  const cards = [{ cardId: "c-x", giverPid: "x" }, { cardId: "c-o", giverPid: "o" }];
+  const { count, expected } = tallyVotes(cards, { x: ["c-x", "c-o"] }, { x: null, o: "가" });
+  assert.deepEqual(count, { "c-x": 0, "c-o": 1 });
+  assert.deepEqual(expected, { "c-x": 0, "c-o": 1 }, "내 카드는 내가 볼 수 있는 카드에서도 빠진다");
+});
+
+test("추첨: 현장에서 정한 숫자와 응모권만으로 결과가 정해지고, 누구나 다시 계산해 검증할 수 있다", () => {
+  const tickets = Object.fromEntries(pids.slice(0, 20).map((pid, i) => [pid, (i % 4) + 1]));
+  tickets.zero = 0;
+  const order = [{ key: "t4", count: 5, tier: true }, { key: "t3", count: 3, tier: true }, { key: "grand", count: 1, tier: false }];
+  const a = seededDraw(tickets, order[0], "4821");
+  assert.deepEqual(a, seededDraw({ ...Object.fromEntries(Object.entries(tickets).reverse()) }, order[0], " 4821 "), "응모권 순서·앞뒤 공백과 무관하게 같다");
+  assert.notDeepEqual(a, seededDraw(tickets, order[0], "4822"), "숫자가 다르면 결과가 다르다");
+  assert.ok(!a.includes("zero"), "0장은 뽑히지 않는다");
+  const t4 = a;
+  const t3 = seededDraw(tickets, order[1], "77", new Set(t4));
+  assert.ok(t3.every((p) => !t4.includes(p)), "2~4등끼리는 중복 없음");
+  const grand = seededDraw(tickets, order[2], "1225");
+  const draws = { t4: { seed: "4821", winners: t4 }, t3: { seed: "77", winners: t3 }, grand: { seed: "1225", winners: grand } };
+  assert.deepEqual(verifyDraws(tickets, draws, order).map((x) => x.ok), [true, true, true]);
+  // 당첨자를 바꿔 저장했거나, 응모권 수를 바꿨으면 검증에서 드러난다
+  const forged = { ...draws, grand: { seed: "1225", winners: [Object.keys(tickets).find((p) => p !== grand[0] && tickets[p] > 0)] } };
+  assert.deepEqual(verifyDraws(tickets, forged, order).map((x) => x.ok), [true, true, false]);
+  assert.equal(verifyDraws({ ...tickets, [t4[0]]: 0 }, draws, order)[0].ok, false);
+  // 예전 방식(배열만 저장)은 검증할 수 없음으로 표시
+  assert.deepEqual(verifyDraws(tickets, { t4: t4 }, order).map((x) => x.ok), [null]);
+});
+
+test("보안 규칙의 단서 형식(clueAnswerOk)이 프로필 문항(PROFILE_QUESTIONS)과 같다", () => {
+  const rules = readFileSync(new URL("../firestore.rules", import.meta.url), "utf8");
+  const fn = rules.slice(rules.indexOf("function clueAnswerOk"), rules.indexOf("function clueWriteOk")).replace(/",\s+"/g, '","');
+  PROFILE_QUESTIONS.forEach((q, i) => {
+    const want = q.options ? `(i == ${i} && a in ${JSON.stringify(q.options)})` : `(i == ${i} && a.trim().size() >= ${q.min || 1})`;
+    assert.ok(fn.includes(want), `${i + 1}번 문항이 규칙과 다름: ${want}`);
+  });
+  assert.equal((fn.match(/\(i == \d/g) || []).length, PROFILE_QUESTIONS.length, "문항 수");
+});
+
+test("도전 추가분: 받는 사람이 '받은 것이 고른 카드와 달라요'로 인증하면 없다", () => {
+  const people = ["A", "B", "C"].map((pid) => ({ pid }));
+  const base = {
+    people, assignments: { A: "B", B: "C", C: "A" }, guesses: {},
+    giverCodes: { A: { 1: "A1", 2: "A2", 3: "A3" }, B: { 1: "B1", 2: "B2", 3: "B3" }, C: { 1: "C1", 2: "C2", 3: "C3" } },
+    missions: { A: { choices: { 1: { level: "hard" }, 2: { level: "hard" } } } },
+  };
+  const ok = computeTickets({ ...base, redemptions: { A1: { receiverPid: "B", slot: 1, voided: false }, A2: { receiverPid: "B", slot: 2, voided: false, cardMatch: true } } });
+  const bad = computeTickets({ ...base, redemptions: { A1: { receiverPid: "B", slot: 1, voided: false }, A2: { receiverPid: "B", slot: 2, voided: false, cardMatch: false } } });
+  assert.deepEqual([ok.A.mission, ok.A.hard], [2, 2]);
+  assert.deepEqual([bad.A.mission, bad.A.hard], [2, 1], "미션 응모권은 그대로, 도전 추가분만 빠진다");
 });

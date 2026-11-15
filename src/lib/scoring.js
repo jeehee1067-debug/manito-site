@@ -1,5 +1,5 @@
 import { TICKET_RULES as R, SCORE_WEIGHTS as W } from "../config/prizes.js";
-import { secureRandom } from "./random.js";
+import { secureRandom, seededRandom } from "./random.js";
 
 /**
  * 응모권 계산
@@ -9,16 +9,20 @@ import { secureRandom } from "./random.js";
  *   dropout     운영자가 "중도 이탈"로 표시했는지
  * assignments: { giverPid: receiverPid }
  * giverCodes: { giverPid: { 1: code, 2: code, 3: code } }
- * redemptions: { code: { receiverPid, slot, voided } }
+ * redemptions: { code: { receiverPid, slot, voided, cardMatch } }
+ *   cardMatch = false: 받는 사람이 "받은 것이 마니또가 고른 카드와 달라요"로 인증함 → 도전 추가분 없음
  * missions: { giverPid: { choices: { slot: { level } } } }
  * guesses: { receiverPid: guessPid }
  * deliveries: [{ receiverPid, slot }]  마니또가 "완료 알리기"(또는 쪽지 더 보내기)를 누를 때마다 1건
+ *   missions의 완료 표시(done)도 완료 알림으로 친다(둘 중 하나만 있는 예전 자료도 같은 기준으로 보도록. 운영 화면 pairs.js와 같은 기준)
+ * cluesDone: Set(giverPid) 프로필을 채워 단서 6개가 지금 대상에게 간 마니또. 주지 않으면(null) 은신 조건에서 단서를 보지 않는다.
  * verdicts: { "받는사람pid_주차": "received" | "missing" }
  *   마니또가 완료를 알렸는데 인증이 없는 주차를 운영자가 확인한 결과(받는 사람이 "받은 게 없어요"로 신고한 주차 포함).
  *
  * 규칙
  *  - 마니또: 인증된 미션 1장씩(최대 3), 도전 +1(최대 2), 끝까지 안 들키면 은신 2장.
  *    은신은 내 미션이 1건 이상 인증된 마니또만 받는다(아무것도 안 한 사람이 가장 안 들키는 문제).
+ *    그리고 단서 6개를 낸 마니또만 받는다(프로필을 안 채워 단서를 안 내면 덜 들키는 문제).
  *    도전 추가분은 받는 사람이 직접 인증한 미션에만 준다(아래 ②로 인정된 미션에는 주지 않는다).
  *  - 받는 사람: 인증 입력 1장씩(최대 3), 정답 지목 1장.
  *  - 상대방 때문에 손해 보지 않게:
@@ -30,7 +34,7 @@ import { secureRandom } from "./random.js";
  *  - 파트 대항전: 미션 완수율 1위 파트원에게 1장(동률이면 모두). 내 미션이 1건 이상 인증된 사람만.
  *  - 가입 안 한 사람, 중도 이탈, 수상 제외는 0장.
  */
-export function computeTickets({ people, assignments, giverCodes, redemptions, missions, guesses, deliveries = [], verdicts = {} }) {
+export function computeTickets({ people, assignments, giverCodes, redemptions, missions, guesses, deliveries = [], verdicts = {}, cluesDone = null }) {
   const out = {};
   const absent = new Set(); // 불참: 가입 안 함 또는 중도 이탈
   for (const p of people) {
@@ -39,6 +43,10 @@ export function computeTickets({ people, assignments, giverCodes, redemptions, m
   }
   const valid = (code) => redemptions[code] && !redemptions[code].voided;
   const delivered = new Set(deliveries.map((d) => `${d.receiverPid}:${d.slot}`));
+  for (const [giver, receiver] of Object.entries(assignments)) {
+    for (const [slot, on] of Object.entries(missions[giver]?.done || {})) if (on) delivered.add(`${receiver}:${slot}`);
+  }
+  const cluesOk = (giver) => !R.hiddenNeedsClues || cluesDone == null || cluesDone.has(giver);
   const verdictOf = (receiver, slot) => verdicts[`${receiver}_${slot}`] || null;
   const credited = {}; // giverPid -> 인증(또는 인정)된 미션 수
 
@@ -56,7 +64,8 @@ export function computeTickets({ people, assignments, giverCodes, redemptions, m
       if (!byReceiver && !byConfirm) continue;
       redeemed++;
       if (byConfirm) assumed++;
-      else if (missions[giver]?.choices?.[slot]?.level === "hard") hard++; // 도전 추가분은 직접 인증된 미션만
+      // 도전 추가분은 받는 사람이 직접 인증했고, 받은 것이 고른 카드와 같다고 한 미션만
+      else if (missions[giver]?.choices?.[slot]?.level === "hard" && redemptions[code].cardMatch !== false) hard++;
     }
     credited[giver] = redeemed;
     redeemed = Math.min(redeemed, R.maxMissions);
@@ -68,7 +77,7 @@ export function computeTickets({ people, assignments, giverCodes, redemptions, m
 
     if (guesses[receiver] === giver && !absent.has(receiver)) {
       if (out[receiver]) out[receiver].guess = R.correctGuess;
-    } else if (credited[giver] >= R.hiddenMinMissions) {
+    } else if (credited[giver] >= R.hiddenMinMissions && cluesOk(giver)) {
       out[giver].hidden = R.hidden;
     }
   }
@@ -164,12 +173,12 @@ export function weeklyPartBoard(people, doneCounts, week) {
  *   기대 득표 = 그 카드를 볼 수 있었던 투표자마다 (고른 수 ÷ 그 사람에게 보인 카드 수)를 더한 값
  *             = 모두가 보이는 카드 중에서 고르게 찍었을 때 받는 표 수
  * 파트 인원이 모두 같으면(또는 파트가 없으면) 기대 득표가 카드마다 같아서 표 수 그대로 비교하는 것과 같다.
- * 화면에서 고를 수 없는 표(내 파트 카드, 없는 카드, 같은 카드 중복)는 세지 않는다. 보안 규칙은 장수(3장)만 확인하기 때문이다.
+ * 화면에서 고를 수 없는 표(내 파트 카드, 없는 카드, 같은 카드 중복)와 내 카드에 준 표는 세지 않는다. 보안 규칙은 장수(3장)만 확인하기 때문이다.
  * cards: [{ cardId, giverPid }], votes: { voterPid: [cardId] }, partOf: { pid: part }
  * 반환: { count: { cardId: 표 수 }, expected: { cardId: 기대 득표 } }
  */
 export function tallyVotes(cards, votes, partOf = {}) {
-  const sees = (voter, card) => !partOf[voter] || partOf[card.giverPid] !== partOf[voter];
+  const sees = (voter, card) => card.giverPid !== voter && (!partOf[voter] || partOf[card.giverPid] !== partOf[voter]);
   const count = Object.fromEntries(cards.map((c) => [c.cardId, 0]));
   const expected = { ...count };
   for (const [voter, ids] of Object.entries(votes)) {
@@ -226,6 +235,37 @@ export function weightedDraw(entries, count, rand = secureRandom, exclude = new 
     pool.splice(idx, 1);
   }
   return winners;
+}
+
+/**
+ * 검증할 수 있는 추첨: 현장에서 정한 숫자(seed)와 응모권 표만으로 결과가 정해진다.
+ * 같은 seed·같은 응모권이면 누가 다시 계산해도 같은 당첨자가 나온다(결과 화면의 "추첨 검증").
+ * 운영자가 미리 여러 번 돌려 보고 고를 수 없게, seed는 추첨 직전에 현장에서 정한다(예: 참석자가 부른 숫자).
+ * tickets: { pid: 장수 }, step: { key, count }, exclude: 이미 당첨된 사람(2~4등끼리 중복 없음)
+ */
+export function seededDraw(tickets, step, seed, exclude = new Set()) {
+  const entries = Object.entries(tickets).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([pid, weight]) => ({ pid, weight }));
+  return weightedDraw(entries, step.count, seededRandom(`${String(seed).trim()}|${step.key}`), exclude);
+}
+
+/**
+ * 추첨 검증: 저장된 추첨 결과(draws)를 seed로 다시 계산해 같은지 본다.
+ * order: 추첨 순서 [{ key, count, tier }] (tier = true면 2~4등처럼 서로 중복 당첨이 없는 순서)
+ * 반환: [{ key, ok, expected, saved }] (seed가 없는 예전 방식 결과는 ok = null)
+ */
+export function verifyDraws(tickets, draws, order) {
+  const won = new Set();
+  return order.filter((s) => draws?.[s.key]).map((s) => {
+    const d = draws[s.key];
+    const saved = Array.isArray(d) ? d : d.winners || [];
+    if (Array.isArray(d) || d.seed == null) {
+      if (s.tier) saved.forEach((p) => won.add(p));
+      return { key: s.key, ok: null, expected: null, saved };
+    }
+    const expected = seededDraw(tickets, s, d.seed, s.tier ? won : new Set());
+    if (s.tier) saved.forEach((p) => won.add(p));
+    return { key: s.key, ok: JSON.stringify(expected) === JSON.stringify(saved), expected, saved };
+  });
 }
 
 // 최다 응모권상: 최댓값 동점자 중 무작위 1명

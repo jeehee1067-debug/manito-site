@@ -8,7 +8,7 @@ import { Panel } from "../ui.jsx";
 //  - 운영자·공동 운영자가 될 계정: 초대 코드를 입력하지 않고, 아래 계정 번호를 운영자에게 알려 준다.
 //    (운영자는 참여하지 않는 계정이라 명단에 연결할 수 없다. 보안 규칙이 막는다)
 export default function Claim() {
-  const { user } = useApp();
+  const { user, recheck } = useApp();
   const [invite, setInvite] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -58,6 +58,7 @@ export default function Claim() {
         </div>
         <div className="inline">
           <button type="button" className="pk-btn sm" onClick={copy}>계정 번호 복사</button>
+          {recheck && <button type="button" className="pk-btn sm" onClick={recheck}>지정됐는지 다시 확인</button>}
           {copied && <span className="note small" role="status">{copied}</span>}
         </div>
         <p className="small muted">로그인한 메일: {user.email}</p>

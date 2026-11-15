@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { doc, setDoc } from "firebase/firestore";
 import { auth, db } from "../firebase.js";
-import { login, signup, claimWithInvite, resetPassword, validateEmail, authErrorMessage } from "../lib/account.js";
+import { login, signup, claimWithInvite, resetPassword, validateEmail, validatePassword, authErrorMessage } from "../lib/account.js";
 import { Garland, Gifts, XMAS_LEADERS, XmasTree } from "../xmas.jsx";
 
 // 운영자 계정 만들기 버튼은 주소 끝에 ?setup을 붙였을 때만 보인다(참여자 화면에는 숨김).
@@ -17,7 +17,10 @@ export default function Login({ bootstrap = false }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [invite, setInvite] = useState("");
-  const [keep, setKeep] = useState(true);
+  // 로그인 유지는 기본으로 끈다(여러 사람이 쓰는 PC에서 로그아웃을 잊으면 다음 사람이 내 대상을 볼 수 있어서).
+  // 개인 기기에서 한 번 켜면 그 기기에서는 다음에도 켜진 채로 보인다.
+  const [keep, setKeepState] = useState(() => { try { return localStorage.getItem("manito:keep") === "1"; } catch { return false; } });
+  const setKeep = (v) => { setKeepState(v); try { localStorage.setItem("manito:keep", v ? "1" : "0"); } catch { /* 저장 못 해도 동작한다 */ } };
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -38,7 +41,7 @@ export default function Login({ bootstrap = false }) {
         await login(email, password, keep);
       } else if (mode === "signup") {
         if (!invite.trim()) throw new Error("운영진에게 받은 초대 코드를 입력해 주세요.");
-        const bad = validateEmail(email);
+        const bad = validateEmail(email) || validatePassword(password);
         if (bad) throw new Error(bad);
         await signup(email, password, keep);
         await claimWithInvite(invite);
@@ -49,7 +52,7 @@ export default function Login({ bootstrap = false }) {
         setNotice("가입된 메일이면 비밀번호 재설정 메일을 보냈어요. 메일의 링크에서 새 비밀번호를 정한 뒤 여기서 로그인해 주세요. 메일이 안 보이면 스팸함도 확인해 주세요.");
       } else if (mode === "bootstrap") {
         if (!auth.currentUser) {
-          const bad = validateEmail(email);
+          const bad = validateEmail(email) || validatePassword(password);
           if (bad) throw new Error(bad);
           await signup(email, password, keep);
         }
@@ -122,13 +125,13 @@ export default function Login({ bootstrap = false }) {
             <label>
               <span className="panel-label">비밀번호</span>
               <input className="pk-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-                autoComplete={mode === "login" ? "current-password" : "new-password"} placeholder="6자 이상" />
+                autoComplete={mode === "login" ? "current-password" : "new-password"} placeholder={mode === "login" ? "비밀번호" : "8자 이상, 글자와 숫자 섞어서"} />
             </label>
           )}
           {needsPassword && (
             <label className="check">
               <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} />
-              이 기기에서 로그인 유지 (여러 사람이 같이 쓰는 기기면 해제)
+              이 기기에서 로그인 유지 (내 휴대폰·내 PC일 때만 켜 주세요)
             </label>
           )}
           {error && <p className="error" role="alert">{error}</p>}
@@ -155,6 +158,7 @@ export default function Login({ bootstrap = false }) {
       {mode === "signup" && (
         <p className="login-note">비밀번호를 잊으면 로그인 화면의 '비밀번호를 잊었어요'로<br />이 메일에서 다시 정할 수 있어요.</p>
       )}
+      <p className="login-note">운영진은 비밀번호를 묻지 않아요. 초대 코드는 나만 쓰고 다른 사람에게 보여 주지 마세요.<br />여러 사람이 같이 쓰는 기기에서는 다 쓴 뒤 꼭 로그아웃해 주세요.</p>
     </main>
   );
 }

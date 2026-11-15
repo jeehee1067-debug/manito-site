@@ -26,11 +26,12 @@ export const SLOT_STATUS_LABEL = {
  * 마니또별 한 줄.
  * assignments: { giverPid: { receiverPid } }, giverCodes: { giverPid: { codes: { 1: 코드 … } } }
  * missions: { giverPid: { choices: { 주차: { level, text } }, done: { 주차: true }, notes: { 주차: 추가 쪽지 수 } } }
- * redemptions: { 코드: { voided } }, reports: { "받는사람_주차": {…} }, verdicts: { "받는사람_주차": { verdict } }
+ * redemptions: { 코드: { voided } }, reports: { "받는사람_주차": { active } }, verdicts: { "받는사람_주차": { verdict } }
+ * delivered: Set("받는사람_주차") 완료 알림(deliveries)이 있는 주차. 완료 표시(done)와 같이 "완료를 알린 주차"로 본다.
  * guesses: { receiverPid: { guessPid } }
  * 반환: [{ giverPid, receiverPid, slots: { 1: { status, level, text, done, notes, code, reported, verdict }, … }, guessPid, correct }]
  */
-export function pairRows({ assignments = {}, giverCodes = {}, missions = {}, redemptions = {}, reports = {}, verdicts = {}, guesses = {} }) {
+export function pairRows({ assignments = {}, giverCodes = {}, missions = {}, redemptions = {}, reports = {}, verdicts = {}, guesses = {}, delivered = new Set() }) {
   return Object.entries(assignments).map(([giverPid, a]) => {
     const receiverPid = a.receiverPid;
     const m = missions[giverPid] || {};
@@ -38,10 +39,10 @@ export function pairRows({ assignments = {}, giverCodes = {}, missions = {}, red
     for (const slot of MISSION_SLOTS) {
       const code = giverCodes[giverPid]?.codes?.[slot] || null;
       const choice = m.choices?.[slot] || null;
-      const done = Boolean(m.done?.[slot]);
-      const red = code ? redemptions[code] : null;
       const key = `${receiverPid}_${slot}`;
-      const reported = Boolean(reports[key]);
+      const done = Boolean(m.done?.[slot]) || delivered.has(key);
+      const red = code ? redemptions[code] : null;
+      const reported = Boolean(reports[key]) && reports[key].active !== false; // 취소한 신고는 active = false (예전 신고는 active 없음)
       const verdict = verdicts[key]?.verdict || null;
       let status = choice ? "chosen" : "none";
       if (red) status = red.voided ? "voided" : "redeemed";
@@ -83,3 +84,19 @@ export function receiverCodesOf(assignments, giverCodes) {
 
 export const sameCodes = (a, b) =>
   MISSION_SLOTS.every((slot) => (a?.[slot] || null) === (b?.[slot] || null));
+
+// 마니또가 대상에게 낸 단서 6칸: [답 또는 null] (지금 배정 회차의 것만, 예전 화면이 빈 답 대신 쓰던 "(답변 없음)"은 빈 칸으로 본다)
+// clues: { "받는사람_칸": { idx, answer, ver } }
+export function clueAnswers(clues, receiverPid, ver = 0) {
+  return Array.from({ length: 6 }, (_, i) => {
+    const c = clues?.[`${receiverPid}_${i}`];
+    return c && (c.ver ?? -1) === ver && c.answer && c.answer !== "(답변 없음)" ? c.answer : null;
+  });
+}
+
+// 단서 6칸을 모두 낸 마니또 Set(giverPid). 은신 응모권 조건(scoring.js computeTickets의 cluesDone)에 쓴다.
+export function cluesDoneSet(assignments, clues, ver = 0) {
+  return new Set(Object.entries(assignments || {})
+    .filter(([, a]) => clueAnswers(clues, a.receiverPid, ver).every(Boolean))
+    .map(([giverPid]) => giverPid));
+}
