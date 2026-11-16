@@ -25,6 +25,8 @@ export const TICKET_RULES = {
   partBonusMinMissions: 1, // 위 응모권은 내 미션이 이만큼 이상 인증된 사람만 (아무것도 안 하고 받는 것 방지)
   maxMissions: 3,
   maxCardBonus: 4, // 카드 추가분 합계 상한 (1·2주차 모두 도전이면 2 + 2)
+  angelPerMission: 1, // 수호천사(지원자): 연결된 사람이 확인한 수호천사 미션마다
+  maxAngel: 2, // 수호천사 응모권 상한(수호천사 미션은 받는 사람마다 2번까지)
   maxReceiverEntries: 3,
 };
 

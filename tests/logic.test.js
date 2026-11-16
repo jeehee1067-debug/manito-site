@@ -737,3 +737,39 @@ test("일정: 단서 공개 날이 단서 수 ÷ 2번(주차마다 2개)이고 �
   const dates = SCHEDULE.map((e) => e.date);
   assert.deepEqual(dates, [...dates].sort(), "일정은 날짜 순서대로");
 });
+
+test("수호천사: 확인된 미션 1건마다 +1(최대 2), 받는 사람은 인증 입력으로 치되 보상과 합쳐 3장까지", () => {
+  // A → B → C → D → A. B의 마니또 A가 아무것도 안 함. D가 수호천사로 B에게 연결됨
+  const people = ["A", "B", "C", "D"].map((pid) => ({ pid }));
+  const base = {
+    people, assignments: { A: "B", B: "C", C: "D", D: "A" }, guesses: {}, missions: {},
+    giverCodes: { A: { 1: "A1", 2: "A2", 3: "A3" }, B: { 1: "B1", 2: "B2", 3: "B3" } },
+    redemptions: { B1: { receiverPid: "C", slot: 1, voided: false } }, // B는 자기 미션 1건이 인증됨(보상 조건)
+  };
+  const none = computeTickets(base);
+  assert.deepEqual([none.B.entries, none.B.comp], [0, 3], "수호천사가 없으면 못 받은 3주 보상");
+  const gifts = [{ receiverPid: "B", k: 1, confirmed: true }, { receiverPid: "B", k: 2, confirmed: true }];
+  const t = computeTickets({ ...base, angels: { B: "D" }, angelGifts: gifts });
+  assert.deepEqual([t.B.entries, t.B.comp], [2, 1], "확인 2건은 인증 입력, 보상은 남은 1장만(합계 3 그대로)");
+  assert.equal(t.D.angel, 2);
+  assert.equal(t.D.total, 2, "수호천사 응모권만(D는 자기 미션이 없어 은신 없음)");
+  assert.equal(t.D.mission, 0, "수호천사 미션은 내 미션 수에 들어가지 않는다");
+  // 확인 안 된 것, 연결이 없는 것은 세지 않는다
+  const half = computeTickets({ ...base, angels: { B: "D" }, angelGifts: [{ receiverPid: "B", k: 1, confirmed: true }, { receiverPid: "B", k: 2 }] });
+  assert.deepEqual([half.D.angel, half.B.entries], [1, 1]);
+  const unlinked = computeTickets({ ...base, angelGifts: gifts });
+  assert.deepEqual([unlinked.D.angel, unlinked.B.entries], [0, 0]);
+  // 수상 제외된 수호천사는 0장
+  const dq = computeTickets({ ...base, people: people.map((x) => (x.pid === "D" ? { ...x, disqualified: true } : x)), angels: { B: "D" }, angelGifts: gifts });
+  assert.equal(dq.D.total, 0);
+  // 한 사람이 두 명을 도와도 최대 2장
+  const two = computeTickets({ ...base, angels: { B: "D", C: "D" }, angelGifts: [...gifts, { receiverPid: "C", k: 1, confirmed: true }] });
+  assert.equal(two.D.angel, 2);
+});
+
+test("발표 화면: 수호천사가 있으면 명탐정 다음에 '숨은 수호천사' 장면", () => {
+  const r = { pairs: [{ giverPid: "A", receiverPid: "B" }, { giverPid: "B", receiverPid: "A" }], angels: [{ angelPid: "A", receiverPid: "B", done: 1 }] };
+  const ids = buildSlides(r, (x) => x).map((x) => x.id);
+  assert.equal(ids[ids.indexOf("detective") + 1], "angels");
+  assert.ok(!buildSlides({ ...r, angels: [] }, (x) => x).some((x) => x.id === "angels"));
+});

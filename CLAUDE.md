@@ -36,7 +36,7 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 - 읽기는 `member()`(초대 코드로 연결된 참여자 또는 운영자)만. 연결 전 계정이 읽을 수 있는 건 초대 코드 한 건과 "`config/app`이 아직 없다"는 사실뿐이다(운영자 목록이 들어 있어서 `config/app`도 `member()`만 읽는다). 그래서 초대 코드 연결(`claimWithInvite`)은 명단을 읽지 않고 바로 쓰고, `App`은 `config/app` 읽기가 거부되면 `LOCKED`(연결 전 화면 + 계정 번호 + "지정됐는지 다시 확인")로 보여 준다.
 - **운영자·공동 운영자는 참여하지 않는 계정이다.** 운영자 계정은 `users` 문서를 만들 수 없고(명단 연결 불가), `users` 문서가 있는 계정은 `config.admins`에 넣을 수 없다(한 번에 한 계정씩만 추가, 0명 불가). 그래서 운영자는 `assignments`·`giverCodes`·`codes`·`giverMissions`·`guesses`·`redemptions`·`reports`·`verdicts`·`progress`·`roster`·`deliveries`(쪽지 내용)·`clues`·`profiles`를 **언제든** 읽는다(쪽지 신고 처리·거짓 단서 확인). `votes`는 phase 4부터.
 - **처음 운영자(`isOwner()` = `config.admins[0]`)만**: 운영자 목록·`adminNotes` 변경, `invites` 쓰기, `roster` 추가·삭제와 연결 계정(`uid`) 비우기, `users` 삭제(연결 해제). 공동 운영자는 `roster.uid`를 바꿀 수 없다(남의 계정을 이름에 끼워 사칭하는 것 방지). 화면도 같은 버튼을 처음 운영자에게만 보인다(`useIsOwner`).
-- **쓰기 횟수 `n`**: 참여자가 고치는 문서(`users`·`avatars`·`profiles`·`prefs`·`clues`·`giverMissions`·`progress`·`reports`·`guesses`·`midGuesses`·`votes`)는 쓸 때마다 `n`을 정확히 1 올려야 한다(규칙 `bumped()`, 화면은 `src/lib/writes.js`의 `bump()` = `increment(1)`). 운영 화면 "쓰기 횟수"가 이 값으로 한도 소진을 일으킨 사람을 찾는다. **이 문서들에 쓰는 화면 코드를 새로 만들면 `...bump()`를 꼭 넣는다**(빠지면 거부됨). 한 번만 만들 수 있는 문서(`deliveries`·`redemptions`·`feed`·`noteFlags`·`toManito`·`feedLikes`)에는 없다.
+- **쓰기 횟수 `n`**: 참여자가 고치는 문서(`users`·`avatars`·`profiles`·`prefs`·`clues`·`giverMissions`·`progress`·`reports`·`guesses`·`midGuesses`·`votes`·`angelVolunteers`)는 쓸 때마다 `n`을 정확히 1 올려야 한다(규칙 `bumped()`, 화면은 `src/lib/writes.js`의 `bump()` = `increment(1)`). 운영 화면 "쓰기 횟수"가 이 값으로 한도 소진을 일으킨 사람을 찾는다. **이 문서들에 쓰는 화면 코드를 새로 만들면 `...bump()`를 꼭 넣는다**(빠지면 거부됨). 한 번만 만들 수 있는 문서(`deliveries`·`redemptions`·`feed`·`noteFlags`·`toManito`·`feedLikes`·`angelGifts`)에는 없다.
 - 시각 필드(`createdAt`, `lastSeen`, `noteFlags.at`)는 `request.time`(= `serverTimestamp()`)만 받는다.
 - 명단 원본(`roster`)은 운영자만 읽는다(연결된 계정 uid, 수상 제외·중도 이탈 표시가 들어 있다). 참여자는 `public/roster` 요약만.
 - 인증 문서(`redemptions/{코드}`: `receiverPid, slot, review, voided, feedId, cardMatch, createdAt`)는 인증한 받는 사람(get·자기 것 목록), 그 코드를 가진 마니또(get), 운영자만 읽는다. 익명 피드는 **별도 문서 `feed/{무작위ID}`**(`slot, review, voided, createdAt, thanks?, hidden?` — 받는 사람·코드 없음)이고, 인증과 한 묶음(batch)으로만 만들 수 있다: 규칙이 `receiverCodes/{받는사람}`(giverCodes를 받는 사람 기준으로 뒤집은 것, 참여자는 못 읽음)로 그 사람의 코드를 찾아 `getAfter(redemptions/코드).feedId == 이 글`인지, 그 글이 이번 묶음에서 새로 생기는지 확인한다(이미 있는 남의 글을 가리키기 방지). 감사 답장은 글쓴이가 자기 `feed` 글의 `thanks`를 한 번만 쓴다(후기도 인증 문서와 같아야 함). 운영자의 무효 처리는 두 문서의 `voided`를 같이 바꾸고, 운영자는 피드 가리기·`thanks` 지우기·인증 `cardMatch` 고치기를 할 수 있다.
@@ -55,6 +55,11 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
   - `toManito/{받는사람}_{주차}`(`receiverPid, slot, message, createdAt`): 받는 사람이 phase 1~2, 열린 주차까지, 주차마다 한 번 만든다(고칠 수 없음, 1~200자). 받는 사람·그 마니또(list `where receiverPid ==`)·운영자만 읽고, 운영자만 지운다.
   - `midGuesses/{pid}`(`guesses: { "주차": pid }, n`): phase 1에 열린 주차 칸만 쓰고 바꾼다(명단에 있는 다른 사람). 본인·운영자만 읽는다. 집계 때 `noticedWeeks`로 "몇 주차부터 계속 맞혔나"를 결과에 넣는다.
   - 피드 공감: `feed.likes`를 1 올리는 것과 `feedLikes/{글ID}_{pid}`(`pid, feedId, at`) 만들기를 한 묶음으로(규칙이 `exists`/`existsAfter`·`getAfter`로 서로 확인). 글마다 한 번, 취소 없음, phase 1~4, 가린 글·무효 글 불가. 공감 표시는 본인·운영자만 읽는다.
+- 수호천사(응모권과 연결됨):
+  - `angelVolunteers/{pid}`(`active, at, n`): 본인이 phase 0~1에 지원·취소. 본인·운영자만 읽는다.
+  - `angels/{받는사람}`(`angelPid, at`): 운영자가 phase 1에 연결. 지원 중(`active`)인 사람만, 받는 사람 본인·그 사람의 마니또(`assignments/{angelPid}.receiverPid != 받는사람`)는 안 된다. `angelGifts`가 생기면 바꾸거나 지울 수 없다. 수호천사는 list `where angelPid ==`로 자기 것만 읽고, 받는 사람은 못 읽는다.
+  - `angelGifts/{받는사람}_{1|2}`(`receiverPid, k, text, message, createdAt`, 보낸 사람 정보 없음): 연결된 수호천사가 phase 1에 만든다. 받는 사람이 한 번 `confirmed: true, review(10~500자), confirmedAt`을 더한다. 받는 사람은 list, 수호천사는 문서 ID로 get(아직 없는 문서도), 운영자는 전부 읽고 지운다.
+  - `prefs`는 연결된 수호천사도 읽는다. 응모권은 `scoring.js`(`angels`·`angelGifts`), 발표 화면 "숨은 수호천사"(`results.angels`).
 - `results/public.step`: 발표 화면이 넘긴 장면 번호(공개 단계에 운영자가 `draws`와 함께 바꿀 수 있는 유일한 값). 참여자 결과 화면은 `src/lib/reveal.js`의 `buildSlides`로 같은 장면 순서를 계산해 그 장면까지만 보인다(화면에서만 가리는 것 — 직접 읽으면 보인다). 집계 때 `step: 0`과 발표용 값(`guesses`·`noticed`·`story`·`stats`·`likesTop`)을 같이 저장한다.
 - `config/app` 수정 규칙: 단계는 그대로이거나 한 칸 앞으로만, 공개(5)로 넘어가려면 `results/public`이 있어야 한다. 주차는 1~3이고 한 번에 한 칸까지만 올린다. 단서는 줄일 수 없고 한 번에 2개까지, **공개 개수 ≤ 2 × 주차**. `assignVer`·`partExcluded`·`siteMatched`는 phase 0에서만 바꾼다.
 - `results/public`: phase 4에는 통째로 다시 쓸 수 있지만 `draws`는 비어 있어야 하고, phase 5에는 `draws`에 새 칸을 더하는 것만 된다(변경·삭제·재집계 불가). 화면(`Reveal.jsx`)은 트랜잭션으로 "아직 안 뽑은 순서"일 때만 쓴다. 추첨 칸은 `{ seed, winners }`(현장에서 정한 숫자와 `seededDraw` 결과, 예전 자료는 당첨자 배열)이고, 결과 화면 "추첨 검증"이 `verifyDraws`로 다시 계산한다.
@@ -93,7 +98,8 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
   - 한 파트가 (근무지 모드에서는 근무지마다) 인원의 절반을 넘으면 같은 파트 짝을 완전히 피할 수 없다. 그때는 되도록 적게 만들고 경고하며 `config.partExcluded = false`가 돼 추리 보드가 내 파트를 빼지 않는다.
 - 일정(`SCHEDULE`): 11/17(화) 1주차, 11/24 2주차, 12/1 3주차(칭찬 카드), 단서는 금요일 11/20·11/27·12/4, 12/8(화) 미션 마감·최종 지목·투표, 12/9(수) 송년회에서 집계 후 발표 화면으로 공개·시상·추첨.
 - 단서: 프로필 6문항(고르기 3 + 직접 쓰기 3, `PROFILE_QUESTIONS`. 5번째가 "나만 아는 의외의 TMI"), 매주 금요일 운영자가 전원 동일하게 2개씩 공개(인증 수와 무관하게 — 은신 응모권 공정성 때문). 주차마다 2개까지만(공개 개수 ≤ 2 × 주차). 최종 지목 단계부터 마지막 단서로 마니또의 **파트**가 공개된다(부서 전원이 한 팀이고 파트만 다르다).
-- 응모권: 미션 인증 1(최대 3), 카드 추가분 보통 +1·도전 +2(`cardBonus`, 합계 최대 4), 받는 사람 입력 1(최대 3), 은신 2, 정답 지목 1, 우승 파트 1. 최대 14장. 정체를 알려주면 둘의 합계가 −1이 되도록 설계됨.
+- 응모권: 미션 인증 1(최대 3), 카드 추가분 보통 +1·도전 +2(`cardBonus`, 합계 최대 4), 받는 사람 입력 1(최대 3), 은신 2, 정답 지목 1, 우승 파트 1, 수호천사 1(지원자만, `angelPerMission`, 최대 2). 최대 16장. 정체를 알려주면 둘의 합계가 −1이 되도록 설계됨.
+  - 수호천사: 마니또가 미션을 안 해서 받은 게 없는 사람에게 운영자가 지원자를 연결한다(1.5주씩 마니또를 바꾸는 방식은 사용자와 검토 후 하지 않기로 함). 확인된 수호천사 미션은 받는 사람의 인증 입력(보상과 합쳐 최대 3)으로 치고, "내 미션 수" 조건에는 넣지 않는다.
   - 은신은 내 미션이 1건 이상 인증되고 **단서 6칸을 모두 낸**(`hiddenNeedsClues`, `cluesDoneSet`) 마니또만. 가입 안 한 사람·중도 이탈·수상 제외는 0장.
   - 카드 추가분은 받는 사람이 **직접 인증한 미션에만**, 그리고 인증할 때 "카드와 다름"(`cardMatch: false`)이 아닐 때만 준다. 대상 불참이나 운영자 확인으로 인정된 미션에는 주지 않는다.
   - "완료를 알린 주차"는 완료 알림(`deliveries`)이 있거나 완료 표시(`giverMissions.done`)가 있는 주차다(둘은 한 묶음으로 저장되지만 예전 자료를 위해 합쳐서 본다).
@@ -125,7 +131,7 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 | `src/pages/PartBoard.jsx` | 파트 순위 탭(운영자가 발표한 `public/board`만 읽음) |
 | `src/pages/Claim.jsx` | "연결 전" 화면: 초대 코드 연결, 공동 운영자로 지정받을 계정의 계정 번호 |
 | `src/pages/Feed.jsx` | 익명 피드(`feed` 문서만 읽음) |
-| `src/pages/Admin.jsx` | 운영 화면: 단계, 명단·배정, 주차·단서, 짝 현황(`Pairs`), 받은 게 없어요·집계 전 확인(`Unresolved`), 인증 검토(`Moderation`), 쪽지 검토(`NotesReview`), 쓰기 횟수(`WriteCounts`), 투표 카드, 집계·검산, 공동 운영자, 규칙 버전 경고(`RulesCheck`) |
+| `src/pages/Admin.jsx` | 운영 화면: 단계, 명단·배정, 주차·단서, 짝 현황(`Pairs`), 받은 게 없어요·집계 전 확인(`Unresolved`), 수호천사 연결(`Angels`), 인증 검토(`Moderation`), 쪽지 검토(`NotesReview`), 쓰기 횟수(`WriteCounts`), 투표 카드, 집계·검산, 공동 운영자, 규칙 버전 경고(`RulesCheck`) |
 | `src/ui.jsx` | 패널·대사창·캐릭터 공통 컴포넌트 |
 | `src/firebase.js` | Firebase 연결. `npm run dev:emu`(`.env.emulator`)일 때만 에뮬레이터 연결. `appCheckSiteKey`가 있으면 App Check. `?longpoll`로 연 기기는 Firestore 긴 폴링(사내 프록시 대비) |
 | `src/xmas.jsx`, `src/xmas.css`, `src/assets/xmas/` | 연말·크리스마스 장식(시즌 한정). 빼는 방법은 README "연말 장식" |

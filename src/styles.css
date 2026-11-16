@@ -437,3 +437,6 @@ textarea.pk-input { resize: vertical; line-height: 1.6; }
 @media (prefers-reduced-motion: reduce) {
   .pres-stage, .pop, .delay, .delay2, .drum, .pres-wall-inner, .board.big .board-bar i { animation: none !important; }
 }
+
+/* 수호천사 미션: 도와줄 사람 이름(작게) */
+.target-name.sm { font-size: 20px; margin: 0 6px 0 0; display: inline-block; }

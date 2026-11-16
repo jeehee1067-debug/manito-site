@@ -39,6 +39,7 @@ export function buildSlides(r, nameOf) {
     s.push({ id: `ask${i}`, type: "pairAsk", i, ...p }, { id: `show${i}`, type: "pairShow", i, ...p });
   });
   s.push({ id: "detective", type: "detective" });
+  if ((r.angels || []).length > 0) s.push({ id: "angels", type: "angels" });
   if (r.likesTop) s.push({ id: "likesTop", type: "likesTop" });
   if (r.bestReview) s.push({ id: "bestReview", type: "bestReview" });
   if (r.mostTickets) s.push({ id: "mostTickets", type: "mostTickets" });

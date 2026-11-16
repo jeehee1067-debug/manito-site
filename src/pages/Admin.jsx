@@ -188,6 +188,7 @@ export default function Admin() {
       {phase === PHASE.RUNNING && <Running />}
       {phase === PHASE.GUESSING && <GuessStatus />}
       {phase >= PHASE.RUNNING && phase <= PHASE.VOTING && <Unresolved />}
+      {phase >= PHASE.RUNNING && <Angels />}
       <Pairs />
       {phase >= PHASE.RUNNING && phase <= PHASE.SCORING && <Moderation />}
       {phase === PHASE.VOTING && <VotingAdmin />}
@@ -851,6 +852,86 @@ function Moderation() {
 
 // 쪽지 검토: 익명 쪽지로 괴롭히는 일이 없게 운영자가 미션 중에도 쪽지를 본다(운영자는 참여하지 않는다).
 // 받는 사람이 신고한 쪽지(noteFlags)가 먼저 보이고, 가리면 받는 사람 화면에서 내용이 안 보인다.
+// 수호천사: 마니또가 아무것도 안 해서 받은 게 없는 사람에게, "수호천사 지원하기"를 누른 참여자를 몰래 연결한다.
+// 수호천사가 한 미션을 받는 사람이 확인하면 수호천사는 1건당 응모권 +1(최대 2), 받는 사람은 인증 입력으로 친다(scoring.js).
+function Angels() {
+  const { nameOf, config } = useApp();
+  const { ready, rows } = usePairs();
+  const volunteers = useColl("angelVolunteers");
+  const angels = useColl("angels");
+  const gifts = useColl("angelGifts");
+  const [pick, setPick] = useState({});
+  const [msg, setMsg] = useState("");
+  if (!ready || !volunteers || !angels || !gifts) return null;
+  const running = config.phase === PHASE.RUNNING;
+  const giverOf = Object.fromEntries(rows.map((r) => [r.receiverPid, r.giverPid]));
+  const active = Object.entries(volunteers).filter(([, v]) => v.active).map(([pid]) => pid);
+  const busy = new Set(Object.values(angels).map((a) => a.angelPid)); // 한 사람에게 한 명씩만 연결
+  const giftsOf = (r) => [1, 2].map((k) => gifts[`${r}_${k}`]).filter(Boolean);
+  // 받은 게 없는 사람: 내 마니또가 아직 한 주차도 완료를 알리지 않았다
+  const needy = rows.filter((r) => !Object.values(r.slots).some((s) => s.done) && !angels[r.receiverPid]).map((r) => r.receiverPid);
+  async function link(receiverPid) {
+    const angelPid = pick[receiverPid];
+    if (!angelPid) return;
+    if (!window.confirm(`${nameOf(receiverPid)}님에게 ${nameOf(angelPid)}님을 수호천사로 연결할까요?\n\n${nameOf(angelPid)}님의 내 미션 화면에 "수호천사 미션"이 생겨요. ${nameOf(receiverPid)}님은 누가 수호천사인지 몰라요.`)) return;
+    try {
+      await setDoc(doc(db, "angels", receiverPid), { angelPid, at: serverTimestamp() });
+      setMsg(`${nameOf(receiverPid)} ← ${nameOf(angelPid)} 연결했어요.`);
+    } catch {
+      setMsg("연결하지 못했어요. 지원을 취소했거나, 그 사람의 마니또인지 확인해 주세요.");
+    }
+  }
+  async function unlink(receiverPid) {
+    if (!window.confirm(`${nameOf(receiverPid)}님의 수호천사 연결을 풀까요? (수호천사 미션이 오기 전에만 풀 수 있어요)`)) return;
+    await deleteDoc(doc(db, "angels", receiverPid)).catch(() => setMsg("풀지 못했어요. 이미 수호천사 미션이 왔으면 풀 수 없어요."));
+  }
+  return (
+    <Panel title={`수호천사 (지원 ${active.length}명 · 연결 ${Object.keys(angels).length}명)`}>
+      <p className="small">
+        마니또가 미션을 안 해서 받은 게 없는 사람에게, 응모권을 더 받고 싶어 지원한 참여자를 몰래 연결해요. 수호천사가 한 미션을 받는 사람이 확인하면
+        수호천사는 1건당 응모권 +1(최대 2), 받는 사람은 인증 입력으로 쳐요(보상과 합쳐 최대 3이라 이중으로 받지 않아요). 받는 사람 본인과 그 사람의 마니또는 연결할 수 없어요.
+        1주차가 끝나도 아무것도 받지 못한 사람부터 연결하는 것을 권해요. 이 화면에 누가 누구를 돕는지 보이니 주의해 주세요.
+      </p>
+      <p className="small"><b>지원자</b>: {active.length ? active.map((pid) => `${nameOf(pid)}${busy.has(pid) ? "(연결됨)" : ""}`).join(", ") : "아직 없어요"}</p>
+      {running && (
+        <>
+          <p className="small"><b>받은 게 없는 사람</b>(마니또의 완료 알림 0건, 수호천사 없음) {needy.length}명</p>
+          <ul className="plain">
+            {needy.map((r) => {
+              const options = active.filter((a) => a !== r && a !== giverOf[r] && !busy.has(a));
+              return (
+                <li key={r} className="row-item inline">
+                  <span>{nameOf(r)}</span>
+                  <select className="pk-input" value={pick[r] || ""} onChange={(e) => setPick({ ...pick, [r]: e.target.value })} aria-label={`${nameOf(r)}님의 수호천사`}>
+                    <option value="">수호천사 고르기</option>
+                    {options.map((a) => <option key={a} value={a}>{nameOf(a)}</option>)}
+                  </select>
+                  <button className="pk-btn sm" disabled={!pick[r]} onClick={() => link(r)}>연결</button>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+      {Object.keys(angels).length > 0 && (
+        <ul className="plain">
+          {Object.entries(angels).map(([r, a]) => {
+            const g = giftsOf(r);
+            return (
+              <li key={r} className="row-item">
+                <span>{nameOf(r)} ← 수호천사 {nameOf(a.angelPid)} · 미션 {g.length}건, 확인 {g.filter((x) => x.confirmed).length}건</span>
+                {g.map((x) => <p key={x.k} className="small">{x.k}번: {x.text}{x.message ? ` — "${x.message}"` : ""}{x.confirmed ? ` (확인: ${x.review})` : " (확인 대기)"}</p>)}
+                {running && g.length === 0 && <button className="text-btn" onClick={() => unlink(r)}>연결 풀기</button>}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {msg && <p className="note small" role="status">{msg}</p>}
+    </Panel>
+  );
+}
+
 function NotesReview() {
   const { nameOf } = useApp();
   const deliveries = useColl("deliveries");
@@ -931,12 +1012,12 @@ function WriteCounts() {
   const [busy, setBusy] = useState(false);
   async function load() {
     setBusy(true);
-    const names = ["progress", "giverMissions", "profiles", "avatars", "reports", "guesses", "clues", "assignments", "users", "prefs", "midGuesses"];
+    const names = ["progress", "giverMissions", "profiles", "avatars", "reports", "guesses", "clues", "assignments", "users", "prefs", "midGuesses", "angelVolunteers"];
     if (config.phase >= PHASE.SCORING) names.push("votes");
     const data = Object.fromEntries(await Promise.all(names.map(async (n) => [n, await readAll(n).catch(() => ({}))])));
     const sum = {};
     const add = (pid, n) => { if (pid && n) sum[pid] = (sum[pid] || 0) + n; };
-    for (const n of ["progress", "giverMissions", "profiles", "avatars", "guesses", "votes", "prefs", "midGuesses"]) {
+    for (const n of ["progress", "giverMissions", "profiles", "avatars", "guesses", "votes", "prefs", "midGuesses", "angelVolunteers"]) {
       Object.entries(data[n] || {}).forEach(([pid, d]) => add(pid, d.n));
     }
     Object.entries(data.reports).forEach(([id, d]) => add(id.split("_")[0], d.n));
@@ -1212,8 +1293,8 @@ function Pairs() {
 
 // 응모권 계산에 필요한 자료를 모두 읽어 계산한다. 집계하기와 검산이 같이 쓴다.
 async function calcAll(roster, assignVer) {
-  const [assignments, giverCodes, redemptions, missions, guesses, votes, owners, evals, deliveries, verdicts, clues, midGuesses, toManito, feed] = await Promise.all(
-    ["assignments", "giverCodes", "redemptions", "giverMissions", "guesses", "votes", "cardOwners", "adminEval", "deliveries", "verdicts", "clues", "midGuesses", "toManito", "feed"]
+  const [assignments, giverCodes, redemptions, missions, guesses, votes, owners, evals, deliveries, verdicts, clues, midGuesses, toManito, feed, angels, angelGifts] = await Promise.all(
+    ["assignments", "giverCodes", "redemptions", "giverMissions", "guesses", "votes", "cardOwners", "adminEval", "deliveries", "verdicts", "clues", "midGuesses", "toManito", "feed", "angels", "angelGifts"]
       .map((n) => readAll(n).catch(() => ({}))) // 새 기능 컬렉션(중간 추측·한마디)이 비어 있거나 예전 규칙이어도 집계는 되게
   );
   const people = roster.map((r) => ({
@@ -1232,6 +1313,9 @@ async function calcAll(roster, assignVer) {
     verdicts: Object.fromEntries(Object.entries(verdicts).map(([id, v]) => [id, v.verdict])),
     // 단서 6개를 다 낸 마니또만 은신 응모권
     cluesDone: cluesDoneSet(assignments, clues, assignVer ?? 0),
+    // 수호천사: 연결(받는 사람 → 수호천사)과 수호천사 미션(받는 사람이 확인한 것만 센다)
+    angels: Object.fromEntries(Object.entries(angels).map(([r, a]) => [r, a.angelPid])),
+    angelGifts: Object.values(angelGifts).map((g) => ({ receiverPid: g.receiverPid, k: g.k, confirmed: Boolean(g.confirmed) })),
   });
   // 송년회 발표용 자료(응모권과 무관)
   const finalGuess = Object.fromEntries(Object.entries(guesses).map(([r, g]) => [r, g.guessPid]));
@@ -1257,10 +1341,15 @@ async function calcAll(roster, assignVer) {
     reviews: feedList.length,
     likes: feedList.reduce((s, f) => s + (f.likes || 0), 0),
     toManito: Object.keys(toManito).length,
+    angelMissions: Object.values(angelGifts).filter((g) => g.confirmed).length,
     correct: Object.entries(finalGuess).filter(([r, g]) => assignMap[g] === r).length,
     guessed: Object.keys(finalGuess).length,
   };
-  const extras = { guesses: finalGuess, noticed, story, stats, likesTop: top && top.likes > 0 ? top : null };
+  // 송년회 "숨은 수호천사" 장면: 확인된 미션이 1건 이상인 연결
+  const angelList = Object.entries(angels).map(([receiverPid, a]) => ({
+    angelPid: a.angelPid, receiverPid, done: Object.values(angelGifts).filter((g) => g.receiverPid === receiverPid && g.confirmed).length,
+  })).filter((x) => x.done > 0);
+  const extras = { guesses: finalGuess, noticed, story, stats, likesTop: top && top.likes > 0 ? top : null, angels: angelList };
   return { assignments, votes, owners, evals, deliveries, people, tickets, extras };
 }
 

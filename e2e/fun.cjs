@@ -149,6 +149,47 @@ const step = (s) => console.log("▶", s);
     await H.panel(r, "익명 피드").locator(".dialogue", { hasText: "서랍 속 간식 덕분에" }).getByText("♥ 공감 2").waitFor();
     console.log(`  ${R}: 1주차 추측(가나) → 할 일에서 사라짐, 인증 → 피드 글에 두 사람이 공감(♥ 2, 같은 사람은 한 번만)`);
   }
+  step("수호천사: 지원 → 운영자가 받은 게 없는 사람에게 연결 → 미션 → 받는 사람 확인");
+  const X = NAMES.map((n) => target[n]).find((r) => giverOf[r] !== "가나"); // 마니또가 아무것도 안 한 사람
+  const ANGEL = NAMES.find((n) => n !== X && n !== giverOf[X]);
+  {
+    const a = u[ANGEL];
+    await H.tab(a, "피드"); await H.tab(a, "내 미션");
+    const ap = H.panel(a, "수호천사 지원 (응모권을 더 받고 싶다면)");
+    await ap.getByRole("button", { name: "수호천사 지원하기" }).click();
+    await ap.getByText("지원 중이에요").waitFor();
+    await H.tab(admin, "운영");
+    const panel = admin.locator("section.panel", { has: admin.locator("h2.panel-title", { hasText: /^수호천사 \(지원 1명/ }) });
+    await panel.waitFor();
+    const row = panel.locator("li.row-item", { has: admin.locator("select") }).filter({ hasText: X });
+    await row.locator("select").selectOption({ label: ANGEL });
+    // 받는 사람 본인과 그 사람의 마니또는 고를 수 없다
+    const opts = await row.locator("option").allInnerTexts();
+    assert.ok(!opts.includes(X) && !opts.includes(giverOf[X]), opts.join(","));
+    await row.getByRole("button", { name: "연결" }).click();
+    await panel.getByText(`${X} ← ${ANGEL} 연결했어요.`).waitFor();
+    // 수호천사 화면: 수호천사 미션 + 이번 주 할 일
+    assert.match(await todoOf(a), /수호천사 미션 하기/);
+    const mp = H.panel(a, "수호천사 미션");
+    await mp.getByPlaceholder("예: 책상에 귤 두 개 두기").fill("책상에 귤 두 개 두기");
+    await mp.locator("textarea").fill("마니또 대신 제가 챙길게요!");
+    const r = u[X];
+    await H.tab(r, "피드"); // 다른 탭에 있다가 숫자를 본다
+    await mp.getByRole("button", { name: "수호천사 미션 완료 알리기" }).click();
+    await mp.getByText("1번: 책상에 귤 두 개 두기 — 확인 기다리는 중").waitFor();
+    const badge = r.locator("nav.tabs button", { hasText: "추리 보드" }).locator(".tab-badge");
+    await badge.waitFor();
+    assert.match(await todoOf(r), /수호천사가 보낸 것 확인하기/);
+    await H.tab(r, "추리 보드");
+    const ai = H.panel(r, "수호천사가 보낸 것");
+    await ai.getByText("책상에 귤 두 개 두기").waitFor();
+    assert.equal(await ai.getByText(ANGEL).count(), 0, "받는 사람 화면에 수호천사 이름이 없다");
+    await ai.locator("textarea").fill("귤 덕분에 오후가 상큼했어요. 고마워요!");
+    await ai.getByRole("button", { name: "받았어요" }).click();
+    await ai.getByText("받았어요: 귤 덕분에 오후가 상큼했어요. 고마워요!").waitFor();
+    await mp.getByText(/1번: 책상에 귤 두 개 두기 — 확인됨/).waitFor();
+    console.log(`  ${ANGEL}이(가) 지원 → 운영자가 ${X}(마니또 ${giverOf[X]}가 아무것도 안 함)에게 연결 → 수호천사 미션 → ${X}이(가) '받았어요'(수호천사 이름은 안 보임)`);
+  }
   for (const w of [2, 3]) {
     await H.panel(admin, "주차").getByRole("button", { name: `${w}주차` }).click();
     await admin.locator(".hud-chip", { hasText: `${w}주차` }).waitFor();
@@ -182,7 +223,7 @@ const step = (s) => console.log("▶", s);
   assert.match(stats, /2번의 공감/); assert.match(stats, /1번의 "마니또에게 한마디"/);
   console.log("  첫 장면 숫자:", stats);
   const next = async () => { await pres.getByRole("button", { name: "다음 ▶" }).click(); await admin.waitForTimeout(120); };
-  let sawPair = false, sawDetective = false, sawLikes = false;
+  let sawPair = false, sawDetective = false, sawLikes = false, sawAngel = false;
   for (let k = 0; k < 40; k++) {
     await next();
     const kicker = await pres.locator(".pres-kicker").first().innerText().catch(() => "");
@@ -197,6 +238,10 @@ const step = (s) => console.log("▶", s);
       await pres.getByText("1주차 추측부터 끝까지 맞혔어요").waitFor();
       sawDetective = true;
     }
+    if (await pres.getByText("숨은 수호천사").count()) {
+      await pres.locator(".pres-person", { hasText: ANGEL }).getByText(`→ ${X}님에게 미션 1건`).waitFor();
+      sawAngel = true;
+    }
     if (kicker.startsWith("가장 많은 공감을 받은 후기")) {
       assert.match(kicker, /♥ 2/);
       await pres.getByText(`— ${R}님`).waitFor();
@@ -204,7 +249,16 @@ const step = (s) => console.log("▶", s);
       break;
     }
   }
-  assert.ok(sawPair && sawDetective && sawLikes, `짝 이야기 ${sawPair}, 명탐정 ${sawDetective}, 공감 1위 ${sawLikes}`);
+  assert.ok(sawPair && sawDetective && sawLikes && sawAngel, `짝 이야기 ${sawPair}, 명탐정 ${sawDetective}, 공감 1위 ${sawLikes}, 수호천사 ${sawAngel}`);
+  {
+    const a = u[ANGEL];
+    await H.tab(a, "결과");
+    const lineEl = a.locator(".target .small", { hasText: "내 응모권" });
+    await lineEl.waitFor();
+    const line = (await lineEl.innerText()).replace(/\s+/g, " ");
+    assert.match(line, /\+ 수호천사 1/, line);
+    console.log(`  발표 화면 '숨은 수호천사: ${ANGEL} → ${X}', ${ANGEL}의 응모권: ${line}`);
+  }
   console.log(`  발표 화면: ${R}의 짝 장면에 "정답! 1주차부터 알고 있었어요"와 가나의 미션(1주차 [보통] …), 명탐정 "가장 먼저 알아챈 사람: ${R}", 공감 1위 후기(♥ 2, ${R}님)`);
   // 참여자 결과 탭에도 같은 장면까지 열린다
   {

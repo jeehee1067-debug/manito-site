@@ -69,9 +69,9 @@ const seenKey = (uid) => `manito:seen:${uid}`;
 function loadSeen(uid) {
   try {
     const v = JSON.parse(localStorage.getItem(seenKey(uid)) || "{}");
-    return { inbox: v.inbox || [], manito: v.manito || [] };
+    return { inbox: v.inbox || [], manito: v.manito || [], angel: v.angel || [] };
   } catch {
-    return { inbox: [], manito: [] };
+    return { inbox: [], manito: [], angel: [] };
   }
 }
 function saveSeen(uid, seen) {
@@ -190,6 +190,13 @@ function Session({ user, logout }) {
     return onSnapshot(query(collection(db, "deliveries"), where("receiverPid", "==", myPidForSeen)), (s) =>
       setInbox(s.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0))), () => {});
   }, [myPidForSeen]);
+  // 수호천사가 나에게 보낸 미션(마니또가 미션을 안 했을 때 운영진이 연결한 지원자)
+  const [angelInbox, setAngelInbox] = useState([]);
+  useEffect(() => {
+    if (!myPidForSeen) return setAngelInbox([]);
+    return onSnapshot(query(collection(db, "angelGifts"), where("receiverPid", "==", myPidForSeen)), (s) =>
+      setAngelInbox(s.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => a.k - b.k)), () => setAngelInbox([]));
+  }, [myPidForSeen]);
   // 내 대상이 나(마니또)에게 보낸 한마디
   const [fromReceiver, setFromReceiver] = useState([]);
   useEffect(() => {
@@ -208,15 +215,16 @@ function Session({ user, logout }) {
     });
   }, [user.uid]);
   const unread = {
-    detective: inbox.filter((d) => !seen.inbox.includes(d.id)).length,
+    detective: inbox.filter((d) => !seen.inbox.includes(d.id)).length + angelInbox.filter((g) => !seen.angel.includes(g.id)).length,
     mission: fromReceiver.filter((m) => !seen.manito.includes(m.id)).length,
   };
   const unreadTotal = unread.detective + unread.mission;
   // 그 탭을 열어 두면 본 것으로 친다(추리 보드 맨 위가 받은 쪽지, 내 미션에 대상의 한마디)
   useEffect(() => {
     if (tab === "detective" && inbox.length) markSeen("inbox", inbox.map((d) => d.id));
+    if (tab === "detective" && angelInbox.length) markSeen("angel", angelInbox.map((g) => g.id));
     if ((tab === "mission" || !tab) && fromReceiver.length) markSeen("manito", fromReceiver.map((m) => m.id));
-  }, [tab, inbox, fromReceiver, markSeen]);
+  }, [tab, inbox, angelInbox, fromReceiver, markSeen]);
   useEffect(() => {
     document.title = unreadTotal > 0 ? `(${unreadTotal}) ${BASE_TITLE}` : BASE_TITLE;
     return () => { document.title = BASE_TITLE; };
@@ -271,9 +279,10 @@ function Session({ user, logout }) {
       isAdmin: Boolean(user && config?.admins?.includes(user.uid)),
       myReceiver,
       inbox,
+      angelInbox,
       fromReceiver,
     };
-  }, [user, config, me, roster, avatars, loadAvatar, setAvatarLocal, myReceiver, inbox, fromReceiver]);
+  }, [user, config, me, roster, avatars, loadAvatar, setAvatarLocal, myReceiver, inbox, angelInbox, fromReceiver]);
 
   if (config === undefined || me === undefined || roster === undefined) return <Loading />;
   if (config === null) return <Login bootstrap />;

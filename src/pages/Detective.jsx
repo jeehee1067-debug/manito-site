@@ -27,6 +27,7 @@ export default function Detective() {
   return (
     <>
       <Inbox myPid={myPid} items={items} />
+      <AngelInbox />
       <CodeEntry myPid={myPid} items={items} />
       <ToManito myPid={myPid} />
       <MyRedemptions myPid={myPid} />
@@ -69,6 +70,44 @@ function Inbox({ myPid, items }) {
       </div>
       {/* 내 인증 목록이 오기 전에는 띄우지 않는다(이미 인증한 주차에 "받은 게 없어요"가 잠깐 보이지 않게) */}
       {mine && waiting.map((slot) => <ReportBox key={slot} myPid={myPid} slot={slot} phase={config.phase} />)}
+    </Panel>
+  );
+}
+
+// 수호천사가 보낸 것: 마니또가 미션을 안 해서 운영진이 연결한 지원자가 대신 챙겨 준 것. 누구인지는 송년회에서 공개된다.
+// "받았어요"로 확인하면 나는 인증 입력 응모권, 수호천사는 수호천사 응모권을 받는다(한 번만, 미션 진행 단계에만).
+function AngelInbox() {
+  const { angelInbox, config } = useApp();
+  const [review, setReview] = useState({});
+  const [error, setError] = useState("");
+  if (!angelInbox.length) return null;
+  const running = config.phase === PHASE.RUNNING;
+  async function confirm(g) {
+    const text = (review[g.id] || "").trim();
+    if (text.length < 10) return setError("후기를 10자 이상 써 주세요.");
+    setError("");
+    await updateDoc(doc(db, "angelGifts", g.id), { confirmed: true, review: text, confirmedAt: serverTimestamp() })
+      .catch(() => setError("확인하지 못했어요. 미션 진행 기간인지 확인해 주세요."));
+  }
+  return (
+    <Panel title="수호천사가 보낸 것">
+      <p className="small">마니또가 바빴는지 아직 미션이 없어서, 운영진이 연결한 수호천사가 몰래 챙겨 줬어요. 누구인지는 송년회에서 공개돼요. 받았다면 "받았어요"를 눌러 주세요(나와 수호천사 모두 응모권을 받아요).</p>
+      {angelInbox.map((g) => (
+        <Dialogue key={g.id} speaker={`수호천사 · ${g.k}번째`} tone="gold">
+          <p><b>{g.text}</b></p>
+          {g.message && <p>{g.message}</p>}
+          {g.confirmed
+            ? <p className="small muted">받았어요: {g.review}</p>
+            : running && (
+              <div className="stack tight">
+                <textarea className="pk-input" rows={2} maxLength={500} value={review[g.id] || ""} onChange={(e) => setReview({ ...review, [g.id]: e.target.value })}
+                  placeholder="무엇을 받았고 어땠는지 (10자 이상)" aria-label={`수호천사 ${g.k}번째 후기`} />
+                <button className="pk-btn sm" onClick={() => confirm(g)}>받았어요</button>
+              </div>
+            )}
+        </Dialogue>
+      ))}
+      {error && <p className="error small" role="alert">{error}</p>}
     </Panel>
   );
 }
