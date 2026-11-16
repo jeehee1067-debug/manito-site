@@ -23,7 +23,7 @@ const BASE = "http://localhost:5173/", P = "demo-manito", FS = `http://127.0.0.1
     await p.goto(BASE);
     await p.getByRole("tab", { name: "처음 가입" }).click();
     await p.getByPlaceholder("운영진에게 받은 6자리").fill(code);
-    await p.getByPlaceholder("회사 메일 아이디").fill(email);
+    await p.getByPlaceholder("Knox ID").fill(email);
     await p.locator('input[type="password"]').fill("secret123");
     await p.getByRole("button", { name: "가입하기" }).click();
   };
@@ -33,7 +33,7 @@ const BASE = "http://localhost:5173/", P = "demo-manito", FS = `http://127.0.0.1
   const admin = await mk("운영자");
   await admin.goto(BASE + "?setup");
   await admin.getByRole("button", { name: "운영자·공동 운영자 계정 만들기" }).click();
-  await admin.getByPlaceholder("회사 메일 아이디").fill("admin@example.com");
+  await admin.getByPlaceholder("Knox ID").fill("admin@example.com");
   await admin.locator('input[type="password"]').fill("secret123");
   await admin.getByRole("button", { name: "운영자 계정 만들기" }).click();
   await admin.locator("section.panel", { has: admin.locator("h2", { hasText: "1. 명단" }) }).locator("textarea").fill("가나,가파트\n다라,가파트\n마바,나파트");

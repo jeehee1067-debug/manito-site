@@ -397,7 +397,7 @@ function Setup() {
   // 아이디(회사 메일) 고치기: 명단에 잘못 적었을 때. 메일 인증으로 연결되는 주소가 바뀐다(처음 운영자만, 보안 규칙).
   async function editEmail(r) {
     const cur = r.email ? (r.email.endsWith(`@${MAIL_DOMAIN}`) ? r.email.slice(0, -MAIL_DOMAIN.length - 1) : r.email) : "";
-    const next = window.prompt(`${r.name}님의 회사 메일 아이디(@ 앞부분). 비우면 메일 인증 없이 초대 코드로만 가입해요.`, cur);
+    const next = window.prompt(`${r.name}님의 Knox ID(@ 앞부분). 비우면 메일 인증 없이 초대 코드로만 가입해요.`, cur);
     if (next === null) return;
     const { email, bad } = parseRosterLine(`${r.name},,${next}`, MAIL_DOMAIN);
     if (bad) return setMsg(`아이디는 회사 메일의 @ 앞부분(영문·숫자)으로 적어 주세요: ${bad}`);
@@ -503,7 +503,7 @@ function Setup() {
       <Panel title="1. 명단">
         <p className="small">
           한 줄에 한 명, <b>"이름, 파트, 아이디"</b> 순서. 엑셀에서 세 칸을 복사해 그대로 붙여 넣으면 돼요.
-          아이디는 회사 메일의 @ 앞부분이에요(뒤에 @{MAIL_DOMAIN}이 붙어요). 참여자는 이 아이디로 가입하고, 그 메일로 온 인증 링크를 누르면 명단의 자기 이름과 자동으로 연결돼요.
+          아이디는 Knox ID(회사 메일의 @ 앞부분)예요. 뒤에 @{MAIL_DOMAIN}이 붙어요. 참여자는 이 아이디로 가입하고, 그 메일로 온 인증 링크를 누르면 명단의 자기 이름과 자동으로 연결돼요.
           같은 파트끼리는 마니또가 되지 않게 배정하고, 최종 지목이 열릴 때 "내 마니또는 ○○ 소속" 단서가 자동으로 나가요. 파트 순위도 이 파트로 매겨요.
         </p>
         <textarea className="pk-input" rows={6} value={text} onChange={(e) => setText(e.target.value)} placeholder={"홍길동\t공정파트\tgildong.hong\n김철수\t소자파트\tcs.kim"} />

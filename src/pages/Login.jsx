@@ -108,18 +108,18 @@ export default function Login({ bootstrap = false }) {
               : "운영자와 공동 운영자는 마니또에 참여하지 않는 계정이에요. 아직 운영자가 없으면 이 계정이 운영자가 되고, 이미 있으면 다음 화면에 나오는 계정 번호를 운영자에게 알려 주면 공동 운영자로 지정받아요."}
           </p>
         )}
-        {mode === "reset" && <p className="small">가입할 때 쓴 회사 메일 아이디를 적으면 그 메일로 비밀번호를 다시 정하는 링크를 보내 드려요.</p>}
+        {mode === "reset" && <p className="small">가입할 때 쓴 Knox ID를 적으면 그 메일로 비밀번호를 다시 정하는 링크를 보내 드려요.</p>}
 
         <form onSubmit={submit} className="stack">
           {!(mode === "bootstrap" && signedIn) && (
             <label>
-              <span className="panel-label">회사 메일 아이디</span>
+              <span className="panel-label">Knox ID</span>
               <span className="id-field">
                 <input className="pk-input" type="text" inputMode="email" autoCapitalize="none" spellCheck={false} value={email} onChange={(e) => setEmail(e.target.value)}
-                  autoComplete="username" placeholder="회사 메일 아이디" />
+                  autoComplete="username" placeholder="Knox ID" />
                 {!email.includes("@") && <span className="id-domain">@{MAIL_DOMAIN}</span>}
               </span>
-              {mode === "signup" && <span className="small muted">@ 앞부분만 적어 주세요. {email.trim() ? `${toEmail(email)}로 인증 메일이 가요.` : "이 메일로 인증 메일이 가요."}</span>}
+              {mode === "signup" && <span className="small muted">Knox ID만 적어 주세요(@ 앞부분). {email.trim() ? `${toEmail(email)}로 인증 메일이 가요.` : "Knox 메일로 인증 메일이 가요."}</span>}
             </label>
           )}
           {needsPassword && (

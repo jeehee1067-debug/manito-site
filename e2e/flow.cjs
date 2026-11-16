@@ -94,7 +94,7 @@ const step = (s) => console.log("▶", s);
   assert.equal(await admin.getByRole("button", { name: "운영자·공동 운영자 계정 만들기" }).count(), 0, "기본 주소에서는 숨김");
   await admin.goto(BASE + "?setup");
   await admin.getByRole("button", { name: "운영자·공동 운영자 계정 만들기" }).click();
-  await admin.getByPlaceholder("회사 메일 아이디").fill("admin1@example.com");
+  await admin.getByPlaceholder("Knox ID").fill("admin1@example.com");
   await admin.locator('input[type="password"]').fill(PW);
   await admin.getByRole("button", { name: "운영자 계정 만들기" }).click();
   await panel(admin, "운영 단계").waitFor();
@@ -159,7 +159,7 @@ const step = (s) => console.log("▶", s);
     await page.goto(BASE);
     await page.getByRole("tab", { name: "처음 가입" }).click();
     await page.getByPlaceholder("운영진에게 받은 6자리").fill(invite[p.name]);
-    await page.getByPlaceholder("회사 메일 아이디").fill(p.id);
+    await page.getByPlaceholder("Knox ID").fill(p.id);
     await page.locator('input[type="password"]').fill(PW);
     await page.getByRole("button", { name: "가입하기" }).click();
     await page.locator("nav.tabs button", { hasText: "내 미션" }).waitFor();
@@ -444,7 +444,7 @@ const step = (s) => console.log("▶", s);
   {
     await co.goto(BASE + "?setup");
     await co.getByRole("button", { name: "운영자·공동 운영자 계정 만들기" }).click();
-    await co.getByPlaceholder("회사 메일 아이디").fill("coadmin@example.com");
+    await co.getByPlaceholder("Knox ID").fill("coadmin@example.com");
     await co.locator('input[type="password"]').fill(PW);
     await co.getByRole("button", { name: "운영자 계정 만들기" }).click();
     // 이미 운영자가 있으므로 운영자가 되지 않고 "연결 전" 화면이 나온다

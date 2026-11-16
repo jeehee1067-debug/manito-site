@@ -63,11 +63,11 @@ const H = require("./helpers.cjs");
 
   step("사아가 미션 시작 뒤에 가입: 내 대상이 보이고, 가입 전에 온 미션을 인증하고, 자기 미션도 한다");
   {
-    // 사아는 초대 코드 없이 회사 메일 아이디(late3)로 가입한다: 인증 메일의 링크를 눌러야 명단의 이름과 연결된다
+    // 사아는 초대 코드 없이 Knox ID(late3)로 가입한다: 인증 메일의 링크를 눌러야 명단의 이름과 연결된다
     const p = await mk(LATE); u[LATE] = p;
     await p.goto(H.BASE);
     await p.getByRole("tab", { name: "처음 가입" }).click();
-    await p.getByPlaceholder("회사 메일 아이디").fill("Late3"); // 대문자로 적어도 소문자 주소가 된다
+    await p.getByPlaceholder("Knox ID").fill("Late3"); // 대문자로 적어도 소문자 주소가 된다
     await p.getByText("late3@samsung.com로 인증 메일이 가요.").waitFor();
     await p.locator('input[type="password"]').fill("secret123");
     await p.getByRole("button", { name: "가입하기" }).click();
@@ -88,7 +88,7 @@ const H = require("./helpers.cjs");
       const x = await mk("외부인");
       await x.goto(H.BASE);
       await x.getByRole("tab", { name: "처음 가입" }).click();
-      await x.getByPlaceholder("회사 메일 아이디").fill("stranger");
+      await x.getByPlaceholder("Knox ID").fill("stranger");
       await x.locator('input[type="password"]').fill("secret123");
       await x.getByRole("button", { name: "가입하기" }).click();
       await H.panel(x, "회사 메일 인증").getByText("stranger@samsung.com").waitFor();
