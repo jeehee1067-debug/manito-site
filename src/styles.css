@@ -525,11 +525,20 @@ textarea.pk-input { resize: vertical; line-height: 1.6; }
   .slips { grid-template-columns: repeat(6, 1fr); }
 }
 
-/* 로그인: Knox ID 입력(뒤에 도메인이 붙어 보인다) */
-.id-field { display: flex; align-items: center; gap: 6px; }
-/* 아이디 칸은 아이디 길이만큼만(전체 폭으로 늘리지 않는다). 좁은 화면에서는 남는 폭까지 줄어든다 */
-.id-field .pk-input { flex: 0 1 200px; min-width: 0; }
-.id-domain { flex: none; font-size: 14px; color: var(--ink-soft); white-space: nowrap; }
+/* 로그인: Knox ID 입력. 아이디 칸과 도메인 칸이 한 줄로 붙어 아래 비밀번호 칸과 같은 너비가 된다.
+   넓은 화면에서는 반반, 휴대폰 폭에서는 도메인 칸을 글자만큼만 두고 아이디 칸을 넓힌다.
+   전체 주소를 적으면(@ 포함) 도메인 칸이 사라지고 아이디 칸이 전체 폭이 된다. */
+.id-field { display: flex; align-items: stretch; }
+.id-field .pk-input { flex: 1 1 50%; width: auto; min-width: 0; }
+.id-field .pk-input:not(:only-child) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.id-domain {
+  flex: 1 1 50%; display: flex; align-items: center; min-width: 0; padding: 0 12px;
+  font-size: 15px; color: var(--ink-soft); white-space: nowrap;
+  background: var(--paper-2); border: 2px solid var(--ink); border-left: 0; border-radius: 0 8px 8px 0;
+}
+@media (max-width: 480px) {
+  .id-domain { flex: 0 0 auto; padding: 0 10px; font-size: 14px; }
+}
 /* 발표 화면: 종이로 뽑힌 이름 입력 */
 .paper-form { display: grid; gap: 8px; justify-items: center; width: 100%; }
 .name-input { max-width: 240px; font-size: 20px; text-align: center; }
