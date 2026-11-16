@@ -105,17 +105,24 @@ export const MISSION_CARDS = {
     { id: "n5", cost: true, remote: false, text: "대상이 좋아할 것 같은 간식 추측해서 전달하기" },
     { id: "n6", remote: true, text: "대상만을 위한 노래 3곡 플레이리스트 쪽지 보내기" },
     { id: "n7", remote: true, text: "대상의 하루를 응원하는 짧은 시 쪽지 보내기" },
-    { id: "n8", cost: true, remote: true, text: "대상 근무지에 갈 일이 생기면 몰래 간식 두기 (못 가게 되면 다른 카드로 바꾸기)" },
+    { id: "n8", cost: true, remote: true, text: "대상이 자리를 비운 사이 책상 서랍이나 가방 옆에 몰래 간식 두기" },
     { id: "n9", remote: true, text: "대상 이름 삼행시 쪽지 보내기" },
+    // 몰래 알아내기: 본인에게 직접 묻지 않고 주변 사람에게 슬쩍 물어 알아낸 뒤 쪽지로 맞혀 본다(맞았는지는 대상이 후기에 적는다)
+    { id: "n10", remote: true, text: "대상이 요즘 해 보고 싶은 취미를 몰래 알아내 쪽지로 맞혀 보기 (본인에게 직접 묻지 않기)" },
+    { id: "n11", remote: true, text: "대상이 요즘 즐겨 보는 드라마·유튜브를 몰래 알아내 쪽지로 맞혀 보기 (본인에게 직접 묻지 않기)" },
+    { id: "n12", remote: true, text: "대상이 힘들 때 찾는 음식(소울푸드)을 몰래 알아내 쪽지로 맞혀 보기 (본인에게 직접 묻지 않기)" },
   ],
   hard: [
     { id: "h1", remote: false, text: "대상 이름으로 삼행시를 지어 손편지로 전달하기" },
-    { id: "h2", remote: false, text: "대상에 대한 퀴즈 카드를 만들어 전달하기" },
+    { id: "h2", remote: false, text: "대상에 대한 O/X 퀴즈 3문제를 손카드로 만들어 전달하기 (예: '○○님은 민트초코를 좋아한다')" },
     { id: "h3", remote: false, text: "종이접기 등 직접 만든 소품 전달하기" },
     { id: "h4", cost: true, remote: false, text: "대상에게 필요할 것 같은 물건을 추측해서 선물하기" },
     { id: "h5", remote: true, text: "3일 연속 매일 다른 응원 쪽지 보내기 (첫날 완료를 알린 뒤 '쪽지 더 보내기'로 이어서)" },
-    { id: "h6", cost: true, remote: true, text: "대상 근무지 동료를 공범으로 섭외해 간식 전달하기 (공범에게도 비밀 유지 부탁)" },
-    { id: "h7", remote: true, text: "대상에 대한 퀴즈 5문제를 쪽지로 보내기" },
+    { id: "h6", cost: true, remote: true, text: "동료를 공범으로 섭외해 간식을 대신 전달하게 하기 (인증 코드 메모를 함께, 공범에게도 비밀 유지 부탁)" },
+    { id: "h7", remote: true, text: "대상에 대한 O/X 퀴즈 5문제를 쪽지로 보내기 (예: '○○님은 아침형 인간이다')" },
+    { id: "h8", remote: true, text: "대상의 이상형을 몰래 알아내 쪽지로 맞혀 보기 (본인에게 직접 묻지 않기)" },
+    { id: "h9", remote: true, text: "대상이 꼭 가 보고 싶은 여행지를 몰래 알아내 쪽지로 맞혀 보기 (본인에게 직접 묻지 않기)" },
+    { id: "h10", remote: true, text: "대상의 버킷리스트 하나를 몰래 알아내 응원 쪽지 보내기 (본인에게 직접 묻지 않기)" },
   ],
 };
 
