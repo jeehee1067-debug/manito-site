@@ -8,9 +8,9 @@ import { Panel } from "../ui.jsx";
 import { PHASE, PHASES, CLUE_COUNT, LEVEL_LABEL, LOCS, PART_HINT_IDX, RULES_VERSION } from "../lib/constants.js";
 import { SLOT_STATUS_LABEL, clueAnswers, cluesDoneSet, pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../lib/pairs.js";
 import { assignManito, assignmentMemo, generateCodes, makeInviteCode } from "../lib/assign.js";
-import { computeTickets, noticedWeeks, partStandings, weeklyPartBoard } from "../lib/scoring.js";
+import { computeTickets, noticedWeeks, partStandings, pickBestReview, weeklyPartBoard } from "../lib/scoring.js";
 import { angelQueue, angelQueueStatus, matchAngels, needyReceivers } from "../lib/angels.js";
-import { PRIZES } from "../config/prizes.js";
+import { PRIZES, TICKET_RULES as R } from "../config/prizes.js";
 import { parseRosterLine, rosterSummary, sameSummary } from "../lib/roster.js";
 
 // Firestore 배치는 500건 제한이라 나눠서 커밋한다.
@@ -56,7 +56,9 @@ function usePairs() {
     if (!ready) return [];
     // 완료 알림 문서가 있는 주차도 "완료를 알린 주차"로 본다(집계 scoring.js와 같은 기준)
     const delivered = new Set(Object.values(deliveries).filter((d) => d.kind !== "note").map((d) => `${d.receiverPid}_${d.slot}`));
-    return pairRows({ assignments, giverCodes, missions, redemptions, reports, verdicts, guesses, delivered });
+    // 사이트가 전달한 3주차 칭찬 카드(운영자가 가리지 않은 것)는 인증이 없어도 마니또의 미션으로 인정된다
+    const autoPraise = new Set(Object.values(deliveries).filter((d) => d.kind === "praise" && !d.hidden).map((d) => `${d.receiverPid}_${d.slot}`));
+    return pairRows({ assignments, giverCodes, missions, redemptions, reports, verdicts, guesses, delivered, autoPraise });
   }, [ready, assignments, giverCodes, missions, redemptions, reports, verdicts, guesses, deliveries]);
   return { ready, rows, assignments, giverCodes, missions, guesses };
 }
@@ -155,13 +157,11 @@ export default function Admin() {
     if (phase === PHASE.SCORING) {
       const res = await getDoc(doc(db, "results", "public")).catch(() => null);
       if (!res?.exists()) return setStepMsg("아직 집계하지 않았어요. 아래 '집계하기'를 먼저 눌러 주세요. 집계 결과가 있어야 공개 단계로 넘어갈 수 있어요.");
-      // 베스트 후기상은 집계 단계에서만 고를 수 있다(공개 단계에서는 추첨과 발표 진행만 쓸 수 있다)
-      if (!res.data().bestReview && !window.confirm(`${PRIZES.bestReview.label}을 아직 고르지 않았어요.\n\n공개 단계로 넘어가면 고를 수 없고, 그 상은 발표 화면에서 빠져요. 고르지 않고 넘어갈까요?\n(고르려면 "취소"를 누르고 아래 "베스트 후기상 고르기"에서 골라 주세요)`)) return;
     }
     // 미션 시작 전: 가입 안 한 사람이 있으면 그 사람의 마니또는 인증을 받을 수 없어 미션 응모권이 0장이 된다.
     const unjoined = phase === PHASE.SETUP && fullRoster ? fullRoster.filter((r) => !r.uid) : [];
     const warn = unjoined.length
-      ? `\n\n⚠ 아직 가입 안 한 사람 ${unjoined.length}명: ${unjoined.map((r) => r.name).join(", ")}\n이 사람들의 마니또는 인증을 받을 수 없어요. 참여하지 않을 사람이면 명단에서 지우고 다시 배정한 뒤 시작하세요.`
+      ? `\n\n⚠ 아직 가입 안 한 사람 ${unjoined.length}명: ${unjoined.map((r) => r.name).join(", ")}\n이 사람들도 이미 배정돼 있고, 미션이 시작된 뒤에도 초대 코드로 가입해 바로 참여할 수 있어요. 가입하기 전까지는 받는 미션을 인증할 수 없고 자기 미션도 못 해요(끝까지 가입하지 않으면 불참으로 처리: 응모권 0장, 그 사람의 마니또가 완료를 알린 미션은 인정). 아예 참여하지 않을 사람이면 명단에서 지우고 다시 배정한 뒤 시작하세요.`
       : "";
     if (!window.confirm(`${PHASES[phase]} → ${PHASES[phase + 1]}\n\n${NEXT_PHASE_NOTE[phase]}${warn}\n\n되돌릴 수 없어요. 진행할까요?`)) return;
     if (phase === PHASE.SETUP && fullRoster) await publishRoster(fullRoster);
@@ -814,7 +814,8 @@ function Moderation() {
     <>
       <Panel title="인증 검토">
         <p className="small">
-          내용 없는 인증은 무효 처리하세요. 무효 처리된 인증은 피드와 응모권에서 빠져요.
+          내용 없는 인증은 무효 처리하세요. 무효 처리된 인증은 피드와 응모권에서 빠져요(받는 사람의 인증 응모권과 마니또의 그 미션 응모권).
+          후기만 성의 없고 미션은 실제로 받은 것이 확인되면, 집계 단계의 "집계 전 확인"에서 그 주차를 "받았음"으로 눌러 마니또의 미션은 인정할 수 있어요.
           미션은 제대로 했는데 후기나 답장만 문제라면 "피드에서 가리기"·"답장 지우기"를 쓰세요(응모권은 그대로예요).
           "카드와 다름"은 받는 사람이 받은 것이 마니또가 고른 카드와 다르다고 한 것이에요(보통·도전 카드면 추가 응모권이 빠져요).
         </p>
@@ -1118,6 +1119,7 @@ async function readAll(name) {
 // all = true(집계 단계): 인증이 없는 완료 알림을 모두 보인다(신고하지 않고 인증만 안 한 경우 포함).
 function Unresolved({ all = false }) {
   const { nameOf } = useApp();
+  const isOwner = useIsOwner();
   const roster = useFullRoster() || [];
   const { ready, rows } = usePairs();
   const [msg, setMsg] = useState("");
@@ -1126,13 +1128,22 @@ function Unresolved({ all = false }) {
   const items = unresolvedSlots(rows, { onlyReported: !all })
     .sort((a, b) => a.slot - b.slot || nameOf(a.receiverPid).localeCompare(nameOf(b.receiverPid), "ko"));
   const autoOf = (pid) => (byPid[pid] && !byPid[pid].uid ? "미가입" : byPid[pid]?.dropout ? "중도 이탈" : null);
-  const waiting = items.filter((x) => !x.verdict && !autoOf(x.receiverPid)).length;
+  // 꼭 확인해야 하는 것: 인증 기록이 없는 완료 알림. 인증이 무효 처리된 주차는 "받았음"을 누를 수 있게 보이기만 한다
+  const waiting = items.filter((x) => !x.verdict && !x.voided && !autoOf(x.receiverPid)).length;
+  const praiseAuto = rows.reduce((n, r) => n + Object.values(r.slots).filter((x) => x.status === "auto").length, 0);
 
   async function decide(it, verdict) {
     setMsg("");
     const ref = doc(db, "verdicts", `${it.receiverPid}_${it.slot}`);
+    const undo = it.verdict === verdict; // 같은 버튼을 다시 누르면 확인 취소
+    // "못 받음"은 마니또가 그 미션의 응모권을 잃는 결정이라, 처음 운영자가 두 사람에게 확인한 뒤에만 확정한다(신고만으로는 아무것도 바뀌지 않는다)
+    if (verdict === "missing" && !undo && !window.confirm(
+      `${nameOf(it.receiverPid)}님의 ${it.slot}주차를 "못 받음"으로 확정할까요?\n\n`
+      + `· 마니또 ${nameOf(it.giverPid)}님: 이 미션의 응모권(미션 ${R.perRedeemedMission}장과 카드 추가분)을 받지 못하고, 미션 ${R.hiddenMinMissions}건을 채우지 못하면 은신 ${R.hidden}장도 받지 못해요.\n`
+      + `· 받는 사람 ${nameOf(it.receiverPid)}님: 그 주차 보상 ${R.compPerMissedWeek}장을 받아요.\n\n`
+      + "두 사람 모두에게 확인한 뒤에 눌러 주세요. 집계 전까지는 같은 버튼을 다시 눌러 취소할 수 있어요.")) return;
     try {
-      if (it.verdict === verdict) await deleteDoc(ref); // 같은 버튼을 다시 누르면 확인 취소
+      if (undo) await deleteDoc(ref);
       else await setDoc(ref, { receiverPid: it.receiverPid, slot: it.slot, verdict, at: serverTimestamp() });
     } catch {
       setMsg("저장하지 못했어요. 잠시 뒤 다시 눌러 주세요.");
@@ -1143,11 +1154,13 @@ function Unresolved({ all = false }) {
     <Panel title={all ? `집계 전 확인: 인증이 없는 완료 알림 (확인 안 한 것 ${waiting}건)` : `받은 게 없어요 신고 (확인 안 한 것 ${waiting}건)`}>
       <p className="small">
         {all
-          ? "마니또가 미션 완료를 알렸는데 받는 사람이 인증하지 않은 주차예요. 집계하기 전에 두 사람에게 확인하고 주차마다 눌러 주세요."
-          : "마니또가 완료를 알렸는데 받는 사람이 \"받은 게 없어요\"로 알린 주차예요. 두 사람에게 확인하고 주차마다 눌러 주세요."}
+          ? "마니또가 미션 완료를 알렸는데 받는 사람의 유효한 인증이 없는 주차예요. 집계하기 전에 두 사람에게 확인하고 주차마다 눌러 주세요."
+          : "마니또가 완료를 알렸는데 받는 사람이 \"받은 게 없어요\"로 알린 주차예요. 신고만으로는 아무것도 바뀌지 않아요. 두 사람에게 확인하고 주차마다 눌러 주세요."}
         {" "}<b>받았음</b>: 마니또의 미션으로 인정해요(카드 추가분은 없고, 받는 사람의 인증 입력 응모권은 생기지 않아요).
-        {" "}<b>못 받음</b>: 마니또의 미션으로 치지 않고, 받는 사람에게 그 주차 응모권 1장을 보상해요.
+        {" "}<b>못 받음</b>: 마니또의 미션으로 치지 않고, 받는 사람에게 그 주차 응모권 1장을 보상해요. <b>처음 운영자만</b> 확정할 수 있어요.
         {" "}확인하지 않으면 어느 쪽에도 응모권이 생기지 않아요. 같은 버튼을 다시 누르면 취소돼요.
+        {all && " 인증이 무효 처리된 주차도 나와요: 후기만 문제였고 미션은 실제로 받았다면 \"받았음\"을 눌러 마니또의 미션을 인정할 수 있어요(받는 사람 쪽은 달라지지 않아요)."}
+        {all && praiseAuto > 0 && ` 3주차 칭찬 카드 ${praiseAuto}건은 사이트로 전달된 것이라 인증이 없어도 자동으로 인정돼요(막말 등은 "쪽지 검토"에서 가리면 여기에 나와요).`}
       </p>
       {items.length === 0 ? <p className="muted">{all ? "해당하는 주차가 없어요." : "신고가 없어요."}</p> : (
         <div className="table-wrap">
@@ -1155,18 +1168,22 @@ function Unresolved({ all = false }) {
             <thead><tr><th>주차</th><th>받는 사람</th><th>마니또</th><th>카드</th><th>신고</th><th>확인</th></tr></thead>
             <tbody>
               {items.map((it) => {
-                const auto = autoOf(it.receiverPid);
+                const auto = it.voided ? null : autoOf(it.receiverPid);
                 return (
-                  <tr key={`${it.receiverPid}_${it.slot}`} className={!it.verdict && !auto ? "warn" : ""}>
+                  <tr key={`${it.receiverPid}_${it.slot}`} className={!it.verdict && !auto && !it.voided ? "warn" : ""}>
                     <td>{it.slot}주차</td>
                     <td>{nameOf(it.receiverPid)}{auto && ` (${auto})`}</td>
                     <td>{nameOf(it.giverPid)}</td>
                     <td className="left" title={it.text}>{it.level === "praise" ? "칭찬 카드" : `${LEVEL_LABEL[it.level] || ""} ${it.text}`}</td>
-                    <td>{it.reported ? "받은 게 없어요" : "-"}</td>
+                    <td>{it.voided ? "인증 무효" : it.reported ? "받은 게 없어요" : "-"}</td>
                     <td>
                       <button className={it.verdict === "received" ? "chip sm is-on" : "chip sm"} aria-pressed={it.verdict === "received"} onClick={() => decide(it, "received")}>받았음</button>
-                      <button className={it.verdict === "missing" ? "chip sm is-on" : "chip sm"} aria-pressed={it.verdict === "missing"} onClick={() => decide(it, "missing")}>못 받음</button>
+                      {!it.voided && (
+                        <button className={it.verdict === "missing" ? "chip sm is-on" : "chip sm"} aria-pressed={it.verdict === "missing"} disabled={!isOwner}
+                          title={isOwner ? undefined : "못 받음은 처음 운영자만 확정할 수 있어요"} onClick={() => decide(it, "missing")}>못 받음</button>
+                      )}
                       {auto && !it.verdict && <span className="small muted"> 확인 없으면 자동 인정</span>}
+                      {it.voided && !it.verdict && <span className="small muted"> 누르지 않으면 인정 안 됨</span>}
                     </td>
                   </tr>
                 );
@@ -1279,8 +1296,8 @@ function Pairs() {
 
 // 응모권 계산에 필요한 자료를 모두 읽어 계산한다. 집계하기와 검산이 같이 쓴다.
 async function calcAll(roster, assignVer) {
-  const [assignments, giverCodes, redemptions, missions, guesses, deliveries, verdicts, clues, midGuesses, toManito, feed, angels, angelGifts, angelVolunteers] = await Promise.all(
-    ["assignments", "giverCodes", "redemptions", "giverMissions", "guesses", "deliveries", "verdicts", "clues", "midGuesses", "toManito", "feed", "angels", "angelGifts", "angelVolunteers"]
+  const [assignments, giverCodes, redemptions, missions, guesses, deliveries, verdicts, clues, midGuesses, toManito, feed, angels, angelGifts, angelVolunteers, feedLikes] = await Promise.all(
+    ["assignments", "giverCodes", "redemptions", "giverMissions", "guesses", "deliveries", "verdicts", "clues", "midGuesses", "toManito", "feed", "angels", "angelGifts", "angelVolunteers", "feedLikes"]
       .map((n) => readAll(n).catch(() => ({}))) // 새 기능 컬렉션(중간 추측·한마디)이 비어 있거나 예전 규칙이어도 집계는 되게
   );
   const people = roster.map((r) => ({
@@ -1288,7 +1305,7 @@ async function calcAll(roster, assignVer) {
     disqualified: Boolean(r.disqualified), joined: Boolean(r.uid), dropout: Boolean(r.dropout),
   }));
   const tickets = computeTickets({
-    deliveries: Object.values(deliveries).map((d) => ({ receiverPid: d.receiverPid, slot: d.slot })),
+    deliveries: Object.values(deliveries).map((d) => ({ receiverPid: d.receiverPid, slot: d.slot, kind: d.kind, hidden: Boolean(d.hidden) })),
     people,
     assignments: Object.fromEntries(Object.entries(assignments).map(([g, a]) => [g, a.receiverPid])),
     giverCodes: Object.fromEntries(Object.entries(giverCodes).map(([g, c]) => [g, c.codes])),
@@ -1317,9 +1334,8 @@ async function calcAll(roster, assignVer) {
     })];
   }));
   const feedList = Object.values(feed).filter((f) => !f.voided && !f.hidden);
-  const top = Object.values(redemptions).filter((r) => !r.voided && feed[r.feedId] && !feed[r.feedId].hidden)
-    .map((r) => ({ receiverPid: r.receiverPid, review: String(r.review).slice(0, 300), likes: feed[r.feedId].likes || 0 }))
-    .sort((a, b) => b.likes - a.likes)[0];
+  // 3등 베스트 후기상: 공감을 가장 많이 받은 후기(자기 공감 제외, 동점이면 먼저 쓴 후기). 운영자가 고르지 않는다
+  const bestReview = pickBestReview({ redemptions, feed, feedLikes, ineligible: new Set(people.filter((p) => p.disqualified || !p.joined || p.dropout).map((p) => p.pid)) });
   const stats = {
     people: people.filter((p) => p.joined && !p.dropout).length,
     missions: Object.values(tickets).reduce((s, t) => s + (t.mission || 0), 0),
@@ -1337,7 +1353,7 @@ async function calcAll(roster, assignVer) {
     angelPid: a.angelPid, receiverPid, done: Object.values(angelGifts).filter((g) => g.receiverPid === receiverPid && g.confirmed).length,
     ...(volunteerOrder[a.angelPid] ? { order: volunteerOrder[a.angelPid] } : {}),
   })).filter((x) => x.done > 0);
-  const extras = { guesses: finalGuess, noticed, story, stats, likesTop: top && top.likes > 0 ? top : null, angels: angelList };
+  const extras = { guesses: finalGuess, noticed, story, stats, bestReview, angels: angelList };
   return { assignments, deliveries, people, tickets, extras };
 }
 
@@ -1346,16 +1362,11 @@ function Scoring() {
   const fullRoster = useFullRoster();
   const roster = fullRoster || [];
   const [result, setResult] = useState(null);
-  const [reviews, setReviews] = useState([]);
   const [busy, setBusy] = useState(false);
   const [audit, setAudit] = useState(null); // 검산 결과
 
   useEffect(() => {
-    const offs = [
-      onSnapshot(doc(db, "results", "public"), (s) => setResult(s.exists() ? s.data() : null)),
-      onSnapshot(collection(db, "redemptions"), (s) => setReviews(s.docs.map((d) => ({ code: d.id, ...d.data() })).filter((r) => !r.voided))),
-    ];
-    return () => offs.forEach((o) => o());
+    return onSnapshot(doc(db, "results", "public"), (s) => setResult(s.exists() ? s.data() : null));
   }, []);
 
   const [error, setError] = useState("");
@@ -1387,7 +1398,6 @@ function Scoring() {
       tickets: Object.fromEntries(Object.entries(tickets).map(([pid, t]) => [pid, t.total])),
       ticketDetail: tickets,
       partBoard: partStandings(people, tickets).map(({ part, members, done, max, winner }) => ({ part, members, done, max, winner })),
-      bestReview: result?.bestReview || null,
       praises,
       ...extras, // 발표용: 최종 지목, 알아챈 주차, 마니또별 미션 이야기, 숫자, 공감 1위 후기
       draws: {},
@@ -1395,8 +1405,6 @@ function Scoring() {
       computedAt: serverTimestamp(),
     });
   }
-
-  const pickReview = (r) => updateDoc(doc(db, "results", "public"), { bestReview: { code: r.code, review: r.review, receiverPid: r.receiverPid } });
 
   // 검산: 저장된 결과의 응모권을 지금 자료로 다시 계산해 비교한다(저장하지 않음).
   // 다른 운영자가 집계했거나 집계 뒤에 결과가 바뀌었는지 확인할 때 쓴다. 공개 단계에서도 결과 탭에서 볼 수 있다.
@@ -1416,7 +1424,7 @@ function Scoring() {
       <Unresolved all />
       <Panel title="집계">
         <p className="small">
-          응모권, 파트 대항전 순위, 칭찬 벽을 계산해요. 위 "집계 전 확인"과 수상 제외·중도 이탈 표시를 먼저 끝내고 누르세요.
+          응모권, 파트 대항전 순위, {PRIZES.bestReview.label}(공감을 가장 많이 받은 후기), 칭찬 벽을 계산해요. 위 "집계 전 확인"과 수상 제외·중도 이탈 표시를 먼저 끝내고 누르세요.
           다시 누르면 다시 계산돼요. 집계해야 공개 단계로 넘어갈 수 있고, 공개 단계로 넘어간 뒤에는 다시 집계할 수 없어요.
           {" "}{PRIZES.grand.label}·{PRIZES.bestManito.label}와 4~6등은 공개 단계의 발표 화면에서 현장 숫자 하나로 한 번에 정해요
           ({PRIZES.bestManito.label}는 1등 당첨자를 뺀 응모권 최다 {PRIZES.bestManito.count}명).
@@ -1434,25 +1442,15 @@ function Scoring() {
             <li>응모권 상위({PRIZES.bestManito.label} 후보, 1등 당첨자는 빠져요): {Object.entries(result.tickets || {}).filter(([, n]) => n > 0)
               .sort((x, y) => y[1] - x[1] || nameOf(x[0]).localeCompare(nameOf(y[0]), "ko")).slice(0, PRIZES.bestManito.count + 3)
               .map(([pid, n]) => `${nameOf(pid)} ${n}장`).join(", ") || "-"}</li>
+            <li>{PRIZES.bestReview.label}: {result.bestReview
+              ? `${nameOf(result.bestReview.receiverPid)} (♥ ${result.bestReview.likes ?? "-"}, 자기 공감 제외) "${String(result.bestReview.review).slice(0, 40)}…"`
+              : "공감을 받은 후기가 없어 수상자가 없어요"}</li>
             <li>파트 대항전: {(result.partBoard || []).length
               ? result.partBoard.map((x) => `${x.part} ${x.done}/${x.max}${x.winner ? " (우승)" : ""}`).join(", ")
               : "파트가 입력되지 않아 없음"}</li>
           </ul>
         )}
       </Panel>
-      {result && (
-        <Panel title="베스트 후기상 고르기">
-          <ul className="plain">
-            {reviews.map((r) => (
-              <li key={r.code} className={result.bestReview?.code === r.code ? "row-item picked" : "row-item"}>
-                <p>{r.review}</p>
-                <span className="small muted">작성: {nameOf(r.receiverPid)}</span>
-                <button className="text-btn" onClick={() => pickReview(r)}>{result.bestReview?.code === r.code ? "선택됨" : "이 후기 선택"}</button>
-              </li>
-            ))}
-          </ul>
-        </Panel>
-      )}
     </>
   );
 }

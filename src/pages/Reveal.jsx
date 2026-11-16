@@ -103,7 +103,7 @@ export default function Reveal() {
     let people = []; // 발표된 사람
     let state = ""; // 아직 보일 것이 없을 때의 안내
     if (isReview) {
-      if (!r.bestReview) state = "미정";
+      if (!r.bestReview) state = "공감을 받은 후기가 없어 수상자가 없어요";
       else if (shown.has("bestReview")) people = [r.bestReview.receiverPid];
       else state = "발표 전";
     } else if (!drawn) {
@@ -124,9 +124,6 @@ export default function Reveal() {
     ),
     shown.has("angels") && (r.angels || []).length > 0 && (
       <li key="angels"><strong>숨은 수호천사</strong> {r.angels.map((a) => `${nameOf(a.angelPid)} → ${nameOf(a.receiverPid)}`).join(", ")}</li>
-    ),
-    shown.has("likesTop") && r.likesTop && (
-      <li key="likes"><strong>가장 많은 공감을 받은 후기</strong> {nameOf(r.likesTop.receiverPid)} <span className="small">(♥ {r.likesTop.likes})</span></li>
     ),
   ].filter(Boolean);
 
@@ -165,7 +162,7 @@ export default function Reveal() {
                 {mine.comp > 0 && ` + 못 받은 주차 보상 ${mine.comp}`} + 은신 {mine.hidden} + 정답 지목 {mine.guess}
                 {mine.partBonus > 0 && ` + 우승 파트 ${mine.partBonus}`}
                 {mine.angel > 0 && ` + 수호천사 ${mine.angel}`}
-                {mine.assumed > 0 && ` (대상 불참·운영진 확인으로 인정된 미션 ${mine.assumed}건 포함, 인정된 미션에는 카드 추가분 없음)`}
+                {mine.assumed > 0 && ` (대상의 인증 없이 인정된 미션 ${mine.assumed}건 포함: 대상 불참, 운영진 확인, 전달된 칭찬 카드. 이런 미션에는 카드 추가분 없음)`}
                 {mine.total === 0 && mine.mission + (mine.card ?? mine.hard ?? 0) + mine.entries + mine.hidden + mine.guess + (mine.comp || 0) + (mine.partBonus || 0) + (mine.angel || 0) > 0 && " · 수상 제외 또는 중도 이탈로 0장 처리됐어요"}
               </p>
             )}
@@ -177,7 +174,7 @@ export default function Reveal() {
         <p className="small">
           현장에서 정한 숫자 하나(예: 참석자가 부른 네 자리 숫자)로 큰 상부터 한 번에 정해요: {DRAW_ORDER.map(rankWord).join(" → ")}. 한 사람은 그중 하나만 받아요.
           {" "}{PRIZES.bestManito.label}는 추첨이 아니라 1등 당첨자를 뺀 응모권 최다 {PRIZES.bestManito.count}명이에요(동점이면 같은 숫자로 가려요).
-          {" "}{PRIZES.bestReview.label}은 운영진이 후기 중에서 뽑아요. 발표는 {rankWord(PRIZES.tiers[PRIZES.tiers.length - 1])}부터 하고, 한 번 뽑은 결과는 다시 뽑을 수 없어요.
+          {" "}{PRIZES.bestReview.label}은 익명 피드에서 공감(♥)을 가장 많이 받은 후기예요(자기 후기에 누른 공감은 세지 않고, 동점이면 먼저 쓴 후기). 발표는 {rankWord(PRIZES.tiers[PRIZES.tiers.length - 1])}부터 하고, 한 번 뽑은 결과는 다시 뽑을 수 없어요.
           같은 숫자로 누가 다시 계산해도 같은 결과가 나오니 발표가 끝나면 아래 "추첨 검증"으로 확인할 수 있어요.
         </p>
         {!drawn && isAdmin && config.phase === PHASE.REVEAL && <DrawForm />}
@@ -199,7 +196,7 @@ export default function Reveal() {
                   ))}
                 </div>
               )}
-              {isReview && people.length > 0 && <Dialogue speaker={nameOf(r.bestReview.receiverPid)}>{r.bestReview.review}</Dialogue>}
+              {isReview && people.length > 0 && <Dialogue speaker={`${nameOf(r.bestReview.receiverPid)}${r.bestReview.likes ? ` · ♥ 공감 ${r.bestReview.likes}` : ""}`}>{r.bestReview.review}</Dialogue>}
               {state && <p className="muted small">{state}</p>}
             </li>
           ))}
@@ -473,18 +470,11 @@ function Slide({ r, slide, nameOf, pairCount }) {
           </div>
         </div>
       );
-    case "likesTop":
-      return (
-        <div className="pres-center">
-          <p className="pres-kicker">가장 많은 공감을 받은 후기 ♥ {r.likesTop.likes}</p>
-          <blockquote className="pres-quote">{r.likesTop.review}</blockquote>
-          <p className="pres-sub pop delay">— {nameOf(r.likesTop.receiverPid)}님</p>
-        </div>
-      );
     case "bestReview":
       return (
         <div className="pres-center">
           <p className="pres-kicker">{PRIZES.bestReview.label} · {PRIZES.bestReview.prize}</p>
+          <p className="pres-sub">가장 많은 공감을 받은 후기{r.bestReview.likes ? ` ♥ ${r.bestReview.likes}` : ""}</p>
           <blockquote className="pres-quote">{r.bestReview.review}</blockquote>
           <h1 className="pres-title pop delay">{nameOf(r.bestReview.receiverPid)}</h1>
         </div>

@@ -9,8 +9,9 @@ import { MISSION_SLOTS } from "./constants.js";
 //  reported  완료를 알렸는데 받는 사람이 "받은 게 없어요"로 신고함(운영자 확인 전)
 //  confirmed 운영자가 "받았음"으로 확인(마니또의 미션 인정)
 //  missing   운영자가 "못 받음"으로 확인(받는 사람에게 보상)
+//  auto      3주차 칭찬 카드가 사이트로 전달됨(받는 사람의 인증이 없어도 마니또의 미션으로 인정. scoring.js와 같은 기준)
 //  redeemed  받는 사람이 인증함
-//  voided    인증했지만 운영자가 무효 처리함
+//  voided    인증했지만 운영자가 무효 처리함(운영자가 "받았음"으로 확인하면 마니또의 미션은 인정된다)
 export const SLOT_STATUS_LABEL = {
   none: "-",
   chosen: "카드 고름",
@@ -18,6 +19,7 @@ export const SLOT_STATUS_LABEL = {
   reported: "받은 게 없다고 신고",
   confirmed: "받았음 확인",
   missing: "못 받음 확인",
+  auto: "칭찬 카드 전달(인정)",
   redeemed: "인증됨",
   voided: "인증 무효",
 };
@@ -28,10 +30,11 @@ export const SLOT_STATUS_LABEL = {
  * missions: { giverPid: { choices: { 주차: { level, text } }, done: { 주차: true }, notes: { 주차: 추가 쪽지 수 } } }
  * redemptions: { 코드: { voided } }, reports: { "받는사람_주차": { active } }, verdicts: { "받는사람_주차": { verdict } }
  * delivered: Set("받는사람_주차") 완료 알림(deliveries)이 있는 주차. 완료 표시(done)와 같이 "완료를 알린 주차"로 본다.
+ * autoPraise: Set("받는사람_주차") 사이트가 전달한 칭찬 카드(운영자가 가리지 않은 것). 인증이 없어도 인정된다.
  * guesses: { receiverPid: { guessPid } }
  * 반환: [{ giverPid, receiverPid, slots: { 1: { status, level, text, done, notes, code, reported, verdict }, … }, guessPid, correct }]
  */
-export function pairRows({ assignments = {}, giverCodes = {}, missions = {}, redemptions = {}, reports = {}, verdicts = {}, guesses = {}, delivered = new Set() }) {
+export function pairRows({ assignments = {}, giverCodes = {}, missions = {}, redemptions = {}, reports = {}, verdicts = {}, guesses = {}, delivered = new Set(), autoPraise = new Set() }) {
   return Object.entries(assignments).map(([giverPid, a]) => {
     const receiverPid = a.receiverPid;
     const m = missions[giverPid] || {};
@@ -45,9 +48,10 @@ export function pairRows({ assignments = {}, giverCodes = {}, missions = {}, red
       const reported = Boolean(reports[key]) && reports[key].active !== false; // 취소한 신고는 active = false (예전 신고는 active 없음)
       const verdict = verdicts[key]?.verdict || null;
       let status = choice ? "chosen" : "none";
-      if (red) status = red.voided ? "voided" : "redeemed";
-      else if (done) status = verdict === "received" ? "confirmed" : verdict === "missing" ? "missing" : reported ? "reported" : "sent";
-      slots[slot] = { status, level: choice?.level || null, text: choice?.text || "", done, notes: m.notes?.[slot] || 0, code, reported, verdict };
+      if (red && !red.voided) status = "redeemed";
+      else if (red) status = verdict === "received" ? "confirmed" : "voided"; // 무효 처리된 인증: "받았음"으로 확인하면 마니또의 미션은 인정
+      else if (done) status = verdict === "received" ? "confirmed" : verdict === "missing" ? "missing" : reported ? "reported" : autoPraise.has(key) ? "auto" : "sent";
+      slots[slot] = { status, level: choice?.level || null, text: choice?.text || "", done, notes: m.notes?.[slot] || 0, code, reported, verdict, voided: Boolean(red?.voided) };
     }
     const guessPid = guesses[receiverPid]?.guessPid || null;
     return { giverPid, receiverPid, slots, guessPid, correct: guessPid === giverPid };
@@ -55,17 +59,20 @@ export function pairRows({ assignments = {}, giverCodes = {}, missions = {}, red
 }
 
 /**
- * 운영자가 확인해야 하는 주차: 마니또가 완료를 알렸는데 인증이 없는 것.
- * 반환: [{ giverPid, receiverPid, slot, level, text, reported, verdict }]
+ * 운영자가 확인해야 하는 주차: 마니또가 완료를 알렸는데 유효한 인증이 없는 것.
+ * 반환: [{ giverPid, receiverPid, slot, level, text, reported, verdict, voided }]
  *   onlyReported = true면 받는 사람이 신고했거나 이미 확인 결과가 있는 것만(미션 진행 중에는 아직 인증 전인 것이 많아서).
+ *   voided = 인증이 무효 처리된 주차("받았음"으로 확인하면 마니또의 미션만 인정된다. 받는 사람 쪽은 달라지지 않는다).
+ *   사이트가 전달한 칭찬 카드(status "auto")는 자동으로 인정되므로 넣지 않는다.
  */
 export function unresolvedSlots(rows, { onlyReported = false } = {}) {
   const out = [];
   for (const r of rows) {
     for (const [slot, s] of Object.entries(r.slots)) {
-      if (!["sent", "reported", "confirmed", "missing"].includes(s.status)) continue;
+      const open = ["sent", "reported", "confirmed", "missing"].includes(s.status) || s.voided;
+      if (!open) continue;
       if (onlyReported && !s.reported && !s.verdict) continue;
-      out.push({ giverPid: r.giverPid, receiverPid: r.receiverPid, slot: Number(slot), level: s.level, text: s.text, reported: s.reported, verdict: s.verdict });
+      out.push({ giverPid: r.giverPid, receiverPid: r.receiverPid, slot: Number(slot), level: s.level, text: s.text, reported: s.reported, verdict: s.verdict, voided: s.voided });
     }
   }
   return out;

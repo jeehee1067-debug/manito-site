@@ -258,9 +258,10 @@ const step = (s) => console.log("▶", s);
   assert.match(stats, /2번의 공감/); assert.match(stats, /1번의 "마니또에게 한마디"/);
   console.log("  첫 장면 숫자:", stats);
   const next = async () => { await pres.getByRole("button", { name: "다음 ▶" }).click(); await admin.waitForTimeout(120); };
-  let sawPair = false, sawDetective = false, sawLikes = false, sawAngel = false;
+  let sawPair = false, sawDetective = false, sawAngel = false;
   for (let k = 0; k < 40; k++) {
     await next();
+    if (await pres.locator(".pres-title", { hasText: "숫자 하나로 한 번에!" }).count()) break; // 추첨 장면: 추첨해야 다음으로 넘어간다
     const kicker = await pres.locator(".pres-kicker").first().innerText().catch(() => "");
     if (kicker === `${R}님의 마니또는`) {
       await pres.getByText("정답! 1주차부터 알고 있었어요").waitFor();
@@ -277,14 +278,17 @@ const step = (s) => console.log("▶", s);
       await pres.locator(".pres-person", { hasText: ANGEL }).getByText(`→ ${X}님에게 미션 1건`).waitFor();
       sawAngel = true;
     }
-    if (kicker.startsWith("가장 많은 공감을 받은 후기")) {
-      assert.match(kicker, /♥ 2/);
-      await pres.getByText(`— ${R}님`).waitFor();
-      sawLikes = true;
-      break;
-    }
   }
-  assert.ok(sawPair && sawDetective && sawLikes && sawAngel, `짝 이야기 ${sawPair}, 명탐정 ${sawDetective}, 공감 1위 ${sawLikes}, 수호천사 ${sawAngel}`);
+  assert.ok(sawPair && sawDetective && sawAngel, `짝 이야기 ${sawPair}, 명탐정 ${sawDetective}, 수호천사 ${sawAngel}`);
+  // 추첨한 뒤 6등 → 5등 → 4등을 지나 3등: 공감을 가장 많이 받은 후기(운영자가 고르지 않는다)
+  await pres.locator(".seed-input").fill("7");
+  await pres.getByRole("button", { name: "추첨하기" }).click();
+  await pres.getByRole("button", { name: "숫자 7로 추첨 확정" }).click();
+  await pres.getByText("추첨 완료! 현장에서 정한 숫자 7").waitFor({ timeout: 8000 });
+  for (let k = 0; k < 4; k++) await next();
+  await pres.getByText(/3등 베스트 후기상/).waitFor();
+  await pres.getByText("가장 많은 공감을 받은 후기 ♥ 2").waitFor();
+  await pres.locator(".pres-title", { hasText: R }).waitFor();
   {
     const a = u[ANGEL];
     await H.tab(a, "결과");
@@ -294,14 +298,15 @@ const step = (s) => console.log("▶", s);
     assert.match(line, /\+ 수호천사 1/, line);
     console.log(`  발표 화면 '숨은 수호천사: ${ANGEL} → ${X}', ${ANGEL}의 응모권: ${line}`);
   }
-  console.log(`  발표 화면: ${R}의 짝 장면에 "정답! 1주차부터 알고 있었어요"와 가나의 미션(1주차 [보통] …), 명탐정 "가장 먼저 알아챈 사람: ${R}", 공감 1위 후기(♥ 2, ${R}님)`);
+  console.log(`  발표 화면: ${R}의 짝 장면에 "정답! 1주차부터 알고 있었어요"와 가나의 미션(1주차 [보통] …), 명탐정 "가장 먼저 알아챈 사람: ${R}", 3등 베스트 후기상 = 공감 1위 후기(♥ 2, ${R}님)`);
   // 참여자 결과 탭에도 같은 장면까지 열린다
   {
     const r = u[R];
     await H.tab(r, "결과");
     await H.panel(r, "그 밖의 기록").getByText("가장 먼저 알아챈 사람").waitFor();
-    await H.panel(r, "그 밖의 기록").getByText("가장 많은 공감을 받은 후기").waitFor();
-    console.log(`  ${R}의 결과 탭 '그 밖의 기록'에도 '가장 먼저 알아챈 사람'·'가장 많은 공감을 받은 후기'가 열림`);
+    const third = H.panel(r, "추첨·시상").locator("li.draw", { hasText: "3등 베스트 후기상" });
+    await third.getByText(`${R} · ♥ 공감 2`).waitFor();
+    console.log(`  ${R}의 결과 탭에도 '가장 먼저 알아챈 사람'과 3등 베스트 후기상(${R} · ♥ 공감 2)이 열림`);
   }
   await pres.getByRole("button", { name: "닫기" }).click();
 

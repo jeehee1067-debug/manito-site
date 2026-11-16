@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { assignManito, assignmentMemo, generateCodes } from "../src/lib/assign.js";
 import { angelQueue, needyReceivers, matchAngels, angelQueueStatus } from "../src/lib/angels.js";
-import { computeTickets, weightedDraw, partStandings, weeklyPartBoard, seededDraw, seededTop, drawAll, verifyDraws, DRAW_ORDER, noticedWeeks } from "../src/lib/scoring.js";
+import { pickBestReview, computeTickets, weightedDraw, partStandings, weeklyPartBoard, seededDraw, seededTop, drawAll, verifyDraws, DRAW_ORDER, noticedWeeks } from "../src/lib/scoring.js";
 import { pairChain, buildSlides, revealedUpTo } from "../src/lib/reveal.js";
 import { readFileSync } from "node:fs";
 import { seededRandom } from "../src/lib/random.js";
@@ -281,9 +281,13 @@ test("운영자 확인 '받았음': 인증이 없는 완료 알림을 그 마니
   };
   const plain = computeTickets(base);
   assert.deepEqual([plain.B.mission, plain.B.assumed], [1, 0], "확인이 없으면 인정되지 않는다");
-  // 2주차(무효 처리된 인증이 있음)와 3주차를 모두 '받았음'으로 확인해도 3주차만 인정된다
+  // 2주차(인증이 무효 처리됨)와 3주차(인증 없음)를 모두 '받았음'으로 확인하면 둘 다 인정된다
+  // (무효가 된 것은 받는 사람의 후기이고, 미션은 실제로 받았다고 운영자가 확인한 것). 3건이 모두 인정돼 은신도 받는다
   const marked = computeTickets({ ...base, verdicts: { C_2: "received", C_3: "received" } });
-  assert.deepEqual([marked.B.mission, marked.B.assumed, marked.B.hidden], [2, 1, 0]);
+  assert.deepEqual([marked.B.mission, marked.B.card, marked.B.assumed, marked.B.hidden], [3, 0, 2, 2]);
+  // 무효 처리된 인증은 '받았음' 확인이 없으면 인정되지 않는다(예전과 같다)
+  const only3 = computeTickets({ ...base, verdicts: { C_3: "received" } });
+  assert.deepEqual([only3.B.mission, only3.B.assumed, only3.B.hidden], [2, 1, 0]);
   // C 본인: 미션 1 + 인증 입력 1(무효 제외) 그대로. 받았다고 확인된 주차는 보상도 없다
   assert.deepEqual([marked.C.mission, marked.C.entries, marked.C.comp, marked.C.total], [1, 1, 0, plain.C.total]);
   assert.ok(marked.C.total > 0);
@@ -489,10 +493,18 @@ test("짝 현황: 마니또별 주차 상태(카드 고름·인증 대기·신�
 
   // 운영자가 확인할 주차: 완료를 알렸는데 인증이 없는 것(인증됐거나 무효 처리된 것은 빠진다)
   const key = (x) => `${x.giverPid}>${x.receiverPid}:${x.slot}:${x.reported ? "신고" : "-"}:${x.verdict || "-"}`;
-  assert.deepEqual(unresolvedSlots(pairRows(data)).map(key).sort(), ["A>B:2:신고:-", "B>C:1:신고:missing", "B>C:2:-:received"]);
+  // 인증이 무효 처리된 주차(A의 3주차)도 나온다: '받았음'으로 확인하면 마니또의 미션은 인정되기 때문
+  assert.deepEqual(unresolvedSlots(pairRows(data)).map(key).sort(), ["A>B:2:신고:-", "A>B:3:-:-", "B>C:1:신고:missing", "B>C:2:-:received"]);
+  assert.equal(unresolvedSlots(pairRows(data)).find((x) => x.giverPid === "A" && x.slot === 3).voided, true);
+  // 무효 처리된 인증을 '받았음'으로 확인하면 상태가 "받았음 확인"이 된다
+  assert.equal(pairRows({ ...data, verdicts: { B_3: { verdict: "received" } } }).find((r) => r.giverPid === "A").slots[3].status, "confirmed");
+  // 사이트가 전달한 칭찬 카드(운영자가 가리지 않은 것)는 인증이 없어도 인정: 확인할 목록에 나오지 않는다
+  const praise = pairRows({ ...data, redemptions: { A1: { voided: false } }, autoPraise: new Set(["B_3"]) });
+  assert.equal(praise.find((r) => r.giverPid === "A").slots[3].status, "auto");
+  assert.ok(!unresolvedSlots(praise).some((x) => x.giverPid === "A" && x.slot === 3));
   // 미션 진행 중에는 신고됐거나 이미 확인한 것만 본다
   const quiet = { ...data, reports: {}, verdicts: {} };
-  assert.equal(unresolvedSlots(pairRows(quiet)).length, 3);
+  assert.equal(unresolvedSlots(pairRows(quiet)).length, 4);
   assert.equal(unresolvedSlots(pairRows(quiet), { onlyReported: true }).length, 0);
   assert.equal(unresolvedSlots(pairRows(data), { onlyReported: true }).length, 3);
 });
@@ -612,6 +624,59 @@ test("추첨: 큰 상부터 정하면 응모권이 많을수록 더 큰 상을 �
   assert.ok(per(16, "any", 8) > per(8, "any", 22) && per(8, "any", 22) > per(2, "any", 24), "응모권이 많을수록 뭐라도 받을 확률이 높다");
   assert.ok(per(8, "t4", 22) > per(2, "t4", 24) * 2, "4등(큰 추첨 상)도 응모권이 많은 쪽이 더 자주");
   assert.ok(per(16, "any", 8) > 0.95, "응모권 최다 그룹은 거의 항상 받는다");
+});
+
+test("3주차 칭찬 카드는 사이트가 전달하므로 받는 사람이 인증하지 않아도 마니또의 미션으로 인정한다", () => {
+  const giverCodes = { A: { 1: "A1", 2: "A2", 3: "A3" }, B: { 1: "B1", 2: "B2", 3: "B3" }, C: { 1: "C1", 2: "C2", 3: "C3" } };
+  const base = {
+    people: ["A", "B", "C"].map((pid) => ({ pid })), assignments: { A: "B", B: "C", C: "A" }, giverCodes, missions: {}, guesses: {},
+    // A → B: 1·2주차는 B가 인증, 3주차 칭찬 카드는 전달만 됨(B가 인증 안 함)
+    redemptions: { A1: { receiverPid: "B", slot: 1, voided: false }, A2: { receiverPid: "B", slot: 2, voided: false } },
+    deliveries: [{ receiverPid: "B", slot: 1, kind: "mission" }, { receiverPid: "B", slot: 2, kind: "mission" }, { receiverPid: "B", slot: 3, kind: "praise" }],
+  };
+  const t = computeTickets(base);
+  assert.deepEqual([t.A.mission, t.A.assumed, t.A.hidden], [3, 1, 2], "칭찬 카드가 인정돼 3건을 채우고 은신도 받는다");
+  // 받는 사람(B)은 인증해야 자기 응모권을 받는다. 받았는데 인증을 안 한 것이라 보상도 없다
+  assert.deepEqual([t.B.entries, t.B.comp], [2, 0]);
+  // 1·2주차 완료 알림(mission)은 자동으로 인정되지 않는다
+  const noRed = computeTickets({ ...base, redemptions: {} });
+  assert.deepEqual([noRed.A.mission, noRed.A.assumed], [1, 1], "칭찬 카드만 인정");
+  // 운영자가 가린 칭찬 카드(막말 등)는 자동으로 인정하지 않는다
+  const hidden = computeTickets({ ...base, deliveries: base.deliveries.map((d) => (d.kind === "praise" ? { ...d, hidden: true } : d)) });
+  assert.deepEqual([hidden.A.mission, hidden.A.hidden], [2, 0]);
+  // 운영자가 "못 받음"으로 확인하면 인정하지 않고(확인이 먼저), 받는 사람에게 그 주차 보상
+  const missing = computeTickets({ ...base, verdicts: { B_3: "missing" } });
+  assert.deepEqual([missing.A.mission, missing.A.hidden, missing.B.comp], [2, 0, 0], "B는 자기 미션이 0건이라 보상 조건이 안 된다");
+  // 받는 사람이 칭찬 카드를 인증했는데 운영자가 무효 처리했다면 자동으로 인정하지 않는다('받았음' 확인이 있어야 한다)
+  const voided = { ...base, redemptions: { ...base.redemptions, A3: { receiverPid: "B", slot: 3, voided: true } } };
+  assert.equal(computeTickets(voided).A.mission, 2);
+  assert.equal(computeTickets({ ...voided, verdicts: { B_3: "received" } }).A.mission, 3);
+});
+
+test("3등 베스트 후기상: 공감을 가장 많이 받은 후기(자기 공감 제외), 동점이면 먼저 쓴 후기", () => {
+  const ts = (seconds) => ({ seconds, nanoseconds: 0 });
+  const redemptions = {
+    K1: { receiverPid: "A", review: "첫 후기", feedId: "f1", createdAt: ts(100), voided: false },
+    K2: { receiverPid: "B", review: "둘째 후기", feedId: "f2", createdAt: ts(200), voided: false },
+    K3: { receiverPid: "C", review: "무효 후기", feedId: "f3", createdAt: ts(50), voided: true },
+    K4: { receiverPid: "D", review: "가린 후기", feedId: "f4", createdAt: ts(60), voided: false },
+  };
+  const feed = { f1: {}, f2: {}, f3: { voided: true }, f4: { hidden: true } };
+  const like = (pid, feedId) => ({ pid, feedId });
+  // f1: A(본인), X, Y → 2표.  f2: X, Y → 2표.  f3·f4는 표가 많아도 제외
+  const feedLikes = Object.fromEntries([
+    like("A", "f1"), like("X", "f1"), like("Y", "f1"), like("X", "f2"), like("Y", "f2"),
+    like("X", "f3"), like("Y", "f3"), like("Z", "f3"), like("X", "f4"), like("Y", "f4"), like("Z", "f4"),
+  ].map((l, i) => [`l${i}`, l]));
+  // 동점(2표)이면 먼저 쓴 후기. 자기 공감은 세지 않아서 A의 후기는 3표가 아니라 2표다
+  assert.deepEqual(pickBestReview({ redemptions, feed, feedLikes }), { code: "K1", review: "첫 후기", receiverPid: "A", likes: 2 });
+  // 한 표가 더 들어오면 그 후기가 된다
+  assert.equal(pickBestReview({ redemptions, feed, feedLikes: { ...feedLikes, more: like("Z", "f2") } }).code, "K2");
+  // 자기 공감만 있는 후기는 0표라 수상하지 못한다. 공감이 하나도 없으면 수상자가 없다
+  assert.equal(pickBestReview({ redemptions, feed, feedLikes: { a: like("A", "f1") } }), null);
+  assert.equal(pickBestReview({ redemptions, feed, feedLikes: {} }), null);
+  // 수상 대상이 아닌 사람(불참·수상 제외)의 후기는 뺀다
+  assert.equal(pickBestReview({ redemptions, feed, feedLikes, ineligible: new Set(["A"]) }).code, "K2");
 });
 
 // ── 수호천사 자동 연결 ─────────────────────────────────────────────────────────

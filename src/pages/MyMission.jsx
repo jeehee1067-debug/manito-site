@@ -363,10 +363,13 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
           )}
           <p className={redeemed && !redeemed.voided ? "note" : "small"}>
             {redeemed
-              ? redeemed.voided ? "운영진이 이 인증을 무효 처리했어요." : `${receiverName}이 인증했어요.`
+              ? redeemed.voided
+                ? verdict === "received" ? "운영진이 인증(후기)은 무효 처리했지만, 전달된 것으로 확인해 미션은 인정돼요." : "운영진이 이 인증을 무효 처리했어요."
+                : `${receiverName}이 인증했어요.`
               : verdict === "received" ? "운영진이 전달된 것으로 확인했어요. 미션으로 인정돼요(카드 추가분은 직접 인증된 경우에만 있어요)."
                 : verdict === "missing" ? "운영진이 전달되지 않은 것으로 확인했어요. 이 주차는 미션으로 인정되지 않아요."
-                  : `${receiverName}의 인증을 기다리는 중이에요.`}
+                  : isPraise ? `칭찬 카드가 전달됐어요. 미션으로 인정돼요(${receiverName}이 인증하면 ${receiverName}도 응모권을 받아요).`
+                    : `${receiverName}의 인증을 기다리는 중이에요.`}
           </p>
           {!redeemed && !verdict && reported && (
             <Dialogue speaker="알림" tone="warn">
@@ -458,7 +461,18 @@ function AngelCard() {
   useEffect(() => onSnapshot(doc(db, "angelVolunteers", myPid), (s) => setVol(s.exists() && s.data().active), () => setVol(false)), [myPid]);
   useEffect(() => onSnapshot(query(collection(db, "angels"), where("angelPid", "==", myPid)), (s) => setTargets(s.docs.map((d) => d.id)), () => setTargets([])), [myPid]);
   if (vol === undefined) return null;
-  const canApply = config.phase <= PHASE.RUNNING;
+  // 지원은 미션이 시작된 뒤부터 받는다(먼저 지원한 순서로 연결되므로, 가입 기간에 먼저 가입한 사람이 앞서지 않게 출발선을 맞춘다)
+  const canApply = config.phase === PHASE.RUNNING;
+  if (config.phase === PHASE.SETUP) {
+    return (
+      <Panel title="수호천사 지원 (응모권을 더 받고 싶다면)">
+        <p className="small">
+          미션이 시작되면 여기에서 수호천사로 지원할 수 있어요. 마니또가 미션을 안 해서 아무것도 받지 못한 사람에게 <b>먼저 지원한 순서대로</b> 연결돼요(운영진이 고르지 않아요).
+          {vol && " 이미 지원해 두셨어요. 그 순서는 그대로 유지돼요."}
+        </p>
+      </Panel>
+    );
+  }
   if (!canApply && targets.length === 0) return null;
   async function toggle() {
     setMsg("");
@@ -585,24 +599,29 @@ function TicketSummary({ codes, missions, entries }) {
   useEffect(() => {
     if (!codes) return;
     const offs = Object.entries(codes).map(([slot, code]) =>
-      // 인증 안 됨: null, 인증됨: "match"(받은 것이 카드와 같음) 또는 "diff"(대상이 "카드와 달라요"로 인증 → 카드 추가분 없음)
+      // 인증 기록 없음: null, 인증됨: "match"(받은 것이 카드와 같음) 또는 "diff"(대상이 "카드와 달라요"로 인증 → 카드 추가분 없음), 운영진이 무효 처리: "void"
       onSnapshot(doc(db, "redemptions", code), (s) => setRedeemedSlots((prev) => ({
-        ...prev, [slot]: s.exists() && !s.data().voided ? (s.data().cardMatch === false ? "diff" : "match") : null,
+        ...prev, [slot]: !s.exists() ? null : s.data().voided ? "void" : s.data().cardMatch === false ? "diff" : "match",
       })), () => {})
     );
     return () => offs.forEach((o) => o());
   }, [codes]);
 
   const R = TICKET_RULES;
-  const mission = Object.values(redeemedSlots).filter(Boolean).length;
+  const ok = (st) => st === "match" || st === "diff";
+  // 3주차 칭찬 카드는 사이트로 전달되므로, 보내면 인증 기록이 없어도 미션으로 인정된다(scoring.js와 같은 기준.
+  // 운영진이 쪽지를 가리거나 "못 받음"으로 확인하면 집계에서 빠질 수 있다)
+  const praiseSent = Boolean(missions.done?.[PRAISE_SLOT]) && redeemedSlots[PRAISE_SLOT] == null;
+  const credited = (sl) => ok(redeemedSlots[sl]) || (Number(sl) === PRAISE_SLOT && praiseSent);
+  const mission = Object.keys(codes || {}).filter(credited).length;
   // 카드 추가분: 보통 +1, 도전 +2 (scoring.js computeTickets와 같은 기준)
   const card = Math.min(R.maxCardBonus, Object.entries(redeemedSlots)
     .filter(([, st]) => st === "match")
     .reduce((sum, [slot]) => sum + (R.cardBonus[missions.choices?.[slot]?.level] || 0), 0));
   // 끝까지 해야 받는 응모권(은신): 주차별로 인증됨 / 인증 대기(완료는 알렸는데 대상이 아직 인증 안 함) / 아직 안 함
   const slots = Object.keys(codes || {});
-  const waiting = slots.filter((sl) => !redeemedSlots[sl] && missions.done?.[sl]).length;
-  const notDone = slots.filter((sl) => !redeemedSlots[sl] && !missions.done?.[sl]).length;
+  const waiting = slots.filter((sl) => !credited(sl) && missions.done?.[sl]).length;
+  const notDone = slots.filter((sl) => !credited(sl) && !missions.done?.[sl]).length;
   const allMissions = R.hiddenMinMissions >= R.maxMissions;
   const hiddenNeed = allMissions ? `미션 ${R.maxMissions}건이 모두 인증돼야` : `미션이 ${R.hiddenMinMissions}건 이상 인증돼야`;
 
@@ -610,7 +629,7 @@ function TicketSummary({ codes, missions, entries }) {
     <Panel title="내 응모권 (지금까지)">
       <p className="ticket-count"><strong>{mission + card + entries}</strong>장</p>
       <ul className="plain tickets">
-        <li>마니또로서: 인증된 미션 {mission} / {R.maxMissions} + 카드 추가분 {card} / {R.maxCardBonus}(보통 +{R.cardBonus.normal}, 도전 +{R.cardBonus.hard})</li>
+        <li>마니또로서: 인증된 미션 {mission} / {R.maxMissions}{praiseSent ? "(전달된 칭찬 카드 포함)" : ""} + 카드 추가분 {card} / {R.maxCardBonus}(보통 +{R.cardBonus.normal}, 도전 +{R.cardBonus.hard})</li>
         <li>받는 사람으로서: 인증 입력 {entries} / {R.maxReceiverEntries}</li>
         <li className="muted">
           마지막에 더해지는 것: 끝까지 안 들키면 +{R.hidden}
