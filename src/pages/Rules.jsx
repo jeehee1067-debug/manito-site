@@ -1,6 +1,7 @@
 import { useApp } from "../App.jsx";
 import { Panel } from "../ui.jsx";
 import { PRIZES, PRIZES_ANNOUNCED, TICKET_RULES as R } from "../config/prizes.js";
+import { DEAL_COUNT } from "../lib/cards.js";
 import { EXTRA_NOTES_MAX, PROFILE_QUESTIONS, REVIEW_MIN, SCHEDULE, SPEND_GUIDE_WON, clueScheduleText, scheduleLabel, todayYmd } from "../lib/constants.js";
 
 // 참여자에게 보여 주는 규칙. 숫자는 prizes.js·constants.js에서 가져오므로 그쪽을 바꾸면 여기도 같이 바뀐다.
@@ -152,9 +153,9 @@ export default function Rules() {
         <ul className="rules-list">
           <li>"소액 비용" 표시가 있는 카드는 간식·음료처럼 내 돈이 들어요. 건당 {SPEND_GUIDE_WON.toLocaleString()}원 이하를 권장해요.</li>
           <li>돈을 쓰는 것도 정성이라, 비용 카드 미션이 인증되면 응모권 {R.costBonus}장을 더 받아요. <b>3주 동안 한 번만</b>이에요. 여러 번 하거나 비싼 것을 해도 {R.costBonus}장이니 부담 갖지 마세요.</li>
-          <li>난이도마다 돈이 안 드는 카드가 있어요. 그 밖의 응모권(미션·카드 추가분)은 돈이 들든 안 들든 똑같아요.</li>
+          <li>돈이 드는 카드만 나오는 일은 없어요(두 장 중 한 장은 돈이 안 드는 카드). 그 밖의 응모권(미션·카드 추가분)은 돈이 들든 안 들든 똑같아요.</li>
           <li>간식을 주기 전에 내 미션 화면의 "내 대상이 알려 준 것"에서 못 먹는 음식·알레르기를 꼭 확인해 주세요.</li>
-          <li>카드가 마음에 안 들면 "다른 카드 보기"로 같은 난이도의 다른 카드를 고를 수 있어요.</li>
+          <li>난이도를 고르면 그 난이도의 카드 {DEAL_COUNT}장이 나오고, 그중 하나를 골라요. 카드는 사람·주차마다 다르게 나오고 다시 뽑을 수는 없어요. 난이도는 완료를 알리기 전까지 다시 고를 수 있어요.</li>
           <li>카드 고르기·완료 알리기·인증은 그 주차가 열린 뒤에만 할 수 있어요. 지난 주차는 미션 진행 기간 안이면 늦게라도 할 수 있어요.</li>
           <li>미션(완료 알리기)은 12월 8일 미션 마감 때 닫혀요. 받은 미션 인증은 그 뒤에도 최종 지목이 마감되기 전까지 할 수 있어요(마감 직전에 받은 미션을 인증할 시간).</li>
           <li>완료를 알린 주차에는 "쪽지 더 보내기"로 쪽지를 더 보낼 수 있어요(주차마다 {EXTRA_NOTES_MAX}건까지). "3일 연속 응원 쪽지" 카드는 첫날 완료를 알린 뒤 이것으로 이어서 보내면 돼요.</li>

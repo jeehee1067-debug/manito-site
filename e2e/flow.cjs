@@ -259,27 +259,41 @@ const step = (s) => console.log("▶", s);
     console.log("  내 미션 화면:", warn);
   }
 
-  step("가나 1주차: 다른 카드 보기 → 도전 카드 고르고 완료");
+  step("가나 1주차: 난이도 고르기 → 카드 두 장 → 도전 카드 고르고 완료");
   {
     const page = users["가나"];
     const slot = panel(page, "1주차 미션");
-    await slot.locator(".cost-tag").first().waitFor(); // 안내 문구의 '소액 비용' 표시
-    const seen = new Set();
-    for (let k = 0; k < 13; k++) { seen.add(await slot.locator(".card.level-normal .card-text").innerText()); await slot.getByRole("button", { name: "다른 보통 카드 보기" }).click(); }
-    const withCost = await slot.locator(".card.level-normal .cost-tag").count();
-    console.log(`  보통 카드: '다른 카드 보기'로 ${seen.size}장을 돌려 봄 (다른 근무지면 10장, 아니면 13장)`);
-    assert.ok(seen.size >= 3);
-    // 비용 표시가 붙은 카드가 나올 때까지 넘겨서 화면 확인
-    for (let k = 0; k < 13 && !(await slot.locator(".card.level-normal .cost-tag").count()); k++) await slot.getByRole("button", { name: "다른 보통 카드 보기" }).click();
-    console.log("  비용 드는 보통 카드:", await slot.locator(".card.level-normal .card-text").innerText(), "/ 표시:", await slot.locator(".card.level-normal .cost-tag").count() ? "소액 비용" : "(없음)", withCost >= 0 ? "" : "");
+    // 처음에는 난이도 세 칸만 보이고 카드는 아직 없다
+    assert.equal(await slot.locator(".level-pick").count(), 3);
+    assert.equal(await slot.locator(".dealt .card").count(), 0);
+    await shot(page, "levels");
+    const dealt = async (level) => {
+      await slot.locator(`.level-pick.level-${level}`).click();
+      await slot.locator(".dealt .card").first().waitFor();
+      const texts = await slot.locator(".dealt .card .card-text").allInnerTexts();
+      const free = await slot.locator(".dealt .card:not(:has(.cost-tag))").count();
+      assert.equal(texts.length, 2, `${level} 카드는 두 장`);
+      assert.equal(new Set(texts).size, 2);
+      assert.ok(free >= 1, "돈이 안 드는 카드가 한 장은 있다");
+      assert.equal(await slot.getByRole("button", { name: /다른 .* 카드 보기/ }).count(), 0, "다시 뽑는 버튼은 없다");
+      await slot.getByRole("button", { name: "난이도 다시 고르기" }).click();
+      await slot.locator(".level-pick").first().waitFor();
+      return texts;
+    };
+    const normal1 = await dealt("normal");
+    const normal2 = await dealt("normal");
+    assert.deepEqual(normal2, normal1, "난이도를 다시 골라도 같은 두 장");
+    console.log("  보통 카드 두 장(다시 골라도 같음):", normal1.join(" / "));
+    await slot.locator(".level-pick.level-hard").click();
+    await slot.locator(".dealt .card").first().waitFor();
     await shot(page, "cards");
+    await slot.getByRole("button", { name: "난이도 다시 고르기" }).click();
   }
   let ganaCost = 0; // 가나가 고른 도전 카드가 "소액 비용" 카드면 비용 카드 추가분 +1
   for (const p of PEOPLE) {
     const page = users[p.name];
     const slot = panel(page, "1주차 미션");
-    await slot.locator(`.card.level-${p.name === "가나" ? "hard" : "easy"}`).click();
-    await slot.locator(".chosen").waitFor();
+    await require("./helpers.cjs").pickCard(slot, p.name === "가나" ? "hard" : "easy");
     if (p.name === "가나") ganaCost = (await slot.locator(".chosen .cost-tag").count()) > 0 ? 1 : 0;
     const box = slot.locator('input[type="checkbox"]');
     if (!(await box.isChecked())) await box.check();
@@ -501,7 +515,7 @@ const step = (s) => console.log("▶", s);
     await tab(g, "추리 보드");
     await tab(g, "내 미션");
     const slot = panel(g, "2주차 미션");
-    await slot.locator(".card.level-easy").click();
+    await require("./helpers.cjs").pickCard(slot, "easy");
     await slot.getByRole("button", { name: "다른 카드 고르기" }).waitFor();
     const code2 = await slot.locator(".code-tag strong").innerText();
     const r = await fetch(`${FS}/v1/projects/${PROJECT}/databases/(default)/documents/redemptions/${code2}`, {
@@ -522,7 +536,7 @@ const step = (s) => console.log("▶", s);
     await tab(g, "추리 보드");
     await tab(g, "내 미션");
     const slot = panel(g, "2주차 미션");
-    await slot.locator(".card.level-easy").click();
+    await require("./helpers.cjs").pickCard(slot, "easy");
     await slot.locator(".chosen").waitFor();
     await slot.getByRole("button", { name: "미션 완료 알리기" }).click();
     await panel(g, "2주차 미션 ✔").waitFor();

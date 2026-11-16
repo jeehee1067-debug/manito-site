@@ -5,7 +5,7 @@ export function secureRandom() {
   return buf[0] / 2 ** 32;
 }
 
-// 같은 사람에게 항상 같은 결과가 나와야 하는 곳(미션 카드 3장 제시, 현장 숫자로 하는 추첨)에 쓰는 시드 난수
+// 같은 사람에게 항상 같은 결과가 나와야 하는 곳(미션 카드 뽑기, 현장 숫자로 하는 추첨)에 쓰는 시드 난수
 export function seededRandom(seedText) {
   let h = 1779033703 ^ seedText.length;
   for (let i = 0; i < seedText.length; i++) {

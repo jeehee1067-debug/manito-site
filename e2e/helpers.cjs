@@ -139,4 +139,10 @@ async function runAwards(admin, { seed, nameOf, pickGrand, onSlide }) {
   const after = S.resolvePrizes(await prizeInput());
   return { S, before, after, t6: after.t6 || [] };
 }
-module.exports = { readTarget, showSecrets, BASE, P, panel, tab, reset, maker, setupAdmin, inviteCodes, signup, fillProfile, answersFor, readDoc, prizeInput, verifyMail, runAwards };
+// 미션 카드: 난이도를 고르면 그 난이도의 카드 두 장이 나온다. 그중 하나(기본: 첫 장)를 고른다.
+async function pickCard(slot, level, nth = 0) {
+  await slot.locator(`.level-pick.level-${level}`).click();
+  await slot.locator(`.dealt .card.level-${level}`).nth(nth).click();
+  await slot.locator(".chosen").waitFor();
+}
+module.exports = { pickCard, readTarget, showSecrets, BASE, P, panel, tab, reset, maker, setupAdmin, inviteCodes, signup, fillProfile, answersFor, readDoc, prizeInput, verifyMail, runAwards };

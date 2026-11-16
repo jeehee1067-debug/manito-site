@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { seededRandom } from "../src/lib/random.js";
 import { parseRosterLine, rosterSummary, summaryToList, sameSummary } from "../src/lib/roster.js";
 import { PRIZES, TICKET_RULES } from "../src/config/prizes.js";
+import { DEAL_COUNT, dealCards } from "../src/lib/cards.js";
 import { MISSION_CARDS, PROFILE_QUESTIONS, CLUE_COUNT, EXTRA_NOTES_MAX, CLUE_DATES, SCHEDULE, profileAnswerError } from "../src/lib/constants.js";
 import { pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../src/lib/pairs.js";
 
@@ -435,6 +436,29 @@ test("미션 카드: 삼행시 쪽지는 보통 카드, 3일 연속 쪽지는 �
   assert.deepEqual(find(/^손편지 써서/).map((c) => c.level), ["hard"]);
   const ids = Object.values(MISSION_CARDS).flat().map((c) => c.id);
   assert.equal(new Set(ids).size, ids.length, "카드 번호 중복 없음");
+});
+
+test("카드 뽑기: 난이도를 고르면 두 장, 사람·주차마다 고정, 돈이 드는 카드만 나오지 않음, 모든 카드가 누군가에게 나옴", () => {
+  const seen = { easy: new Set(), normal: new Set(), hard: new Set() };
+  for (let i = 1; i <= 54; i++) {
+    for (const slot of [1, 2]) {
+      for (const level of ["easy", "normal", "hard"]) {
+        for (const remote of [false, true]) {
+          const hand = dealCards(`p${i}`, slot, level, remote);
+          assert.equal(hand.length, DEAL_COUNT);
+          assert.equal(new Set(hand.map((c) => c.id)).size, DEAL_COUNT, "서로 다른 카드");
+          assert.ok(hand.every((c) => c.level === level && MISSION_CARDS[level].some((m) => m.id === c.id && m.text === c.text)));
+          assert.ok(hand.some((c) => !c.cost), "무비용 카드가 한 장은 있다");
+          if (remote) assert.ok(hand.every((c) => c.remote), "다른 근무지면 원격 카드만");
+          assert.deepEqual(dealCards(`p${i}`, slot, level, remote), hand, "다시 불러도 같은 카드");
+          if (!remote) hand.forEach((c) => seen[level].add(c.id));
+        }
+      }
+    }
+  }
+  for (const [level, cards] of Object.entries(MISSION_CARDS)) assert.equal(seen[level].size, cards.length, `${level}: 54명·2주차에 모든 카드가 한 번은 나온다`);
+  // 주차가 다르면 다른 카드가 나오는 사람이 있다(매주 같은 카드만 나오지 않는다)
+  assert.ok(Array.from({ length: 54 }, (_, i) => `p${i + 1}`).some((p) => dealCards(p, 1, "normal")[0].id !== dealCards(p, 2, "normal")[0].id));
 });
 
 test("파트 대항전: 완수율 1위 파트원에게 +1, 내 미션이 0건이면 없음, 불참자는 인원에서 빼고 0장", () => {

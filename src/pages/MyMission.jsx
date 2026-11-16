@@ -3,7 +3,7 @@ import { collection, doc, getDoc, increment, onSnapshot, query, serverTimestamp,
 import { db } from "../firebase.js";
 import { useApp, Loading } from "../App.jsx";
 import { EXTRA_NOTES_MAX, LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT, SCHEDULE, SPEND_GUIDE_WON, scheduleLabel, todayYmd } from "../lib/constants.js";
-import { seededRandom, shuffle } from "../lib/random.js";
+import { DEAL_COUNT, dealCards } from "../lib/cards.js";
 import { syncClues } from "../lib/sync.js";
 import { Avatar, Dialogue, Panel } from "../ui.jsx";
 import { Icon } from "../icons.jsx";
@@ -18,12 +18,9 @@ const LEVELS = ["easy", "normal", "hard"];
 const ALL_CARDS = Object.values(MISSION_CARDS).flat();
 const isCostCard = (cardId) => Boolean(ALL_CARDS.find((c) => c.id === cardId)?.cost);
 
-// 난이도별 카드 순서(사람·주차마다 고정). 맨 앞 장이 먼저 보이고 "다른 카드 보기"를 누르면 다음 장으로 넘어간다.
-// 대상이 다른 근무지면 원격으로 할 수 있는 카드만. 돈이 드는 카드가 나와도 넘기면 무비용 카드가 나온다.
-function cardDeck(pid, slot, level, remoteOnly) {
-  const list = MISSION_CARDS[level].filter((c) => !remoteOnly || c.remote);
-  return shuffle(list, seededRandom(`${pid}:${slot}:${level}:${remoteOnly ? "r" : "a"}`)).map((c) => ({ ...c, level }));
-}
+// 난이도 고르기 화면에 적는 한 줄 설명(규칙 탭 "미션 카드 난이도"와 같은 기준)
+const LEVEL_HINT = { easy: "사이트 쪽지 한 통", normal: "공들인 쪽지 또는 간단한 실물", hard: "직접 전달 · 만든 것 · 여러 날" };
+const stars = (level) => <span className="card-stars" aria-hidden="true">{"★".repeat(LEVELS.indexOf(level) + 1)}<i>{"★".repeat(2 - LEVELS.indexOf(level))}</i></span>;
 
 export default function MyMission() {
   const { myPid, nameOf, config, byPid, inbox, fromReceiver, angelInbox } = useApp();
@@ -221,7 +218,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
   const [thanks, setThanks] = useState(null);
   const [reported, setReported] = useState(false); // 대상이 "받은 게 없어요"로 알렸는지
   const [verdict, setVerdict] = useState(null); // 운영진 확인 결과: received / missing
-  const [offset, setOffset] = useState({ easy: 0, normal: 0, hard: 0 }); // 난이도별로 몇 번째 카드를 보고 있는지
+  const [level, setLevel] = useState(null); // 고른 난이도. 고르면 그 난이도의 카드 DEAL_COUNT장이 나온다(lib/cards.js)
   const isPraise = slot === PRAISE_SLOT;
 
   // 내 코드의 인증 문서(받는 사람과 나, 운영자만 읽는다)
@@ -300,38 +297,52 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
 
       {open && !done && !isPraise && !choice && (
         <>
-          <p className="small">
-            세 장 중 하나를 골라 주세요. 대상이 인증하면 보통은 응모권 {TICKET_RULES.cardBonus.normal}장, 도전은 {TICKET_RULES.cardBonus.hard}장을 더 받아요.
-            마음에 안 들면 "다른 카드 보기"로 같은 난이도의 다른 카드를 볼 수 있어요.
-          </p>
-          <p className="small">
-            <span className="cost-tag">소액 비용</span> 표시는 간식·음료처럼 내 돈이 드는 카드예요. 건당 {SPEND_GUIDE_WON.toLocaleString()}원 이하를 권장해요.
-            비용 카드 미션이 인증되면 응모권 {TICKET_RULES.costBonus}장을 더 받아요(3주 동안 한 번만. 여러 번 해도 {TICKET_RULES.costBonus}장이에요).
-          </p>
-          <div className="cards">
-            {LEVELS.map((level) => {
-              const deck = cardDeck(myPid, slot, level, remote);
-              const c = deck[offset[level] % deck.length];
-              return (
-                <div key={level} className="card-wrap">
-                  <button className={`card level-${c.level}`} onClick={() => choose(c)}>
+          {!level && (
+            <>
+              <p className="small">
+                먼저 난이도를 골라 주세요. 고르면 그 난이도의 카드 {DEAL_COUNT}장이 나오고, 그중 하나를 고르면 돼요.
+                대상이 인증하면 보통은 응모권 {TICKET_RULES.cardBonus.normal}장, 도전은 {TICKET_RULES.cardBonus.hard}장을 더 받아요.
+              </p>
+              <div className="cards">
+                {LEVELS.map((lv) => (
+                  <button key={lv} type="button" className={`card level-pick level-${lv}`} onClick={() => setLevel(lv)}>
+                    <span className="card-head">
+                      <span className="card-level">{LEVEL_LABEL[lv]}</span>
+                      {stars(lv)}
+                      <span className="card-reward">응모권 +{1 + (TICKET_RULES.cardBonus[lv] || 0)}</span>
+                    </span>
+                    <span className="card-text">{LEVEL_HINT[lv]}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+          {level && (
+            <>
+              <p className="small">
+                이번 주 {LEVEL_LABEL[level]} 카드예요. 하나를 골라 주세요. 카드는 사람·주차마다 다르게 나오고, 다시 뽑을 수는 없어요.
+              </p>
+              <p className="small">
+                <span className="cost-tag">소액 비용</span> 표시는 간식·음료처럼 내 돈이 드는 카드예요. 건당 {SPEND_GUIDE_WON.toLocaleString()}원 이하를 권장해요.
+                비용 카드 미션이 인증되면 응모권 {TICKET_RULES.costBonus}장을 더 받아요(3주 동안 한 번만. 여러 번 해도 {TICKET_RULES.costBonus}장이에요).
+                돈이 드는 카드만 나오는 일은 없어요.
+              </p>
+              <div className="cards dealt">
+                {dealCards(myPid, slot, level, remote).map((c) => (
+                  <button key={c.id} type="button" className={`card level-${c.level}`} onClick={() => choose(c)}>
                     <span className="card-head">
                       <span className="card-level">{LEVEL_LABEL[c.level]}</span>
-                      <span className="card-stars" aria-hidden="true">{"★".repeat(LEVELS.indexOf(c.level) + 1)}<i>{"★".repeat(2 - LEVELS.indexOf(c.level))}</i></span>
+                      {stars(c.level)}
                       {c.cost && <span className="cost-tag">소액 비용</span>}
                       <span className="card-reward">응모권 +{1 + (TICKET_RULES.cardBonus[c.level] || 0)}</span>
                     </span>
                     <span className="card-text">{c.text}</span>
                   </button>
-                  {deck.length > 1 && (
-                    <button type="button" className="text-btn" onClick={() => setOffset((o) => ({ ...o, [level]: o[level] + 1 }))}>
-                      다른 {LEVEL_LABEL[level]} 카드 보기
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                ))}
+              </div>
+              <button type="button" className="text-btn" onClick={() => setLevel(null)}>난이도 다시 고르기</button>
+            </>
+          )}
           {error && <p className="error" role="alert">{error}</p>}
         </>
       )}

@@ -75,7 +75,7 @@ const val = (v) => v.stringValue ?? (v.integerValue !== undefined ? Number(v.int
   const DELIVER = ["가나", "다라", "사아"];
   for (const name of DELIVER) {
     const page = users[name], slot = panel(page, "1주차 미션");
-    await slot.locator(".card.level-easy").click();
+    await H.pickCard(slot, "easy");
     await slot.locator(".chosen").waitFor();
     await slot.locator("textarea").fill(`${name}의 쪽지`);
     await slot.getByRole("button", { name: "미션 완료 알리기" }).click();
