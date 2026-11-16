@@ -54,7 +54,7 @@ async function tokenOf(email) {
   {
     const g = u["가나"]; await g.reload();
     const slot = H.panel(g, "1주차 미션");
-    await slot.locator(".card.level-hard").click(); await slot.locator(".chosen").waitFor();
+    await H.pickCard(slot, "hard");
     const hardText = await slot.locator(".chosen span").nth(1).innerText();
     await slot.locator("textarea").fill("가나의 응원 쪽지");
     await slot.getByRole("button", { name: "미션 완료 알리기" }).click();
@@ -139,7 +139,7 @@ async function tokenOf(email) {
   {
     const g = u["다라"]; await H.tab(g, "추리 보드"); await H.tab(g, "내 미션");
     const slot = H.panel(g, "1주차 미션");
-    await slot.locator(".card.level-hard").click(); await slot.locator(".chosen").waitFor();
+    await H.pickCard(slot, "hard");
     const hardText = await slot.locator(".chosen span").nth(1).innerText();
     const code = (await slot.locator(".code-tag strong").innerText()).trim(); // 실물과 함께 전한 메모의 코드
     // 받는 사람이 완료 알림보다 먼저 인증한다: 카드가 아직 안 보이므로 확인 칸이 없다

@@ -68,7 +68,7 @@ const step = (s) => console.log("▶", s);
     assert.match(await todoOf(g), /1주차 미션 카드 고르기/);
     const slot = H.panel(g, "1주차 미션");
     await slot.getByText(/보통은 응모권 1장, 도전은 2장을 더 받아요/).waitFor();
-    await slot.locator(".card.level-normal").click(); await slot.locator(".chosen").waitFor();
+    await H.pickCard(slot, "normal");
     assert.match(await todoOf(g), /1주차 미션 하고 "완료 알리기"/);
     await H.tab(g, "피드"); // 가나는 다른 탭에 있다가 나중에 한마디 표시를 본다
   }

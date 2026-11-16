@@ -54,7 +54,7 @@ const H = require("./helpers.cjs");
   step(`${lateGiver}이(가) 아직 가입 안 한 사아에게 1주차 미션을 하고 완료를 알린다`);
   {
     const p = u[lateGiver], slot = H.panel(p, "1주차 미션");
-    await slot.locator(".card.level-easy").click();
+    await H.pickCard(slot, "easy");
     await slot.locator(".chosen").waitFor();
     await slot.locator("textarea").fill("가입하면 보세요! 책상 위에 간식을 두었어요.");
     await slot.getByRole("button", { name: "미션 완료 알리기" }).click();
@@ -113,7 +113,7 @@ const H = require("./helpers.cjs");
     // 자기 1주차 미션
     await H.tab(p, "내 미션");
     const slot = H.panel(p, "1주차 미션");
-    await slot.locator(".card.level-easy").click();
+    await H.pickCard(slot, "easy");
     await slot.locator(".chosen").waitFor();
     await slot.locator("textarea").fill("늦었지만 저도 시작해요!");
     await slot.getByRole("button", { name: "미션 완료 알리기" }).click();

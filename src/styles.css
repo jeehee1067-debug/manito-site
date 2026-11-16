@@ -263,7 +263,7 @@ textarea.pk-input { resize: vertical; line-height: 1.6; }
 
 /* ---------- 미션 카드 ---------- */
 .cards { display: grid; gap: 10px; grid-template-columns: 1fr; }
-@media (min-width: 620px) { .cards { grid-template-columns: repeat(3, 1fr); } }
+@media (min-width: 620px) { .cards { grid-template-columns: repeat(3, 1fr); } .cards.dealt { grid-template-columns: repeat(2, 1fr); } }
 /* 미션 카드: 난이도 색 띠(왼쪽), 별, 받는 응모권. 누르면 살짝 눌린다 */
 .card {
   position: relative; overflow: hidden; text-align: left; display: flex; flex-direction: column; gap: 6px; cursor: pointer;
