@@ -93,12 +93,16 @@ async function tokenOf(email) {
     assert.equal(fd.fields.review.stringValue, "");
     assert.equal(fd.fields.hidden.booleanValue, true);
     assert.equal((await (await fetch(`${FS}/hiddenFeed/${fid}`, { headers: owner })).json()).fields.review.stringValue, REVIEW);
+    // 피드는 실시간으로 바뀌지 않는다: 열어 둔 화면에는 "새 글 확인"을 누르기 전까지 그대로 보인다
+    await feedPanel.getByRole("button", { name: "새 글 확인" }).click();
     await feedPanel.getByText("첫 인증이 올라오면 여기에 보여요.").waitFor();
     assert.equal(await feedPanel.getByText(REVIEW).count(), 0);
     // 운영 화면에는 인증 문서의 후기가 그대로 보인다
     await mod.getByText(REVIEW).waitFor();
     console.log("  '피드에서 가리기' → 피드 문서의 후기는 빈 값, 원문은 hiddenFeed(운영자 전용), 참여자 피드에서 사라짐");
     await mod.getByRole("button", { name: "피드에 다시 보이기" }).click();
+    await mod.locator("span.small.muted", { hasText: "· 피드에서 가림" }).waitFor({ state: "detached" });
+    await feedPanel.getByRole("button", { name: "새 글 확인" }).click();
     await feedPanel.getByText(REVIEW).waitFor();
     assert.equal((await fetch(`${FS}/hiddenFeed/${fid}`, { headers: owner })).status, 404);
     console.log("  '피드에 다시 보이기' → 원문으로 되돌아오고 hiddenFeed는 지워짐");

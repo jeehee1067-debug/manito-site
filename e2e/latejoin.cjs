@@ -96,6 +96,37 @@ const H = require("./helpers.cjs");
   // 마니또 화면에도 인증이 반영된다
   await H.panel(u[lateGiver], "1주차 미션 ✔").getByText(/인증했어요\.$/).waitFor(); // 대상 이름은 가려져 있을 수 있다("내 대상이 인증했어요.")
 
+  step("미션 마감 뒤(최종 지목 단계)에도 받은 미션은 인증할 수 있다: 마감 직전에 온 미션을 인증할 시간");
+  {
+    await H.tab(admin, "운영");
+    await admin.getByRole("button", { name: "다음 단계로: 최종 지목" }).click();
+    await admin.locator(".hud-chip", { hasText: "최종 지목" }).waitFor();
+    assert.ok(dialogs.some((d) => d.includes("받은 미션 인증은 최종 지목이 마감될 때까지 할 수 있어요")), "미션 마감 확인창에 인증 유예 안내");
+    const t = u[target[LATE]]; // 사아의 대상: 사아가 보낸 1주차 미션을 아직 인증하지 않았다
+    await t.reload();
+    await H.tab(t, "추리 보드");
+    await H.panel(t, "인증하기").getByText("미션은 마감됐어요. 받은 미션은 최종 지목이 마감되기 전까지 인증할 수 있어요.").waitFor();
+    const inbox = H.panel(t, "마니또에게서 온 것");
+    const entry = H.panel(t, "인증하기");
+    await entry.getByPlaceholder("K7Q2").fill(await inbox.locator("strong.mono").first().innerText());
+    await entry.locator("textarea").fill("마감 뒤에 인증해요. 늦게 시작했는데도 챙겨 줘서 고마워요!");
+    await entry.getByRole("button", { name: "인증하기" }).click();
+    await t.getByText("인증했어요. 응모권 1장이 쌓였어요.").waitFor();
+    // 미션(완료 알리기)은 마감됐다: 마니또 화면에 완료 알리기 버튼이 없다
+    const g = u[EARLY.find((n) => n !== lateGiver && n !== target[LATE]) || EARLY[0]];
+    await g.reload();
+    await g.locator(".target-name").waitFor();
+    assert.equal(await g.getByRole("button", { name: "미션 완료 알리기" }).count(), 0, "미션 마감 뒤에는 완료를 알릴 수 없다");
+    console.log(`  최종 지목 단계: ${target[LATE]}이(가) 사아의 미션을 인증함(유예), 완료 알리기는 닫힘`);
+    // 지목까지 마감되면 인증도 닫힌다
+    await admin.getByRole("button", { name: "다음 단계로: 마감" }).click();
+    await admin.locator(".hud-chip", { hasText: "마감" }).waitFor();
+    await t.reload();
+    await H.tab(t, "추리 보드");
+    await H.panel(t, "인증하기").getByText("인증은 미션 진행 기간과 최종 지목 기간에 할 수 있어요.").waitFor();
+    assert.ok(await H.panel(t, "인증하기").getByRole("button", { name: "인증하기" }).isDisabled());
+  }
+
   await browser.close();
   console.log("\n콘솔 오류·경고", errors.length, "건"); errors.slice(0, 8).forEach((e) => console.log("  ", e));
   if (errors.length) process.exit(1);

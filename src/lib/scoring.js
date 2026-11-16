@@ -215,16 +215,18 @@ export function seededDraw(tickets, step, seed, exclude = new Set()) {
 }
 
 /**
- * 응모권이 많은 순으로 count명(2등 베스트 마니또). 추첨이 아니라 순위이고, 경계에서 동점일 때만 seed로 가른다.
- * 반환은 응모권이 많은 순서. 응모권 0장과 exclude(1등 당첨자)는 뺀다.
+ * 응모권이 많은 순으로 count명(2등 베스트 마니또). 추첨이 아니라 순위다.
+ * 동점이면 tieBreak(내 미션에 달린 후기가 남에게 받은 공감 수, missionLikes)가 많은 쪽, 그래도 같을 때만 seed로 가른다.
+ * 모두가 열심히 하면 응모권이 같은 사람이 수십 명 나올 수 있어서(지목·은신만 갈린다), 운으로만 정해지지 않게 한 것이다.
+ * 반환은 순위 순서. 응모권 0장과 exclude(1등 당첨자)는 뺀다.
  */
-export function seededTop(tickets, step, seed, exclude = new Set()) {
+export function seededTop(tickets, step, seed, exclude = new Set(), tieBreak = {}) {
   const rand = seededRandom(`${String(seed).trim()}|${step.key}`);
   return Object.entries(tickets)
     .filter(([pid, n]) => n > 0 && !exclude.has(pid))
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([pid, n]) => ({ pid, n, tie: rand() }))
-    .sort((a, b) => b.n - a.n || a.tie - b.tie)
+    .map(([pid, n]) => ({ pid, n, likes: tieBreak[pid] || 0, tie: rand() }))
+    .sort((a, b) => b.n - a.n || b.likes - a.likes || a.tie - b.tie)
     .slice(0, step.count)
     .map((x) => x.pid);
 }
@@ -239,14 +241,15 @@ export const DRAW_ORDER = [
 /**
  * 한 번에 추첨: 현장 숫자 하나로 큰 상부터 차례로 정한다. 앞에서 받은 사람은 뒤 순서에서 빠진다(한 사람은 하나만).
  * 작은 상부터 뽑으면 응모권이 많은 사람일수록 작은 상에 먼저 뽑혀 큰 상 기회를 잃기 때문에 큰 상부터 정한다.
+ * tieBreak: { pid: 내 미션 후기가 받은 공감 수 } 2등 동점을 가르는 값(집계할 때 results/public.tieBreak에 저장한 것)
  * 반환: { grand: { seed, winners }, best: { seed, winners }, t4: …, t5: …, t6: … } (results/public.draws에 그대로 저장)
  */
-export function drawAll(tickets, seed, order = DRAW_ORDER) {
+export function drawAll(tickets, seed, order = DRAW_ORDER, tieBreak = {}) {
   const s = String(seed).trim();
   const won = new Set();
   const out = {};
   for (const step of order) {
-    const winners = step.kind === "top" ? seededTop(tickets, step, s, won) : seededDraw(tickets, step, s, won);
+    const winners = step.kind === "top" ? seededTop(tickets, step, s, won, tieBreak) : seededDraw(tickets, step, s, won);
     winners.forEach((pid) => won.add(pid));
     out[step.key] = { seed: s, winners };
   }
@@ -257,12 +260,12 @@ export function drawAll(tickets, seed, order = DRAW_ORDER) {
  * 추첨 검증: 저장된 결과(draws)를 저장된 숫자로 다시 계산해 같은지 본다.
  * 반환: [{ key, ok, expected, saved }]. 한 번에 뽑은 결과가 아니면(칸이 빠졌거나 숫자가 칸마다 다르면) 모두 ok = false.
  */
-export function verifyDraws(tickets, draws, order = DRAW_ORDER) {
+export function verifyDraws(tickets, draws, order = DRAW_ORDER, tieBreak = {}) {
   const have = order.filter((s) => draws?.[s.key]);
   if (have.length === 0) return [];
   const seeds = new Set(have.map((s) => draws[s.key].seed ?? null));
   const seed = have.length === order.length && seeds.size === 1 ? [...seeds][0] : null;
-  const expected = seed == null ? null : drawAll(tickets, seed, order);
+  const expected = seed == null ? null : drawAll(tickets, seed, order, tieBreak);
   return order.map((s) => {
     const saved = draws?.[s.key]?.winners || [];
     const exp = expected ? expected[s.key].winners : null;
@@ -271,29 +274,47 @@ export function verifyDraws(tickets, draws, order = DRAW_ORDER) {
 }
 
 /**
- * 3등 베스트 후기상: 공감(♥)을 가장 많이 받은 후기. 운영진이 고르지 않는다.
- * - 자기 후기에 누른 공감은 세지 않는다(피드 글에는 글쓴이가 없어서 보안 규칙으로는 막을 수 없다).
- * - 무효 처리됐거나 피드에서 가린 후기, 수상 대상이 아닌 사람(불참·수상 제외)의 후기는 뺀다.
- * - 공감이 1개도 없으면 수상자가 없다. 동점이면 먼저 쓴 후기(인증 시각), 그래도 같으면 코드 순.
- * redemptions: { 코드: { receiverPid, review, voided, feedId, createdAt } }, feed: { 글ID: { voided, hidden } }
- * feedLikes: { 문서ID: { pid, feedId } }, ineligible: Set(pid)
+ * 후기별 "남이 누른 공감 수". 피드 글의 공감 수(feed.likes)에서 그 미션의 당사자 두 사람
+ * (후기를 쓴 받는 사람, 그 미션을 한 마니또)이 누른 공감을 뺀다. 피드 글에는 글쓴이가 없어서 보안 규칙으로는 막을 수 없다.
+ * 무효 처리됐거나 피드에서 가린 후기는 뺀다.
+ * redemptions: { 코드: { receiverPid, review, voided, feedId, createdAt } }, feed: { 글ID: { likes, voided, hidden } }
+ * giverOfCode: { 코드: giverPid }, ownLikes: Set("글ID_pid") 당사자가 누른 공감 문서 ID(feedLikes에서 그 문서만 골라 읽은 것)
+ * 반환: [{ code, receiverPid, giverPid, review, likes, at: [초, 나노초] }]
+ */
+export function reviewLikes({ redemptions = {}, feed = {}, giverOfCode = {}, ownLikes = new Set() }) {
+  const when = (t) => (t && typeof t.seconds === "number" ? [t.seconds, t.nanoseconds || 0] : [Infinity, 0]);
+  return Object.entries(redemptions)
+    .filter(([, r]) => !r.voided && r.feedId && feed[r.feedId] && !feed[r.feedId].voided && !feed[r.feedId].hidden)
+    .map(([code, r]) => {
+      const giverPid = giverOfCode[code] || null;
+      const own = [r.receiverPid, giverPid].filter((pid) => pid && ownLikes.has(`${r.feedId}_${pid}`)).length;
+      return { code, receiverPid: r.receiverPid, giverPid, review: String(r.review || "").slice(0, 300), likes: Math.max(0, (feed[r.feedId].likes || 0) - own), at: when(r.createdAt) };
+    });
+}
+
+/**
+ * 3등 베스트 후기상: 남에게 공감을 가장 많이 받은 후기(reviewLikes 결과에서). 운영진이 고르지 않는다.
+ * 수상 대상이 아닌 사람(불참·수상 제외)의 후기는 빼고, 공감이 1개도 없으면 수상자가 없다.
+ * 동점이면 먼저 쓴 후기(인증 시각), 그래도 같으면 코드 순.
  * 반환: { code, review, receiverPid, likes } 또는 null
  */
-export function pickBestReview({ redemptions = {}, feed = {}, feedLikes = {}, ineligible = new Set() }) {
-  const likers = {};
-  for (const l of Object.values(feedLikes)) if (l?.feedId && l?.pid) (likers[l.feedId] ||= new Set()).add(l.pid);
-  const when = (t) => (t && typeof t.seconds === "number" ? [t.seconds, t.nanoseconds || 0] : [Infinity, 0]);
-  const rows = Object.entries(redemptions)
-    .filter(([, r]) => !r.voided && r.feedId && feed[r.feedId] && !feed[r.feedId].voided && !feed[r.feedId].hidden && !ineligible.has(r.receiverPid))
-    .map(([code, r]) => ({
-      code, review: String(r.review || "").slice(0, 300), receiverPid: r.receiverPid, at: when(r.createdAt),
-      likes: [...(likers[r.feedId] || [])].filter((pid) => pid !== r.receiverPid).length,
-    }))
-    .filter((x) => x.likes > 0)
+export function pickBestReview(rows, ineligible = new Set()) {
+  const list = rows
+    .filter((x) => x.likes > 0 && !ineligible.has(x.receiverPid))
     .sort((a, b) => b.likes - a.likes || a.at[0] - b.at[0] || a.at[1] - b.at[1] || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
-  if (rows.length === 0) return null;
-  const { code, review, receiverPid, likes } = rows[0];
+  if (list.length === 0) return null;
+  const { code, review, receiverPid, likes } = list[0];
   return { code, review, receiverPid, likes };
+}
+
+/**
+ * 2등 동점을 가르는 값: 마니또마다 "내 미션에 달린 후기가 남에게 받은 공감 수"의 합(reviewLikes 결과에서).
+ * 반환: { giverPid: 합 } (0인 사람은 넣지 않는다)
+ */
+export function missionLikes(rows) {
+  const out = {};
+  for (const x of rows) if (x.giverPid && x.likes > 0) out[x.giverPid] = (out[x.giverPid] || 0) + x.likes;
+  return out;
 }
 
 /**

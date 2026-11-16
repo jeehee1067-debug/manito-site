@@ -136,7 +136,7 @@ const step = (s) => console.log("▶", s);
     await entry.getByRole("button", { name: "인증하기" }).click();
     await r.getByText("인증했어요. 응모권 1장이 쌓였어요.").waitFor();
     // 공감: 두 사람이 공감, 같은 사람은 한 번만
-    for (const n of NAMES.filter((x) => x !== R).slice(0, 2)) {
+    for (const n of NAMES.filter((x) => x !== R && x !== "가나")) { // 글쓴이(R)와 그 미션의 마니또(가나)가 아닌 두 사람: 이 두 사람의 공감만 센다
       const p = u[n];
       await H.tab(p, "피드");
       const post = H.panel(p, "익명 피드").locator(".dialogue", { hasText: "서랍 속 간식 덕분에" });

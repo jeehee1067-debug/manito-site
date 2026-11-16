@@ -22,7 +22,7 @@ async function runDrawAll(seed) {
   await runTransaction(db, async (tx) => {
     const cur = (await tx.get(resultRef())).data();
     if (Object.keys(cur.draws || {}).length > 0) throw new Error("already");
-    tx.update(resultRef(), { draws: drawAll(cur.tickets, seed) });
+    tx.update(resultRef(), { draws: drawAll(cur.tickets, seed, DRAW_ORDER, cur.tieBreak || {}) });
   });
 }
 const drawError = (err) => (err.message === "already" ? "이미 추첨했어요. 추첨 결과는 다시 뽑거나 바꿀 수 없어요."
@@ -173,8 +173,9 @@ export default function Reveal() {
       <Panel title="추첨·시상">
         <p className="small">
           현장에서 정한 숫자 하나(예: 참석자가 부른 네 자리 숫자)로 큰 상부터 한 번에 정해요: {DRAW_ORDER.map(rankWord).join(" → ")}. 한 사람은 그중 하나만 받아요.
-          {" "}{PRIZES.bestManito.label}는 추첨이 아니라 1등 당첨자를 뺀 응모권 최다 {PRIZES.bestManito.count}명이에요(동점이면 같은 숫자로 가려요).
-          {" "}{PRIZES.bestReview.label}은 익명 피드에서 공감(♥)을 가장 많이 받은 후기예요(자기 후기에 누른 공감은 세지 않고, 동점이면 먼저 쓴 후기). 발표는 {rankWord(PRIZES.tiers[PRIZES.tiers.length - 1])}부터 하고, 한 번 뽑은 결과는 다시 뽑을 수 없어요.
+          {" "}{PRIZES.bestManito.label}는 추첨이 아니라 1등 당첨자를 뺀 응모권 최다 {PRIZES.bestManito.count}명이에요.
+          동점이면 내 미션에 달린 후기가 받은 공감(♥)이 많은 사람, 그래도 같으면 같은 숫자로 가려요.
+          {" "}{PRIZES.bestReview.label}은 익명 피드에서 공감(♥)을 가장 많이 받은 후기예요(동점이면 먼저 쓴 후기). 공감 수에서 그 미션의 당사자 두 사람(후기를 쓴 사람과 그 미션을 한 마니또)이 누른 것은 빼요. 발표는 {rankWord(PRIZES.tiers[PRIZES.tiers.length - 1])}부터 하고, 한 번 뽑은 결과는 다시 뽑을 수 없어요.
           같은 숫자로 누가 다시 계산해도 같은 결과가 나오니 발표가 끝나면 아래 "추첨 검증"으로 확인할 수 있어요.
         </p>
         {!drawn && isAdmin && config.phase === PHASE.REVEAL && <DrawForm />}
@@ -191,7 +192,7 @@ export default function Reveal() {
                   {people.map((pid) => (
                     <span key={pid} className="winner">
                       <Avatar pid={pid} size={48} /><span>{nameOf(pid)}</span>
-                      {isBest && <span className="small muted">{r.tickets?.[pid] ?? 0}장</span>}
+                      {isBest && <span className="small muted">{r.tickets?.[pid] ?? 0}장{r.tieBreak?.[pid] ? ` · ♥ ${r.tieBreak[pid]}` : ""}</span>}
                     </span>
                   ))}
                 </div>
@@ -203,7 +204,7 @@ export default function Reveal() {
         </ol>
         {drawn && (isAdmin || shown.has(`draw_${PRIZES.grand.key}`)) && (
           <div className="stack tight">
-            <button type="button" className="pk-btn sm" onClick={() => setCheck(verifyDraws(r.tickets, draws))}>추첨 검증</button>
+            <button type="button" className="pk-btn sm" onClick={() => setCheck(verifyDraws(r.tickets, draws, DRAW_ORDER, r.tieBreak || {}))}>추첨 검증</button>
             {check && (
               <ul className="plain">
                 {check.map((x) => (
@@ -492,7 +493,7 @@ function Slide({ r, slide, nameOf, pairCount }) {
                   <p className="pres-sub drum">응모권이 가장 많은 {PRIZES.bestManito.count}명 · 두구두구…</p>
                   <div className="pop delay"><Avatar pid={pid} size={200} /></div>
                   <h1 className="pres-title pop delay">{nameOf(pid)}</h1>
-                  <p className="pres-sub pop delay">응모권 {r.tickets?.[pid] ?? 0}장</p>
+                  <p className="pres-sub pop delay">응모권 {r.tickets?.[pid] ?? 0}장{r.tieBreak?.[pid] ? ` · 미션 후기 공감 ♥ ${r.tieBreak[pid]}` : ""}</p>
                 </>
               )}
         </div>

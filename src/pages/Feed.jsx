@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { collection, doc, getDocs, increment, limit, onSnapshot, orderBy, query, serverTimestamp, where, writeBatch } from "firebase/firestore";
+import { collection, doc, getDocs, increment, limit, orderBy, query, serverTimestamp, where, writeBatch } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp } from "../App.jsx";
 import { PHASE } from "../lib/constants.js";
@@ -11,42 +11,65 @@ import { Dialogue, Panel } from "../ui.jsx";
 // 읽기 줄이기: 최근 PAGE건씩. 감사 답장은 같은 문서에 들어 있어서 따로 읽지 않는다.
 const PAGE = 30;
 
+// 내가 공감한 글 목록은 사이트를 열고 처음 피드에 들어올 때 한 번만 읽는다(탭을 오갈 때마다 다시 읽지 않게).
+const likedCache = new Map(); // pid → Set(글ID)
+
+// 피드는 실시간으로 구독하지 않는다: 열 때·"새 글 확인"·"더 보기"를 누를 때만 읽는다.
+// 공감 수가 글 문서에 들어 있어서, 구독하면 누가 공감을 누를 때마다 피드를 열어 둔 모든 사람에게 1건씩 읽기가 생긴다
+// (공감이 상에 반영되면서 많이 눌릴 수 있고, 무료 한도는 하루 읽기 5만 건이다).
 export default function Feed() {
   const { myPid, config } = useApp();
   const [count, setCount] = useState(PAGE);
+  const [tick, setTick] = useState(0); // "새 글 확인"
+  const [busy, setBusy] = useState(false);
   // 내가 공감한 글(본인만 읽는다). 글마다 한 번만, 취소는 없다(쓰기 반복 방지).
-  const [liked, setLiked] = useState(new Set());
+  const [liked, setLiked] = useState(() => likedCache.get(myPid) || new Set());
   const canLike = Boolean(myPid) && config.phase >= PHASE.RUNNING && config.phase <= PHASE.SCORING;
+  const [docs, setDocs] = useState([]);
+  const [loaded, setLoaded] = useState(false);
   useEffect(() => {
-    if (!myPid) return;
+    if (!myPid || likedCache.has(myPid)) return;
     getDocs(query(collection(db, "feedLikes"), where("pid", "==", myPid)))
-      .then((s) => setLiked(new Set(s.docs.map((d) => d.data().feedId)))).catch(() => {});
+      .then((s) => {
+        const set = new Set(s.docs.map((d) => d.data().feedId));
+        likedCache.set(myPid, set);
+        setLiked(set);
+      }).catch(() => {});
   }, [myPid]);
+  const remember = (set) => { likedCache.set(myPid, set); setLiked(set); };
+  const bumpLikes = (id, by) => setDocs((list) => list.map((d) => (d.id === id ? { ...d, likes: Math.max(0, (d.likes || 0) + by) } : d)));
   async function like(id) {
     if (liked.has(id)) return;
-    setLiked((x) => new Set(x).add(id));
+    remember(new Set(liked).add(id));
+    bumpLikes(id, 1); // 구독하지 않으므로 화면의 숫자는 직접 올린다
     const b = writeBatch(db);
     b.update(doc(db, "feed", id), { likes: increment(1) });
     b.set(doc(db, "feedLikes", `${id}_${myPid}`), { pid: myPid, feedId: id, at: serverTimestamp() });
-    await b.commit().catch(() => setLiked((x) => { const y = new Set(x); y.delete(id); return y; }));
+    await b.commit().catch(() => {
+      const back = new Set(likedCache.get(myPid) || []);
+      back.delete(id);
+      remember(back);
+      bumpLikes(id, -1);
+    });
   }
-  const [docs, setDocs] = useState([]);
-  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    const q = query(collection(db, "feed"), orderBy("createdAt", "desc"), limit(count));
-    return onSnapshot(q, (s) => {
-      setDocs(s.docs.map((d) => ({ id: d.id, ...d.data() })));
-      setLoaded(true);
-    }, () => setLoaded(true));
-  }, [count]);
+    let live = true;
+    setBusy(true);
+    getDocs(query(collection(db, "feed"), orderBy("createdAt", "desc"), limit(count)))
+      .then((s) => { if (live) setDocs(s.docs.map((d) => ({ id: d.id, ...d.data() }))); })
+      .catch(() => {})
+      .finally(() => { if (live) { setLoaded(true); setBusy(false); } });
+    return () => { live = false; };
+  }, [count, tick]);
 
   const items = docs.filter((r) => !r.voided && !r.hidden); // 무효 처리했거나 운영진이 가린 글은 빼고
   const hasMore = docs.length >= count;
 
   return (
     <Panel title="익명 피드">
-      <p className="small">누가 누구에게 했는지는 송년회까지 비밀이에요. 최근 것부터 {PAGE}건씩 보여요.</p>
+      <p className="small">누가 누구에게 했는지는 송년회까지 비밀이에요. 최근 것부터 {PAGE}건씩 보여요. 새 글과 공감 수는 "새 글 확인"을 누르면 다시 불러와요.</p>
+      <button type="button" className="pk-btn sm" disabled={busy} onClick={() => setTick((t) => t + 1)}>새 글 확인</button>
       {loaded && items.length === 0 && <p className="muted">첫 인증이 올라오면 여기에 보여요.</p>}
       <div className="stack">
         {items.map((r) => (

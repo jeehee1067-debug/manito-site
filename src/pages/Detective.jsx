@@ -81,13 +81,13 @@ function AngelInbox() {
   const [review, setReview] = useState({});
   const [error, setError] = useState("");
   if (!angelInbox.length) return null;
-  const running = config.phase === PHASE.RUNNING;
+  const running = config.phase === PHASE.RUNNING || config.phase === PHASE.GUESSING; // 확인은 최종 지목 단계가 끝날 때까지
   async function confirm(g) {
     const text = (review[g.id] || "").trim();
     if (text.length < 10) return setError("후기를 10자 이상 써 주세요.");
     setError("");
     await updateDoc(doc(db, "angelGifts", g.id), { confirmed: true, review: text, confirmedAt: serverTimestamp() })
-      .catch(() => setError("확인하지 못했어요. 미션 진행 기간인지 확인해 주세요."));
+      .catch(() => setError("확인하지 못했어요. 확인은 최종 지목이 마감되기 전까지 할 수 있어요."));
   }
   return (
     <Panel title="수호천사가 보낸 것">
@@ -208,7 +208,7 @@ function ReportBox({ myPid, slot, phase }) {
       <p className="small">
         <b>{slot}주차</b>: 마니또가 미션을 했다고 알렸는데 아직 인증하지 않았어요. 받았다면 아래 "인증하기"에 코드와 후기를 입력해 주세요.
       </p>
-      {verdict === "received" && <p className="small note">운영진 확인: 전달된 것으로 확인됐어요. {phase === PHASE.RUNNING ? "코드를 찾으면 지금이라도 인증할 수 있어요." : ""}</p>}
+      {verdict === "received" && <p className="small note">운영진 확인: 전달된 것으로 확인됐어요. {phase === PHASE.RUNNING || phase === PHASE.GUESSING ? "코드를 찾으면 지금이라도 인증할 수 있어요." : ""}</p>}
       {verdict === "missing" && <p className="small note">운영진 확인: 못 받은 것으로 처리됐어요. 이 주차는 인증 입력 대신 응모권 1장으로 보상돼요(내 미션이 1건 이상 인증된 경우).</p>}
       {!verdict && reported && (
         <p className="small">
@@ -232,7 +232,8 @@ function CodeEntry({ myPid, items }) {
   const [busy, setBusy] = useState(false);
   const [slotOf, setSlotOf] = useState(null); // 입력한 코드의 주차(나에게 온 코드일 때)
   const [cardMatch, setCardMatch] = useState(true);
-  const running = config.phase === PHASE.RUNNING;
+  // 미션(완료 알리기)은 미션 진행 단계에 마감되지만, 인증은 최종 지목 단계가 끝날 때까지 받는다(마감 직전에 온 미션을 인증할 시간)
+  const running = config.phase === PHASE.RUNNING || config.phase === PHASE.GUESSING;
   // 4자리를 다 넣으면 어느 주차 코드인지 확인하고, 그 주차에 마니또가 고른 카드를 보여 준다(받은 것과 맞는지 확인)
   const typed = normalizeCode(code);
   useEffect(() => {
@@ -281,7 +282,8 @@ function CodeEntry({ myPid, items }) {
 
   return (
     <Panel title="인증하기">
-      {!running && <p className="muted">인증은 미션 진행 기간에만 할 수 있어요.</p>}
+      {!running && <p className="muted">인증은 미션 진행 기간과 최종 지목 기간에 할 수 있어요.</p>}
+      {config.phase === PHASE.GUESSING && <p className="small note">미션은 마감됐어요. 받은 미션은 최종 지목이 마감되기 전까지 인증할 수 있어요.</p>}
       <form className="stack" onSubmit={submit}>
         <label>
           <span className="panel-label">인증 코드</span>

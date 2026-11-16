@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { assignManito, assignmentMemo, generateCodes } from "../src/lib/assign.js";
 import { angelQueue, needyReceivers, matchAngels, angelQueueStatus } from "../src/lib/angels.js";
-import { pickBestReview, computeTickets, weightedDraw, partStandings, weeklyPartBoard, seededDraw, seededTop, drawAll, verifyDraws, DRAW_ORDER, noticedWeeks } from "../src/lib/scoring.js";
+import { pickBestReview, reviewLikes, missionLikes, computeTickets, weightedDraw, partStandings, weeklyPartBoard, seededDraw, seededTop, drawAll, verifyDraws, DRAW_ORDER, noticedWeeks } from "../src/lib/scoring.js";
 import { pairChain, buildSlides, revealedUpTo } from "../src/lib/reveal.js";
 import { readFileSync } from "node:fs";
 import { seededRandom } from "../src/lib/random.js";
@@ -653,30 +653,63 @@ test("3주차 칭찬 카드는 사이트가 전달하므로 받는 사람이 인
   assert.equal(computeTickets({ ...voided, verdicts: { B_3: "received" } }).A.mission, 3);
 });
 
-test("3등 베스트 후기상: 공감을 가장 많이 받은 후기(자기 공감 제외), 동점이면 먼저 쓴 후기", () => {
+test("3등 베스트 후기상: 남에게 공감을 가장 많이 받은 후기(당사자 두 사람의 공감 제외), 동점이면 먼저 쓴 후기", () => {
   const ts = (seconds) => ({ seconds, nanoseconds: 0 });
+  // 후기를 쓴 사람(받는 사람) → 그 미션을 한 마니또: A ← G1, B ← G2, C ← G3, D ← G4
   const redemptions = {
     K1: { receiverPid: "A", review: "첫 후기", feedId: "f1", createdAt: ts(100), voided: false },
     K2: { receiverPid: "B", review: "둘째 후기", feedId: "f2", createdAt: ts(200), voided: false },
     K3: { receiverPid: "C", review: "무효 후기", feedId: "f3", createdAt: ts(50), voided: true },
     K4: { receiverPid: "D", review: "가린 후기", feedId: "f4", createdAt: ts(60), voided: false },
   };
-  const feed = { f1: {}, f2: {}, f3: { voided: true }, f4: { hidden: true } };
-  const like = (pid, feedId) => ({ pid, feedId });
-  // f1: A(본인), X, Y → 2표.  f2: X, Y → 2표.  f3·f4는 표가 많아도 제외
-  const feedLikes = Object.fromEntries([
-    like("A", "f1"), like("X", "f1"), like("Y", "f1"), like("X", "f2"), like("Y", "f2"),
-    like("X", "f3"), like("Y", "f3"), like("Z", "f3"), like("X", "f4"), like("Y", "f4"), like("Z", "f4"),
-  ].map((l, i) => [`l${i}`, l]));
-  // 동점(2표)이면 먼저 쓴 후기. 자기 공감은 세지 않아서 A의 후기는 3표가 아니라 2표다
-  assert.deepEqual(pickBestReview({ redemptions, feed, feedLikes }), { code: "K1", review: "첫 후기", receiverPid: "A", likes: 2 });
+  const giverOfCode = { K1: "G1", K2: "G2", K3: "G3", K4: "G4" };
+  // f1: 공감 4개 중 글쓴이 A와 마니또 G1이 누른 2개는 빼서 2.  f2: 2.  f3(무효)·f4(가림)는 표가 많아도 제외
+  const feed = { f1: { likes: 4 }, f2: { likes: 2 }, f3: { likes: 9, voided: true }, f4: { likes: 9, hidden: true } };
+  const ownLikes = new Set(["f1_A", "f1_G1"]);
+  const rows = reviewLikes({ redemptions, feed, giverOfCode, ownLikes });
+  assert.deepEqual(rows.map((x) => [x.code, x.likes, x.giverPid]), [["K1", 2, "G1"], ["K2", 2, "G2"]]);
+  // 동점(2)이면 먼저 쓴 후기
+  assert.deepEqual(pickBestReview(rows), { code: "K1", review: "첫 후기", receiverPid: "A", likes: 2 });
   // 한 표가 더 들어오면 그 후기가 된다
-  assert.equal(pickBestReview({ redemptions, feed, feedLikes: { ...feedLikes, more: like("Z", "f2") } }).code, "K2");
-  // 자기 공감만 있는 후기는 0표라 수상하지 못한다. 공감이 하나도 없으면 수상자가 없다
-  assert.equal(pickBestReview({ redemptions, feed, feedLikes: { a: like("A", "f1") } }), null);
-  assert.equal(pickBestReview({ redemptions, feed, feedLikes: {} }), null);
+  assert.equal(pickBestReview(reviewLikes({ redemptions, feed: { ...feed, f2: { likes: 3 } }, giverOfCode, ownLikes })).code, "K2");
+  // 당사자의 공감만 있는 후기는 0표라 수상하지 못한다. 공감이 하나도 없으면 수상자가 없다
+  assert.equal(pickBestReview(reviewLikes({ redemptions, feed: { f1: { likes: 2 }, f2: { likes: 0 } }, giverOfCode, ownLikes })), null);
+  assert.equal(pickBestReview(reviewLikes({ redemptions, feed: { f1: {}, f2: {} }, giverOfCode })), null);
   // 수상 대상이 아닌 사람(불참·수상 제외)의 후기는 뺀다
-  assert.equal(pickBestReview({ redemptions, feed, feedLikes, ineligible: new Set(["A"]) }).code, "K2");
+  assert.equal(pickBestReview(rows, new Set(["A"])).code, "K2");
+  // 2등 동점 기준: 마니또마다 내 미션 후기가 남에게 받은 공감의 합
+  assert.deepEqual(missionLikes(rows), { G1: 2, G2: 2 });
+  assert.deepEqual(missionLikes([...rows, { code: "K9", giverPid: "G1", likes: 3 }, { code: "K8", giverPid: "G5", likes: 0 }]), { G1: 5, G2: 2 });
+});
+
+test("2등 동점: 응모권이 같으면 내 미션 후기가 받은 공감이 많은 사람, 그래도 같을 때만 추첨 숫자", () => {
+  // 모두가 열심히 해서 54명이 모두 13장인 경우
+  const tickets = Object.fromEntries(pids.map((pid) => [pid, 13]));
+  const step = { key: "best", count: 3 };
+  // 공감 기준이 없으면 숫자에 따라 누구나 될 수 있다(운)
+  const lucky = new Set();
+  for (let i = 0; i < 60; i++) seededTop(tickets, step, String(i)).forEach((pid) => lucky.add(pid));
+  assert.ok(lucky.size > 40, `숫자만으로 가르면 ${lucky.size}명이 번갈아 뽑힌다`);
+  // 공감 기준이 있으면 숫자와 상관없이 공감이 많은 순서로 정해진다
+  const tb = { [pids[7]]: 9, [pids[20]]: 6, [pids[33]]: 4, [pids[40]]: 1 };
+  for (let i = 0; i < 20; i++) assert.deepEqual(seededTop(tickets, step, String(i), new Set(), tb), [pids[7], pids[20], pids[33]]);
+  // 응모권이 먼저다: 공감이 많아도 응모권이 적으면 뒤
+  assert.deepEqual(seededTop({ a: 14, b: 13, c: 13, d: 13 }, step, "1", new Set(), { d: 50, c: 2 }), ["a", "d", "c"]);
+  // 공감도 같으면 그 사람들끼리만 숫자로 가른다: 확실한 두 명은 항상 들어가고, 남은 한 자리만 바뀐다
+  const tb2 = { [pids[1]]: 5, [pids[2]]: 5, [pids[3]]: 2, [pids[4]]: 2, [pids[5]]: 2 };
+  const third = new Set();
+  for (let i = 0; i < 40; i++) {
+    const w = seededTop(tickets, step, String(i), new Set(), tb2);
+    assert.deepEqual(w.slice(0, 2).sort(), [pids[1], pids[2]].sort());
+    third.add(w[2]);
+  }
+  assert.deepEqual([...third].sort(), [pids[3], pids[4], pids[5]].sort());
+  // 한 번에 추첨과 검증에도 같은 기준이 들어간다(기준이 다르면 검증에 통과하지 못한다)
+  const d = drawAll(tickets, "2026", DRAW_ORDER, tb);
+  const rest = [pids[7], pids[20], pids[33], pids[40]].filter((pid) => pid !== d.grand.winners[0]).slice(0, 3);
+  assert.deepEqual(d.best.winners, rest, "1등 당첨자를 뺀 공감 순");
+  assert.ok(verifyDraws(tickets, d, DRAW_ORDER, tb).every((x) => x.ok));
+  assert.equal(verifyDraws(tickets, d, DRAW_ORDER, {}).find((x) => x.key === "best").ok, false);
 });
 
 // ── 수호천사 자동 연결 ─────────────────────────────────────────────────────────
