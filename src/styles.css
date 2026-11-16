@@ -91,9 +91,16 @@ a { color: var(--blue-dark); }
 }
 .tabs::-webkit-scrollbar { display: none; }
 .tab {
-  position: relative; flex: none; background: none; border: 0; padding: 9px 9px 10px; cursor: pointer;
-  color: #9aa6bd; font-size: 14px; font-weight: 700; white-space: nowrap;
+  position: relative; flex: none; display: flex; flex-direction: column; align-items: center; gap: 3px;
+  background: none; border: 0; padding: 8px 9px 10px; cursor: pointer;
+  color: #9aa6bd; font-size: 13px; font-weight: 700; white-space: nowrap;
 }
+/* 메뉴 아이콘: 고르지 않은 메뉴는 흐리게, 고른 메뉴는 또렷하게 살짝 떠오른다 */
+.px-icon { image-rendering: pixelated; flex: none; vertical-align: middle; }
+.tab-icon { opacity: 0.72; filter: saturate(0.75); transition: transform 0.15s ease-out, opacity 0.15s; }
+.tab:hover .tab-icon { opacity: 0.85; }
+.tab.is-on .tab-icon { opacity: 1; filter: none; transform: translateY(-2px) scale(1.12); }
+.tab .tab-badge { position: absolute; top: 2px; right: 0; margin: 0; }
 .tab:hover { color: #dfe6f3; }
 .tab::after { content: ""; position: absolute; left: 6px; right: 6px; bottom: 0; height: 4px; border-radius: 4px 4px 0 0; background: transparent; }
 .tab.is-on { color: #fff; }
@@ -107,7 +114,7 @@ a { color: var(--blue-dark); }
   .hud-chip { padding: 2px 8px 2px 7px; font-size: 12px; }
   .hud-out { padding: 4px 8px; gap: 6px; }
   .hud-who + .hud-out-label { padding-left: 6px; }
-  .tab { padding: 9px 7px 10px; font-size: 13.5px; }
+  .tab { padding: 8px 7px 10px; font-size: 12.5px; }
 }
 
 /* ---------- 칩 ---------- */
@@ -255,19 +262,31 @@ textarea.pk-input { resize: vertical; line-height: 1.6; }
 .loc-tag.sm { margin-left: 6px; font-size: 11px; vertical-align: 1px; }
 
 /* ---------- 미션 카드 ---------- */
-.cards { display: grid; gap: 8px; grid-template-columns: 1fr; }
+.cards { display: grid; gap: 10px; grid-template-columns: 1fr; }
 @media (min-width: 620px) { .cards { grid-template-columns: repeat(3, 1fr); } }
+/* 미션 카드: 난이도 색 띠(왼쪽), 별, 받는 응모권. 누르면 살짝 눌린다 */
 .card {
-  text-align: left; display: flex; flex-direction: column; gap: 4px; cursor: pointer;
-  background: #fff; border: 3px solid var(--ink); border-radius: 10px; padding: 10px; box-shadow: var(--shadow);
+  position: relative; overflow: hidden; text-align: left; display: flex; flex-direction: column; gap: 6px; cursor: pointer;
+  background: #fff; border: 3px solid var(--ink); border-radius: 12px; padding: 10px 12px 12px 20px; box-shadow: var(--shadow);
+  transition: transform 0.12s ease-out, box-shadow 0.12s ease-out;
 }
+.card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 10px; background: var(--blue); border-right: 3px solid var(--ink); }
+.card.level-easy::before { background: var(--green); }
+.card.level-hard::before { background: var(--red); }
+.card.level-easy { background: linear-gradient(180deg, #f4fbf6, #fff 60%); }
+.card.level-normal { background: linear-gradient(180deg, #f2f7fd, #fff 60%); }
+.card.level-hard { background: linear-gradient(180deg, #fdf3f1, #fff 60%); }
+@media (hover: hover) { .card:hover { transform: translateY(-2px); box-shadow: 0 7px 0 rgba(0, 0, 0, 0.35); } }
 .card:active { transform: translateY(4px); box-shadow: none; }
 .card-level { align-self: flex-start; color: #fff; font-size: 12px; border: 2px solid var(--ink); border-radius: 6px; padding: 0 8px; }
-.card-text { font-size: 14px; }
+.card-stars { color: var(--gold); font-size: 13px; letter-spacing: 1px; text-shadow: 0 1px 0 rgba(0, 0, 0, 0.25); }
+.card-stars i { font-style: normal; color: #d8d4c4; text-shadow: none; }
+.card-reward { margin-left: auto; font-size: 11.5px; font-weight: 700; color: #7a5a00; background: #fff3c4; border: 2px dashed #d9a520; border-radius: 6px; padding: 0 6px; white-space: nowrap; }
+.card-text { font-size: 15px; line-height: 1.45; }
 .card-wrap { display: flex; flex-direction: column; gap: 6px; }
 .card-wrap .card { flex: 1; }
 .card-wrap .text-btn { align-self: flex-end; }
-.card-head { display: flex; align-items: center; gap: 6px; }
+.card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .cost-tag { display: inline-block; font-size: 11px; color: var(--ink); background: #fff6d8; border: 2px solid var(--gold); border-radius: 6px; padding: 0 6px; white-space: nowrap; }
 .card.level-easy .card-level, .badge.level-easy { background: var(--green); }
 .card.level-normal .card-level, .badge.level-normal { background: var(--blue); }
@@ -280,8 +299,18 @@ textarea.pk-input { resize: vertical; line-height: 1.6; }
   background: var(--gold); border: 3px solid var(--ink); border-radius: 10px; padding: 4px 14px; box-shadow: var(--shadow);
 }
 .code-tag strong { font-size: 26px; letter-spacing: 0.3em; }
-.ticket-count { font-size: 15px; }
-.ticket-count strong { font-size: 34px; color: var(--blue-dark); }
+/* 내 응모권: 응모권 한 장처럼(양옆이 파인 금색 표) */
+.ticket-count {
+  position: relative; display: inline-flex; align-items: baseline; gap: 4px; margin: 2px 0 10px; padding: 6px 26px 6px 22px;
+  font-size: 15px; font-weight: 700; color: #6b4e00;
+  background: linear-gradient(180deg, #ffe58a, #f3c94a); border: 3px solid var(--ink); border-radius: 10px; box-shadow: 0 4px 0 rgba(0, 0, 0, 0.3);
+  -webkit-mask-image: radial-gradient(circle at 0 50%, transparent 7px, #000 7.5px), radial-gradient(circle at 100% 50%, transparent 7px, #000 7.5px);
+  -webkit-mask-size: 51% 100%; -webkit-mask-position: left, right; -webkit-mask-repeat: no-repeat;
+  mask-image: radial-gradient(circle at 0 50%, transparent 7px, #000 7.5px), radial-gradient(circle at 100% 50%, transparent 7px, #000 7.5px);
+  mask-size: 51% 100%; mask-position: left, right; mask-repeat: no-repeat;
+}
+.ticket-count::after { content: ""; position: absolute; right: 18px; top: 6px; bottom: 6px; border-left: 2px dashed rgba(107, 78, 0, 0.45); }
+.ticket-count strong { font-size: 36px; line-height: 1; color: var(--ink); text-shadow: 0 2px 0 rgba(255, 255, 255, 0.6); }
 .plain.tickets { gap: 2px; font-size: 14px; margin-bottom: 6px; }
 .notice-banner { background: #fff6d8; border: 3px solid var(--ink); border-radius: 10px; padding: 8px 12px; margin-bottom: 14px; white-space: pre-line; }
 .notice-banner b { margin-right: 6px; }
@@ -414,8 +443,11 @@ textarea.pk-input { resize: vertical; line-height: 1.6; }
 .tab-badge { display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 5px; border: 2px solid #141a26; border-radius: 9px; background: var(--red); color: #fff; font-size: 11px; line-height: 14px; text-align: center; vertical-align: 1px; }
 
 /* 이번 주 할 일 */
-.todo-list { margin: 4px 0 6px; padding-left: 20px; display: grid; gap: 4px; }
-.todo-list li::marker { content: "□ "; }
+.todo-list { list-style: none; margin: 4px 0 8px; padding: 0; display: grid; gap: 6px; }
+.todo-list li { position: relative; padding: 7px 10px 7px 36px; background: #fff; border: 2px solid #d9d5c5; border-radius: 10px; line-height: 1.45; }
+.todo-list li::before { content: ""; position: absolute; left: 10px; top: 9px; width: 16px; height: 16px; border: 2px solid var(--ink); border-radius: 4px; background: #fff; box-shadow: inset 0 -3px 0 #e6e2d3; }
+.todo-list li a { text-decoration-thickness: 1px; }
+.next-event { display: inline-flex; align-items: center; gap: 6px; margin: 2px 0 0; padding: 3px 10px 3px 6px; font-size: 13px; color: var(--ink-soft); background: var(--paper-2); border: 2px solid #d9d5c5; border-radius: 20px; }
 
 /* 대상이 알려 준 것: 알레르기는 눈에 띄게 */
 .warn-line { margin: 4px 0; padding: 6px 8px; border: 2px solid var(--red); border-radius: 6px; background: #fff3f1; }
@@ -504,3 +536,34 @@ textarea.pk-input { resize: vertical; line-height: 1.6; }
 .name-x { margin-left: 2px; font-size: 14px; color: var(--ink-soft); }
 .refill-list { text-align: left; font-size: clamp(15px, 1.9vw, 24px); color: var(--ink); }
 .winner.me { outline: 3px solid var(--gold); border-radius: 8px; }
+
+/* ---------- 패널 제목 아이콘 ---------- */
+.panel-title { display: flex; align-items: center; gap: 8px; }
+.title-icon { margin: -2px 0; filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.25)); }
+
+/* ---------- 미션 스탬프(내 미션): 3주 도장판 ---------- */
+.stamps {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0 0 16px; padding: 12px 10px 10px;
+  background: var(--paper); border: 3px solid var(--ink); border-radius: 12px; box-shadow: var(--shadow);
+  background-image: radial-gradient(#e7e3d4 1.2px, transparent 1.3px); background-size: 12px 12px;
+}
+.stamp { display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center; }
+.stamp-ring { display: grid; place-items: center; width: 62px; height: 62px; border-radius: 50%; border: 3px dashed #c3bfae; background: #fff; }
+.stamp-week { font-size: 13px; font-weight: 700; color: var(--ink); margin-top: 4px; }
+.stamp-state { font-size: 11.5px; color: var(--ink-soft); }
+.stamp.is-locked .stamp-ring { background: var(--paper-2); }
+.stamp.is-locked .px-icon { opacity: 0.45; filter: grayscale(1); }
+.stamp.is-locked .stamp-week { color: var(--ink-soft); }
+.stamp.is-open .stamp-ring { border-color: var(--gold); background: #fff8dc; animation: stamp-wait 1.8s ease-in-out infinite; }
+.stamp.is-open .stamp-state { color: #8a6500; font-weight: 700; }
+.stamp.is-done .stamp-ring { border: 3px solid var(--red); background: #fff; box-shadow: inset 0 0 0 3px #fff, inset 0 0 0 5px rgba(192, 57, 43, 0.35); transform: rotate(-10deg); animation: stamp-press 0.35s ease-out both; }
+.stamp-ink { font-size: 15px; font-weight: 800; color: var(--red); letter-spacing: 0.5px; }
+.stamp.is-done .stamp-state { color: var(--red); font-weight: 700; }
+@keyframes stamp-wait { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes stamp-press { 0% { transform: rotate(-10deg) scale(1.5); opacity: 0; } 70% { transform: rotate(-10deg) scale(0.94); opacity: 1; } 100% { transform: rotate(-10deg) scale(1); } }
+@media (prefers-reduced-motion: reduce) { .stamp.is-open .stamp-ring, .stamp.is-done .stamp-ring, .tab-icon { animation: none; transition: none; } }
+
+/* ---------- 패널: 살짝 떠 있는 종이 느낌 ---------- */
+.panel.locked .panel-title { filter: grayscale(0.4); }
+.stamps-title { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 14px; font-weight: 700; color: var(--ink); }
+.stamps-title small { margin-left: auto; font-size: 11.5px; font-weight: 400; color: var(--ink-soft); }

@@ -6,6 +6,7 @@ import { EXTRA_NOTES_MAX, LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT, SCHEDU
 import { seededRandom, shuffle } from "../lib/random.js";
 import { syncClues } from "../lib/sync.js";
 import { Avatar, Dialogue, Panel } from "../ui.jsx";
+import { Icon } from "../icons.jsx";
 import { TICKET_RULES } from "../config/prizes.js";
 import { cardCost, cardLevel } from "../lib/scoring.js";
 import { bump } from "../lib/writes.js";
@@ -127,7 +128,7 @@ export default function MyMission() {
           {todo.length === 0
             ? <p className="small">지금 할 일은 다 했어요! 마니또의 다음 미션을 기다려 보세요.</p>
             : <ul className="todo-list">{todo.map((t) => <li key={t.text}>{t.href ? <a href={t.href}>{t.text}</a> : t.text}</li>)}</ul>}
-          {nextEvent && <p className="small muted">다음 일정: {scheduleLabel(nextEvent)}</p>}
+          {nextEvent && <p className="next-event"><Icon name="calendar" size={18} /><span>다음 일정: {scheduleLabel(nextEvent)}</span></p>}
         </Panel>
       )}
       <section className="panel target">
@@ -152,6 +153,24 @@ export default function MyMission() {
           찾아봐도 받은 게 없으면 추리 보드에서 "받은 게 없어요"로 알려 주세요.
         </Dialogue>
       )}
+      {/* 미션 스탬프: 3주 동안 어디까지 했는지 한눈에(완료를 알린 주차에 도장이 찍힌다) */}
+      <div className="stamps" role="list" aria-label="미션 스탬프">
+        <p className="stamps-title"><Icon name="stamp" size={18} /><span>미션 스탬프</span><small>완료를 알리면 도장이 찍혀요</small></p>
+        {[1, 2, 3].map((slot) => {
+          const done = missions.done?.[slot] === true;
+          const open = config.phase === PHASE.RUNNING && slot <= week;
+          const state = done ? "done" : open ? "open" : "locked";
+          return (
+            <div key={slot} role="listitem" className={`stamp is-${state}`}>
+              <span className="stamp-ring">
+                {done ? <span className="stamp-ink">완료!</span> : open ? <Icon name="gift" size={26} /> : <Icon name="lock" size={22} />}
+              </span>
+              <span className="stamp-week">{slot}주차</span>
+              <span className="stamp-state">{done ? "도장 꾹" : open ? "진행 중" : config.phase > PHASE.RUNNING ? "마감" : "곧 열려요"}</span>
+            </div>
+          );
+        })}
+      </div>
       <TargetPrefs receiverPid={receiverPid} targetName={targetName} />
       {fromReceiver.length > 0 && (
         <Panel title={`${targetName}이 보낸 한마디`}>
@@ -298,7 +317,9 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
                   <button className={`card level-${c.level}`} onClick={() => choose(c)}>
                     <span className="card-head">
                       <span className="card-level">{LEVEL_LABEL[c.level]}</span>
+                      <span className="card-stars" aria-hidden="true">{"★".repeat(LEVELS.indexOf(c.level) + 1)}<i>{"★".repeat(2 - LEVELS.indexOf(c.level))}</i></span>
                       {c.cost && <span className="cost-tag">소액 비용</span>}
+                      <span className="card-reward">응모권 +{1 + (TICKET_RULES.cardBonus[c.level] || 0)}</span>
                     </span>
                     <span className="card-text">{c.text}</span>
                   </button>
