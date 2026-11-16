@@ -42,7 +42,6 @@ export function buildSlides(r, nameOf) {
   });
   s.push({ id: "detective", type: "detective" });
   if ((r.angels || []).length > 0) s.push({ id: "angels", type: "angels" });
-  if (r.likesTop) s.push({ id: "likesTop", type: "likesTop" });
   if ((r.praises || []).length > 0) s.push({ id: "praise", type: "praise" });
   // 추첨: 숫자 하나로 1~6등(3등 제외)을 한 번에 정하고(drawGo), 발표는 작은 상부터 한 장면씩.
   // 장면 수는 추첨 전후가 같아야 한다(results/public.step이 장면 번호라서): 2등은 항상 정해진 인원만큼 장면을 둔다.

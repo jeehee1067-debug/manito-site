@@ -347,6 +347,16 @@ const step = (s) => console.log("▶", s);
     await tab(page, "피드");
     await panel(page, "익명 피드").locator(".dialogue").nth(N - 1).waitFor();
     assert.equal(await panel(page, "익명 피드").locator(".dialogue").count(), N);
+    // 공감: 카타가 가나의 후기에, 가나가 자기 후기에 공감한다 → 3등(베스트 후기상)은 자기 공감을 빼고 세므로 가나의 후기 1표
+    for (const who of ["카타", "가나"]) {
+      const pg = users[who];
+      await tab(pg, "피드");
+      const post = panel(pg, "익명 피드").locator(".dialogue", { hasText: `${giverOf["가나"]}님 덕분에` });
+      await post.waitFor();
+      await post.getByRole("button", { name: /공감/ }).click();
+      await post.locator(".like-btn.is-on").waitFor();
+    }
+    await tab(users["가나"], "내 미션");
     // 감사 답장: 사아가 보내면 → 피드 글에 붙고, 미션을 보낸 마니또 화면에 보인다
     const r = users["사아"];
     await tab(r, "추리 보드");
@@ -524,7 +534,14 @@ const step = (s) => console.log("▶", s);
     assert.deepEqual(cells.slice(0, 3), ["2주차", rName, "자차"]);
     assert.equal(cells[4], "받은 게 없어요");
     assert.equal((await pairTable())["자차"].w[1], "쉬움 · 받은 게 없다고 신고");
+    // 신고만으로는 아무것도 바뀌지 않는다. "못 받음"은 처음 운영자만 확정할 수 있다: 공동 운영자 화면에서는 버튼이 꺼져 있다
+    await tab(co, "운영");
+    const coUp = panel(co, "받은 게 없어요 신고 (확인 안 한 것 1건)");
+    await coUp.waitFor();
+    assert.ok(await coUp.getByRole("button", { name: "못 받음" }).isDisabled(), "공동 운영자는 '못 받음'을 확정할 수 없다");
+    assert.ok(await coUp.getByRole("button", { name: "받았음" }).isEnabled());
     await up.getByRole("button", { name: "못 받음" }).click();
+    assert.ok(dialogsSeen.some((d) => d.includes('"못 받음"으로 확정할까요?') && d.includes("두 사람 모두에게 확인한 뒤에")), "못 받음을 확정하기 전에 결과를 알리고 한 번 묻는다");
     await panel(admin, "받은 게 없어요 신고 (확인 안 한 것 0건)").waitFor();
     assert.equal((await pairTable())["자차"].w[1], "쉬움 · 못 받음 확인");
     await box.getByText("운영진 확인: 못 받은 것으로 처리됐어요.").waitFor();
@@ -714,16 +731,16 @@ const step = (s) => console.log("▶", s);
   assert.equal(await panel(admin, "투표 카드").count(), 0);
   console.log("  마감 단계: 참여자 메뉴에 투표 탭 없음, 운영 화면에 투표 카드 패널 없음");
   await advance(admin, "집계");
-  // 집계 전 확인: 마바의 3주차 칭찬 카드(인증 없음, 신고 없음)와 자차의 2주차(못 받음 확인)
+  // 집계 전 확인: 자차의 2주차(못 받음 확인)만 나온다.
+  // 마바의 3주차 칭찬 카드(받는 사람이 인증 안 함)는 사이트로 전달된 것이라 자동으로 인정되어 확인할 목록에 없다
   {
-    const up = panel(admin, "집계 전 확인: 인증이 없는 완료 알림 (확인 안 한 것 1건)");
+    const up = panel(admin, "집계 전 확인: 인증이 없는 완료 알림 (확인 안 한 것 0건)");
     await up.waitFor();
     const list = [];
     for (const tr of await up.locator("tbody tr").all()) list.push((await tr.locator("td").allInnerTexts()).slice(0, 3).join(" "));
-    assert.deepEqual(list.sort(), [`2주차 ${target["자차"]} 자차`, `3주차 ${target["마바"]} 마바`].sort());
-    await up.locator("tbody tr", { hasText: "3주차" }).getByRole("button", { name: "받았음" }).click();
-    await panel(admin, "집계 전 확인: 인증이 없는 완료 알림 (확인 안 한 것 0건)").waitFor();
-    console.log("  집계 전 확인: 마바의 3주차(칭찬 카드, 인증 없음)를 '받았음'으로 확인");
+    assert.deepEqual(list, [`2주차 ${target["자차"]} 자차`]);
+    await up.getByText("3주차 칭찬 카드 1건은 사이트로 전달된 것이라 인증이 없어도 자동으로 인정돼요").waitFor();
+    console.log("  집계 전 확인: 마바의 3주차(칭찬 카드, 인증 없음)는 자동 인정이라 목록에 없음. 확인 안 한 것 0건");
   }
   // 집계 없이 공개 단계로 넘어갈 수 없다
   await admin.getByRole("button", { name: "다음 단계로: 공개" }).click();
@@ -741,7 +758,9 @@ const step = (s) => console.log("▶", s);
   await admin.getByText(/^응모권 상위/).waitFor();
   const scoreText = (await panel(admin, "집계").locator("ul").innerText()).replace(/\n/g, " / ");
   console.log("  ", scoreText);
-  await panel(admin, "베스트 후기상 고르기").locator("li").first().getByRole("button", { name: "이 후기 선택" }).click();
+  // 3등 베스트 후기상은 운영자가 고르지 않는다: 공감을 가장 많이 받은 후기(자기 공감 제외)
+  assert.equal(await panel(admin, "베스트 후기상 고르기").count(), 0, "운영자가 후기를 고르는 칸이 없다");
+  assert.match(scoreText, /3등 베스트 후기상: 가나 \(♥ 1, 자기 공감 제외\)/);
   await advance(admin, "공개");
   step("송년회 발표 화면: 넘긴 장면까지만 참여자 결과 탭에 열린다, 짝은 원을 따라 공개, 추첨도 발표 화면에서");
   for (const p of PEOPLE) await tab(users[p.name], "결과");
@@ -836,6 +855,8 @@ const step = (s) => console.log("▶", s);
     await phoneBecomes([shownCount, waiting], `${label}까지 발표: 참여자 화면에 ${shownCount}명`);
   }
   await next(); await pres.getByText(/3등 베스트 후기상/).waitFor();
+  await pres.getByText("가장 많은 공감을 받은 후기 ♥ 1").waitFor();
+  await pres.locator(".pres-title", { hasText: "가나" }).waitFor();
   shownCount += 1; waiting -= 1;
   await phoneBecomes([shownCount, waiting], "3등 발표");
   for (const rank of [2, 1, 0]) {
@@ -891,7 +912,7 @@ const step = (s) => console.log("▶", s);
   // 받는 사람이 직접 인증한 주차 / 완료를 알린 주차 / 운영자 확인(받았음·못 받음)
   const realSlots = { 가나: [1, 2], 다라: [1, 3], 마바: [1], 사아: [1], 자차: [1], 카타: [1] };
   const sentSlots = { 가나: [1, 2], 다라: [1, 3], 마바: [1, 3], 사아: [1], 자차: [1, 2], 카타: [1] };
-  const confirmed = { 마바: [3] }; // 받았음: 마니또의 미션으로 인정(카드 추가분 없음)
+  const confirmed = { 마바: [3] }; // 전달된 칭찬 카드: 받는 사람의 인증이 없어도 마니또의 미션으로 인정(카드 추가분 없음)
   const missingV = { 자차: [2] }; // 못 받음: 인정하지 않고 받는 사람에게 보상
   // 인증·인정된 미션 수
   const redeemed = Object.fromEntries(PEOPLE.map((p) => [p.name, realSlots[p.name].length + (confirmed[p.name] || []).length]));
@@ -959,7 +980,7 @@ const step = (s) => console.log("▶", s);
     assert.match(rows[2], /^3위 다파트 33% 2 \/ 6 · 2명$/);
     // 운영자 확인으로 인정된 미션은 결과 화면에 표시된다
     const mabaText = (await users["마바"].locator(".target .small").innerText()).replace(/\s+/g, " ");
-    assert.match(mabaText, /대상 불참·운영진 확인으로 인정된 미션 1건 포함/);
+    assert.match(mabaText, /대상의 인증 없이 인정된 미션 1건 포함/);
   }
   await shot(users["가나"], "reveal");
 

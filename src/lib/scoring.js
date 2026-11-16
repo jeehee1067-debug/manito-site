@@ -13,7 +13,8 @@ import { secureRandom, seededRandom } from "./random.js";
  *   cardMatch = false: 받는 사람이 "받은 것이 마니또가 고른 카드와 달라요"로 인증함 → 카드 추가분 없음
  * missions: { giverPid: { choices: { slot: { level } } } }
  * guesses: { receiverPid: guessPid }
- * deliveries: [{ receiverPid, slot }]  마니또가 "완료 알리기"(또는 쪽지 더 보내기)를 누를 때마다 1건
+ * deliveries: [{ receiverPid, slot, kind, hidden }]  마니또가 "완료 알리기"(또는 쪽지 더 보내기)를 누를 때마다 1건
+ *   kind = "praise"(3주차 칭찬 카드)이고 운영자가 가리지 않은(hidden 아님) 것은 사이트가 직접 전달한 것이라 인증 없이도 인정한다(아래 ②)
  *   missions의 완료 표시(done)도 완료 알림으로 친다(둘 중 하나만 있는 예전 자료도 같은 기준으로 보도록. 운영 화면 pairs.js와 같은 기준)
  * cluesDone: Set(giverPid) 프로필을 채워 단서 6개가 지금 대상에게 간 마니또. 주지 않으면(null) 은신 조건에서 단서를 보지 않는다.
  * angels: { receiverPid: angelPid } 운영자가 연결한 수호천사(마니또가 미션을 안 한 사람에게 지원자를 연결)
@@ -31,8 +32,11 @@ import { secureRandom, seededRandom } from "./random.js";
  *  - 상대방 때문에 손해 보지 않게:
  *    ① 내 마니또가 미션을 안 보낸 주차, 그리고 완료를 알렸지만 운영자가 "못 받음"으로 확인한 주차는 인증 입력 대신 1장(보상).
  *       인증 입력과 합쳐 최대 3장. 내 미션이 1건 이상 인증된 사람만.
- *    ② 완료를 알렸는데 인증이 없는 미션은, 대상이 불참(가입 안 함·중도 이탈)이거나 운영자가 "받았음"으로 확인하면 인증된 것으로 인정한다.
- *       운영자의 확인이 불참 자동 인정보다 먼저다("못 받음"이면 불참이어도 인정하지 않는다). 무효 처리된 인증은 인정하지 않는다.
+ *    ② 받는 사람의 유효한 인증이 없는 미션도 다음 경우에는 마니또의 미션으로 인정한다(카드 추가분은 없음).
+ *       - 운영자가 "받았음"으로 확인: 인증이 없을 때도, 인증이 무효 처리됐을 때도(후기가 성의 없어 무효가 됐지만 미션은 실제로 받은 경우).
+ *       - 확인이 없고 인증 기록도 없을 때: 대상이 불참(가입 안 함·중도 이탈)이거나, 사이트가 전달한 3주차 칭찬 카드(운영자가 가리지 않은 것).
+ *       운영자의 확인이 자동 인정보다 먼저다("못 받음"이면 불참이어도, 칭찬 카드여도 인정하지 않는다).
+ *       무효 처리된 인증은 운영자가 "받았음"으로 확인하지 않으면 인정하지 않는다.
  *    ③ 확인이 없는 미인증 주차(대상이 참여 중)는 마니또도 받는 사람도 받지 못한다.
  *  - 파트 대항전: 미션 완수율 1위 파트원에게 1장(동률이면 모두). 내 미션이 1건 이상 인증된 사람만.
  *  - 가입 안 한 사람, 중도 이탈, 수상 제외는 0장.
@@ -46,6 +50,7 @@ export function computeTickets({ people, assignments, giverCodes, redemptions, m
   }
   const valid = (code) => redemptions[code] && !redemptions[code].voided;
   const delivered = new Set(deliveries.map((d) => `${d.receiverPid}:${d.slot}`));
+  const autoPraise = new Set(deliveries.filter((d) => d.kind === "praise" && !d.hidden).map((d) => `${d.receiverPid}:${d.slot}`));
   for (const [giver, receiver] of Object.entries(assignments)) {
     for (const [slot, on] of Object.entries(missions[giver]?.done || {})) if (on) delivered.add(`${receiver}:${slot}`);
   }
@@ -62,8 +67,11 @@ export function computeTickets({ people, assignments, giverCodes, redemptions, m
     for (const [slot, code] of Object.entries(codes)) {
       const byReceiver = valid(code);
       const v = verdictOf(receiver, slot);
-      const byConfirm = !redemptions[code] && delivered.has(`${receiver}:${slot}`)
-        && (v === "received" || (v == null && absent.has(receiver)));
+      const key = `${receiver}:${slot}`;
+      const hasRecord = Boolean(redemptions[code]); // 무효 처리된 인증도 "받는 사람이 코드를 넣은 기록"이다
+      const byConfirm = !byReceiver && (
+        (v === "received" && (delivered.has(key) || hasRecord))
+        || (v == null && !hasRecord && delivered.has(key) && (absent.has(receiver) || autoPraise.has(key))));
       if (!byReceiver && !byConfirm) continue;
       redeemed++;
       if (byConfirm) assumed++;
@@ -260,6 +268,32 @@ export function verifyDraws(tickets, draws, order = DRAW_ORDER) {
     const exp = expected ? expected[s.key].winners : null;
     return { key: s.key, ok: exp != null && JSON.stringify(exp) === JSON.stringify(saved), expected: exp, saved };
   });
+}
+
+/**
+ * 3등 베스트 후기상: 공감(♥)을 가장 많이 받은 후기. 운영진이 고르지 않는다.
+ * - 자기 후기에 누른 공감은 세지 않는다(피드 글에는 글쓴이가 없어서 보안 규칙으로는 막을 수 없다).
+ * - 무효 처리됐거나 피드에서 가린 후기, 수상 대상이 아닌 사람(불참·수상 제외)의 후기는 뺀다.
+ * - 공감이 1개도 없으면 수상자가 없다. 동점이면 먼저 쓴 후기(인증 시각), 그래도 같으면 코드 순.
+ * redemptions: { 코드: { receiverPid, review, voided, feedId, createdAt } }, feed: { 글ID: { voided, hidden } }
+ * feedLikes: { 문서ID: { pid, feedId } }, ineligible: Set(pid)
+ * 반환: { code, review, receiverPid, likes } 또는 null
+ */
+export function pickBestReview({ redemptions = {}, feed = {}, feedLikes = {}, ineligible = new Set() }) {
+  const likers = {};
+  for (const l of Object.values(feedLikes)) if (l?.feedId && l?.pid) (likers[l.feedId] ||= new Set()).add(l.pid);
+  const when = (t) => (t && typeof t.seconds === "number" ? [t.seconds, t.nanoseconds || 0] : [Infinity, 0]);
+  const rows = Object.entries(redemptions)
+    .filter(([, r]) => !r.voided && r.feedId && feed[r.feedId] && !feed[r.feedId].voided && !feed[r.feedId].hidden && !ineligible.has(r.receiverPid))
+    .map(([code, r]) => ({
+      code, review: String(r.review || "").slice(0, 300), receiverPid: r.receiverPid, at: when(r.createdAt),
+      likes: [...(likers[r.feedId] || [])].filter((pid) => pid !== r.receiverPid).length,
+    }))
+    .filter((x) => x.likes > 0)
+    .sort((a, b) => b.likes - a.likes || a.at[0] - b.at[0] || a.at[1] - b.at[1] || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
+  if (rows.length === 0) return null;
+  const { code, review, receiverPid, likes } = rows[0];
+  return { code, review, receiverPid, likes };
 }
 
 /**
