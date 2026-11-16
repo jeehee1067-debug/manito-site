@@ -72,7 +72,7 @@ const BASE = "http://localhost:5173/", P = "demo-manito", FS = `http://127.0.0.1
   await wrong.reload();
   await wrong.getByPlaceholder("초대 코드 6자리").waitFor();
   await wrong.getByPlaceholder("초대 코드 6자리").fill(oldCode);
-  await wrong.getByRole("button", { name: "연결하기" }).click();
+  await wrong.getByRole("button", { name: "연결하기", exact: true }).click();
   await wrong.locator(".error").waitFor();
   console.log("  예전 코드로 연결 시도:", await wrong.locator(".error").innerText());
 

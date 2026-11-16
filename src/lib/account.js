@@ -60,7 +60,15 @@ export async function resetPassword(email) {
 // 인증 메일 보내기(가입 직후, 그리고 "다시 보내기"). 이미 인증한 계정이면 아무것도 하지 않는다.
 export async function sendVerifyMail() {
   const u = auth.currentUser;
-  if (u && !u.emailVerified) await sendEmailVerification(u);
+  if (!u || u.emailVerified) return;
+  try {
+    // 인증을 마친 화면에 "계속" 버튼이 나와 이 사이트로 돌아올 수 있게 주소를 같이 보낸다
+    await sendEmailVerification(u, { url: window.location.origin + window.location.pathname });
+  } catch (err) {
+    // 사이트 주소가 Firebase의 승인된 도메인에 없으면 거부된다: 돌아오는 주소 없이 보낸다
+    if (!String(err?.code || "").includes("continue-uri")) throw err;
+    await sendEmailVerification(u);
+  }
 }
 
 // 메일 인증으로 명단의 내 이름과 계정을 연결한다(초대 코드 없이).

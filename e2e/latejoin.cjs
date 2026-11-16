@@ -1,4 +1,4 @@
-// 가입 유예: 가입하지 않은 사람도 명단에 있으면 배정되고, 미션이 시작된 뒤에 가입해도 바로 참여할 수 있는지 확인한다.
+// 가입 유예와 회사 메일 인증: 가입하지 않은 사람도 명단에 있으면 배정되고, 미션이 시작된 뒤에 가입해도 바로 참여할 수 있는지 확인한다.
 //  - 명단은 엑셀에서 붙여 넣은 모양(탭으로 구분)으로 넣는다
 //  - 아무도 가입하기 전에 배정 → 3명만 가입 → 미션 시작(가입 안 한 사람 안내) → 가입 안 한 사람의 마니또가 미션
 //  - 늦게 가입한 사람: 내 대상이 보이고, 가입 전에 온 미션을 인증하고, 자기 미션도 한다
@@ -46,7 +46,7 @@ const H = require("./helpers.cjs");
   await admin.getByRole("button", { name: "다음 단계로: 미션 진행" }).click();
   await admin.locator(".hud-chip", { hasText: "미션 진행" }).waitFor();
   const warn = dialogs.find((d) => d.includes("아직 가입 안 한 사람 1명: 사아"));
-  assert.ok(warn && warn.includes("미션이 시작된 뒤에도 초대 코드로 가입해 바로 참여할 수 있어요"), warn);
+  assert.ok(warn && warn.includes("미션이 시작된 뒤에도 가입해 바로 참여할 수 있어요"), warn);
   for (const name of EARLY) { await u[name].reload(); await u[name].locator(".target-name").waitFor(); }
   await H.panel(u["가나"], ANGEL_PANEL).getByRole("button", { name: "수호천사 지원하기" }).waitFor();
   console.log("  미션 시작 뒤에는 수호천사 지원 버튼이 열린다");
@@ -63,9 +63,41 @@ const H = require("./helpers.cjs");
 
   step("사아가 미션 시작 뒤에 가입: 내 대상이 보이고, 가입 전에 온 미션을 인증하고, 자기 미션도 한다");
   {
+    // 사아는 초대 코드 없이 회사 메일 아이디(late3)로 가입한다: 인증 메일의 링크를 눌러야 명단의 이름과 연결된다
     const p = await mk(LATE); u[LATE] = p;
-    await H.signup(p, inv[LATE], "late9@example.com");
+    await p.goto(H.BASE);
+    await p.getByRole("tab", { name: "처음 가입" }).click();
+    await p.getByPlaceholder("회사 메일 아이디").fill("Late3"); // 대문자로 적어도 소문자 주소가 된다
+    await p.getByText("late3@samsung.com로 인증 메일이 가요.").waitFor();
+    await p.locator('input[type="password"]').fill("secret123");
+    await p.getByRole("button", { name: "가입하기" }).click();
+    const verify = H.panel(p, "회사 메일 인증");
+    await verify.getByText("late3@samsung.com").waitFor();
+    assert.equal(await p.locator("nav.tabs").count(), 0, "인증 전에는 메뉴가 없다(아무것도 읽을 수 없다)");
+    await verify.getByRole("button", { name: "인증했어요 · 연결하기" }).click();
+    await verify.getByText("아직 메일 인증 전이에요").waitFor(); // 링크를 누르기 전에는 연결되지 않는다
+    await verify.getByRole("button", { name: "인증 메일 다시 보내기" }).click();
+    await verify.getByText(/인증 메일을 다시 보냈어요|조금 전에 보냈어요/).waitFor();
+    await H.verifyMail("late3@samsung.com"); // 메일의 링크 누르기(에뮬레이터)
+    await verify.getByRole("button", { name: "인증했어요 · 연결하기" }).click();
     await p.locator(".target-name").waitFor();
+    await p.locator(".hud-who", { hasText: "사아님" }).waitFor();
+    console.log("  사아: 아이디 late3로 가입 → 인증 전에는 연결 안 됨 → 메일의 링크를 누른 뒤 '인증했어요 · 연결하기' → 명단의 사아로 자동 연결(초대 코드 없이)");
+    {
+      // 명단에 없는 아이디로 가입한 사람은 메일을 인증해도 연결되지 않는다
+      const x = await mk("외부인");
+      await x.goto(H.BASE);
+      await x.getByRole("tab", { name: "처음 가입" }).click();
+      await x.getByPlaceholder("회사 메일 아이디").fill("stranger");
+      await x.locator('input[type="password"]').fill("secret123");
+      await x.getByRole("button", { name: "가입하기" }).click();
+      await H.panel(x, "회사 메일 인증").getByText("stranger@samsung.com").waitFor();
+      await H.verifyMail("stranger@samsung.com");
+      await H.panel(x, "회사 메일 인증").getByRole("button", { name: "인증했어요 · 연결하기" }).click();
+      await H.panel(x, "회사 메일 인증").getByText("명단에 없는 메일이에요(stranger@samsung.com)").waitFor();
+      assert.equal(await x.locator("nav.tabs").count(), 0);
+      console.log("  명단에 없는 아이디(stranger)는 메일을 인증해도 '명단에 없는 메일이에요'");
+    }
     target[LATE] = await H.readTarget(p);
     assert.ok(EARLY.includes(target[LATE]), `사아의 대상: ${target[LATE]}`);
     assert.equal(new Set(Object.values(target)).size, 4, "네 사람이 서로 다른 한 사람씩 맡는다(가입 순서와 상관없이 처음 배정 그대로)");
