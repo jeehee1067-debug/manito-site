@@ -230,7 +230,7 @@ const step = (s) => console.log("▶", s);
   {
     const page = users["다라"];
     await tab(page, "규칙");
-    await panel(page, "응모권 받는 법 (최대 17장)").waitFor();
+    await panel(page, "응모권 받는 법 (최대 15장, 수호천사는 +2장)").waitFor();
     await panel(page, "파트 대항전").getByText("같은 파트끼리는 마니또가 되지 않아요.").waitFor();
     await panel(page, "응모권 받는 법").getByText("마지막 집계에서 미션 완수율 1위").waitFor();
     await panel(page, "응모권 받는 법").getByText("끝까지 해야 받는 것이 있어요.").waitFor();
@@ -265,12 +265,12 @@ const step = (s) => console.log("▶", s);
     const slot = panel(page, "1주차 미션");
     await slot.locator(".cost-tag").first().waitFor(); // 안내 문구의 '소액 비용' 표시
     const seen = new Set();
-    for (let k = 0; k < 8; k++) { seen.add(await slot.locator(".card.level-normal .card-text").innerText()); await slot.getByRole("button", { name: "다른 보통 카드 보기" }).click(); }
+    for (let k = 0; k < 13; k++) { seen.add(await slot.locator(".card.level-normal .card-text").innerText()); await slot.getByRole("button", { name: "다른 보통 카드 보기" }).click(); }
     const withCost = await slot.locator(".card.level-normal .cost-tag").count();
-    console.log(`  보통 카드: '다른 카드 보기'로 ${seen.size}장을 돌려 봄 (원격 여부에 따라 3장 또는 8장)`);
+    console.log(`  보통 카드: '다른 카드 보기'로 ${seen.size}장을 돌려 봄 (다른 근무지면 10장, 아니면 13장)`);
     assert.ok(seen.size >= 3);
     // 비용 표시가 붙은 카드가 나올 때까지 넘겨서 화면 확인
-    for (let k = 0; k < 8 && !(await slot.locator(".card.level-normal .cost-tag").count()); k++) await slot.getByRole("button", { name: "다른 보통 카드 보기" }).click();
+    for (let k = 0; k < 13 && !(await slot.locator(".card.level-normal .cost-tag").count()); k++) await slot.getByRole("button", { name: "다른 보통 카드 보기" }).click();
     console.log("  비용 드는 보통 카드:", await slot.locator(".card.level-normal .card-text").innerText(), "/ 표시:", await slot.locator(".card.level-normal .cost-tag").count() ? "소액 비용" : "(없음)", withCost >= 0 ? "" : "");
     await shot(page, "cards");
   }

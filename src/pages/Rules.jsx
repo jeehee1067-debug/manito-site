@@ -9,7 +9,9 @@ export default function Rules() {
   const { roster } = useApp();
   const partsInUse = roster.some((r) => r.part);
   const max = R.maxMissions * R.perRedeemedMission + R.maxCardBonus + R.costBonus + R.hidden + R.maxReceiverEntries * R.perReceiverEntry + R.correctGuess
-    + (partsInUse ? R.partBonus : 0) + R.maxAngel * R.angelPerMission;
+    + (partsInUse ? R.partBonus : 0);
+  // 수호천사 응모권은 연결된 지원자만 받는다. "최대 N장"에 넣으면 모두가 받을 수 있는 것처럼 보여서 따로 적는다.
+  const angelMax = R.maxAngel * R.angelPerMission;
   const rank = (p) => p.label.split(" ")[0]; // "6등 응모권 추첨" → "6등"
   // 금액·인원은 알린 상만 보인다(prizes.js PRIZES_ANNOUNCED). 나머지는 이름과 정하는 방법만.
   const announced = (p) => PRIZES_ANNOUNCED.includes(p.key);
@@ -55,7 +57,7 @@ export default function Rules() {
         </ul>
       </Panel>
 
-      <Panel title={`응모권 받는 법 (최대 ${max}장)`}>
+      <Panel title={`응모권 받는 법 (최대 ${max}장, 수호천사는 +${angelMax}장)`}>
         <table className="rules-table">
           <tbody>
             <tr><th rowSpan={4}>마니또로서</th><td>내 미션이 인증될 때마다</td><td className="num">{R.perRedeemedMission}장 (최대 {R.maxMissions})</td></tr>
@@ -136,6 +138,16 @@ export default function Rules() {
         </ul>
       </Panel>
 
+      <Panel title="미션 카드 난이도">
+        <ul className="rules-list">
+          <li><b>쉬움</b>(추가 응모권 없음): 사이트 쪽지 한 통.</li>
+          <li><b>보통</b>(+{R.cardBonus.normal}장): 공들인 쪽지(삼행시, O/X 퀴즈, 몰래 알아내기) 또는 간단한 실물(포스트잇, 간식, 음료).</li>
+          <li><b>도전</b>(+{R.cardBonus.hard}장): 손으로 쓰거나 만든 것을 직접 전달하기, 선물, 3일 연속 쪽지.</li>
+          <li>직접 전달하는 미션은 들킬 위험이 있는 만큼 응모권이 더 많아요. 들키지 않고 전달하는 것까지가 미션이에요.</li>
+          <li>"몰래 알아내기" 카드는 주변에 슬쩍 물어볼 때 내가 마니또라는 것을 밝히지 않아요. 맞았는지는 대상이 후기에 적어 줘요.</li>
+        </ul>
+      </Panel>
+
       <Panel title="미션 비용">
         <ul className="rules-list">
           <li>"소액 비용" 표시가 있는 카드는 간식·음료처럼 내 돈이 들어요. 건당 {SPEND_GUIDE_WON.toLocaleString()}원 이하를 권장해요.</li>
@@ -154,7 +166,7 @@ export default function Rules() {
         <ul className="rules-list">
           <li>송년회 공개 전에 정체를 알려주거나 캐묻기("마니또에게 한마디"로 슬쩍 찔러보는 것은 괜찮아요)</li>
           <li>하지 않은 미션을 완료로 알리거나, 받지 않은 미션을 인증하기, 받고도 "받은 게 없어요"로 알리기</li>
-          <li>내가 누구를 맡았는지 다른 사람에게 알려주거나 서로 맞춰 보기(정체를 알려주는 것과 같아요)</li>
+          <li>내가 누구를 맡았는지 다른 사람에게 알려주거나 서로 맞춰 보기(정체를 알려주는 것과 같아요). <b>"공범" 카드로 전달을 부탁하는 한 사람만 예외</b>예요. 공범도 비밀을 지켜 주세요</li>
           <li>단서를 거짓으로 답하기</li>
           <li>내 후기에 공감을 눌러 달라고 부탁하거나 서로 눌러 주기로 짜기</li>
           <li>사이트를 일부러 반복 요청해 멈추게 하기(반복해서 저장한 기록은 누가 했는지 운영진에게 남아요)</li>
