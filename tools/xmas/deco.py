@@ -130,81 +130,178 @@ def bell(L, x, y, r=4):
 
 # ── 모자·머리띠 ───────────────────────────────────────────────────────────────
 
-def santa_hat(L, cx, by, w):
-    l, r = cx - w // 2, cx + w // 2
-    body = [(l + 2, by + 4), (l + 5, by - 10), (l + 12, by - 26), (cx - 6, by - 38), (cx + 8, by - 43), (cx + 22, by - 40),
-            (r + 2, by - 28), (r + 14, by - 12), (r + 22, by - 2), (r + 12, by - 4), (r + 2, by - 12), (r - 2, by + 4)]
-    L.poly(body, RED)
-    L.poly([(cx + 8, by - 43), (cx + 22, by - 40), (r + 2, by - 28), (r + 14, by - 12), (r + 22, by - 2), (r + 12, by - 4),
-            (r + 2, by - 12), (r - 2, by + 4), (cx + 14, by + 4), (cx + 12, by - 18)], RED_D)
-    L.line([(cx + 12, by - 18), (r + 4, by - 14), (r + 14, by - 6)], RED_DD, 2)  # 접힌 주름
-    L.poly([(l + 8, by - 6), (l + 13, by - 20), (cx - 8, by - 33), (cx - 5, by - 29), (l + 15, by - 14), (l + 11, by)], RED_L)
-    L.line([(cx - 2, by - 38), (cx + 6, by - 40)], RED_L)
-    # 방울
-    px, py = r + 21, by + 2
-    L.ell(px - 8, py - 8, px + 8, py + 8, WHT)
-    L.ell(px - 4, py - 3, px + 8, py + 8, WHT_D)
-    L.ell(px - 7, py - 7, px + 4, py + 4, WHT)
-    L.px(px - 4, py - 4, C(255, 255, 255))
-    L.px(px + 5, py + 5, WHT_DD)
-    fur(L, l - 3, by - 2, r + 3, by + 13, 4)
-    holly(L, l + 8, by + 1)
+# 모자는 머리 실루엣에 맞춘다: 띠(챙) 폭과 가운데는 띠 윗줄의 머리 폭으로, 모자 안쪽 높이는 머리카락을 덮을 만큼만.
+# 챙은 머리를 감싸듯 가운데가 살짝 내려간 곡선, 긴 머리는 띠 아래로 흘러나온다.
+
+def head_profile(src):
+    """머리 쪽 실루엣: y별 (왼쪽 x, 오른쪽 x), 원본 좌표."""
+    a = src.split()[3]
+    prof = {}
+    for y in range(0, 60):
+        xs = [x for x in range(30, min(src.width, 126)) if a.getpixel((x, y)) > 0]
+        if xs:
+            prof[y] = (xs[0], xs[-1])
+    return prof
 
 
-def elf_hat(L, cx, by, w):
-    l, r = cx - w // 2, cx + w // 2
-    cone = [(l + 2, by + 2), (l + 6, by - 12), (l + 2, by - 26), (l - 8, by - 38), (l - 18, by - 46), (l - 8, by - 42),
-            (l + 8, by - 32), (cx - 2, by - 22), (cx + 12, by - 10), (r - 2, by + 2)]
-    L.poly(cone, GRN)
-    L.poly([(cx - 2, by - 22), (cx + 12, by - 10), (r - 2, by + 2), (cx + 6, by + 2), (cx - 4, by - 12)], GRN_D)
-    L.poly([(l + 6, by - 10), (l + 3, by - 24), (l - 6, by - 36), (l - 2, by - 35), (l + 7, by - 25), (l + 10, by - 10)], GRN_L)
-    L.line([(l + 4, by - 26), (cx - 4, by - 14)], GRN_DD)  # 천 주름
-    bell(L, l - 21, by - 48, 5)
-    # 금색 띠 + 초록 마름모 무늬
-    L.rect(l - 3, by - 2, r + 3, by + 11, GOLD)
-    L.rect(l - 3, by + 8, r + 3, by + 11, GOLD_D)
-    L.line([(l - 3, by - 1), (r + 3, by - 1)], GOLD_L)
-    for x in range(l + 2, r, 9):
-        L.poly([(x, by + 4), (x + 3, by + 1), (x + 6, by + 4), (x + 3, by + 7)], GRN_D)
-        L.px(x + 3, by + 3, GRN_L)
-    holly(L, r - 6, by, -1)
+class Fit:
+    """모자 자리. top·bottom = 띠의 윗줄·아랫줄(양 끝 기준), cx·w = 가운데·폭, dome = 머리카락을 덮는 모자 안쪽 높이."""
+
+    def __init__(self, prof, top, bottom, overhang=2, margin=2):
+        self.top, self.bottom = top, bottom
+        xl, xr = prof[top]
+        self.cx = (xl + xr) / 2
+        self.w = (xr - xl + 1) + overhang * 2
+        self.l, self.r = self.cx - self.w / 2, self.cx + self.w / 2
+        a = self.w / 2 - 1
+        need = 0
+        for y, (x0, x1) in prof.items():
+            if y >= top:
+                continue
+            for x in (x0, x1):
+                t = max(0.05, 1 - ((x - self.cx) / a) ** 2)
+                need = max(need, (top - y) / math.sqrt(t))
+        self.dome = need + margin
+
+    def curve(self, x, depth=2):
+        """챙 곡선: 가운데가 depth만큼 내려간 U자. x 위치에서 더할 y."""
+        u = (x - self.cx) / (self.w / 2)
+        return round(depth * max(0.0, 1 - u * u))
+
+    def dome_pts(self, b=None, inset=1):
+        """띠 윗줄 위의 반타원(모자 안쪽) 점들."""
+        a, b = self.w / 2 - inset, b or self.dome
+        pts = [(self.cx + a * math.cos(t), self.top + 1 - b * math.sin(t)) for t in [i * math.pi / 32 for i in range(33)]]
+        return pts
 
 
+def band(L, f, top_off, bot_off, fill):
+    """챙 곡선을 따라 띠 한 줄을 칠한다(top_off·bot_off는 f.top 기준)."""
+    for x in range(math.floor(f.l), math.ceil(f.r) + 1):
+        c = f.curve(x)
+        L.line([(x, f.top + top_off + c), (x, f.top + bot_off + c)], fill)
 
 
-def beanie(L, cx, by, w):
-    l, r = cx - w // 2, cx + w // 2
-    a, b, cy = (r - l) / 2, 20, by - 12  # 돔(타원) 반지름·중심. 아래 끝(by+8)은 접은 단(by-2~by+13) 뒤로 숨는다
-    def top(x):
+def contact_shadow(base, f):
+    """모자 아래 머리·이마에 얇은 그림자(머리에 얹힌 느낌)."""
+    px = base.load()
+    for x in range(math.floor(f.l) + 1, math.ceil(f.r)):
+        y = f.bottom + f.curve(x) + 2
+        for dy, a in ((0, 70), (1, 34)):
+            X, Y = x + OX, y + dy + OY
+            if 0 <= X < base.width and 0 <= Y < base.height and px[X, Y][3] > 0:
+                r, g, b, al = px[X, Y]
+                k = 1 - a / 255
+                px[X, Y] = (int(r * k), int(g * k), int(b * k), al)
+
+
+def beanie(L, f):
+    cx, top = f.cx, f.top
+    b = max(f.dome, 10)
+    L.poly(f.dome_pts(b), RED)
+    a = f.w / 2 - 1
+    for x in range(math.floor(f.l) + 1, math.ceil(f.r)):  # 오른쪽 그늘 + 니트 골
         t = max(0.0, 1 - ((x - cx) / a) ** 2)
-        return cy - b * math.sqrt(t)
-    L.ell(l, cy - b, r, cy + b, RED)
-    for x in range(l + 1, r):  # 오른쪽 그늘 + 니트 골
-        y0 = round(top(x)) + 1
-        if x > cx + 8:
-            L.line([(x, y0), (x, by)], RED_D)
-        if (x - l) % 4 == 0:
-            L.line([(x, y0 + 2), (x, by)], RED_DD if x > cx + 8 else RED_D)
-    for y in range(by - 22, by - 2, 5):  # 꽈배기 무늬
+        y0 = round(top + 1 - b * math.sqrt(t)) + 1
+        if x > cx + 6:
+            L.line([(x, y0), (x, top + 1)], RED_D)
+        if (x - math.floor(f.l)) % 4 == 0 and y0 < top:
+            L.line([(x, y0 + 1), (x, top + 1)], RED_DD if x > cx + 6 else RED_D)
+    for y in range(round(top - b + 6), top - 1, 5):  # 꽈배기 무늬
         L.line([(cx - 2, y), (cx + 2, y + 3)], RED_L)
         L.line([(cx + 2, y), (cx - 2, y + 3)], RED_DD)
-    L.line([(l + 7, by - 12), (l + 13, by - 22), (cx - 8, by - 27)], RED_L)
-    # 접은 단: 빨강 바탕 + 흰 지그재그·눈송이 무늬
-    L.rect(l - 3, by - 2, r + 3, by + 13, RED_D)
-    for x in range(l - 2, r + 3):
-        y = by + 2 + (abs((x % 6) - 3) if True else 0)
-        L.px(x, y, WHT)
-        L.px(x, by + 10 - abs((x % 6) - 3), WHT_D)
-    for x in range(l + 4, r - 2, 12):
+    L.line([(f.l + 6, top - b * 0.35), (f.l + 11, top - b * 0.7), (cx - 7, top - b * 0.93)], RED_L)
+    # 접은 단: 곡선을 따라
+    band(L, f, 0, f.bottom - top, RED_D)
+    for x in range(math.floor(f.l), math.ceil(f.r) + 1):
+        c = f.curve(x)
+        L.px(x, top + 2 + abs((x % 6) - 3) // 2 + c, WHT)
+        L.px(x, f.bottom - 2 - abs((x % 6) - 3) // 2 + c, WHT_D)
+        L.px(x, f.bottom + c, RED_DD)
+    for x in range(math.floor(f.l) + 5, math.ceil(f.r) - 3, 11):
+        y = (top + f.bottom) // 2 + f.curve(x)
         for dx, dy in ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)):
-            L.px(x + dx, by + 6 + dy, WHT)
-    L.line([(l - 3, by + 13), (r + 3, by + 13)], RED_DD)
-    # 털 방울
-    for dx, dy, rr in ((0, -34, 7), (-5, -31, 5), (5, -31, 5), (0, -39, 5), (-4, -37, 4), (4, -37, 4)):
-        L.ell(cx + dx - rr, by + dy - rr, cx + dx + rr, by + dy + rr, WHT)
-    L.ell(cx - 1, by - 34, cx + 7, by - 27, WHT_D)
-    L.px(cx - 3, by - 38, C(255, 255, 255))
-    L.px(cx + 5, by - 29, WHT_DD)
+            L.px(x + dx, y + dy, WHT)
+    # 털 방울(작게)
+    py = top - b - 3
+    for dx, dy, rr in ((0, 0, 5), (-3, 2, 3), (3, 2, 3), (0, -3, 3)):
+        L.ell(cx + dx - rr, py + dy - rr, cx + dx + rr, py + dy + rr, WHT)
+    L.ell(cx, py - 1, cx + 5, py + 4, WHT_D)
+    L.px(cx - 2, py - 3, C(255, 255, 255))
+    return f
+
+
+def santa_hat(L, f):
+    cx, top, l, r = f.cx, f.top, f.l, f.r
+    b = max(f.dome, 10)
+    L.poly(f.dome_pts(b), RED)
+    # 오른쪽으로 접혀 늘어진 끝
+    tip = (r + 11, top + 1)
+    flop = [(cx - 6, top - b + 2), (cx, top - b - 7), (cx + 8, top - b - 12), (cx + 16, top - b - 11), (r, top - b * 0.5 - 3),
+            (r + 9, top - b * 0.15), (tip[0] + 2, tip[1] - 2), (tip[0] - 4, tip[1] + 1), (r + 1, top - b * 0.05), (r - 4, top - b * 0.3)]
+    L.poly(flop, RED)
+    L.poly([(cx + 8, top - b - 12), (cx + 16, top - b - 11), (r, top - b * 0.5 - 3), (r + 9, top - b * 0.15), (tip[0] + 2, tip[1] - 2),
+            (tip[0] - 4, tip[1] + 1), (r + 1, top - b * 0.05), (r - 4, top - b * 0.3), (cx + 10, top - b * 0.55), (cx + 6, top - b - 6)], RED_D)
+    L.line([(cx + 6, top - b - 6), (cx + 10, top - b * 0.55), (r - 3, top - b * 0.28), (r + 2, top - b * 0.05)], RED_DD)  # 접힌 주름
+    a = f.w / 2 - 1
+    for x in range(math.floor(cx) + 6, math.ceil(r)):  # 안쪽 오른쪽 그늘
+        t = max(0.0, 1 - ((x - cx) / a) ** 2)
+        y0 = round(top + 1 - b * math.sqrt(t)) + 1
+        L.line([(x, max(y0, top - b * 0.3)), (x, top + 1)], RED_D)
+    L.line([(l + 5, top - b * 0.3), (l + 10, top - b * 0.68), (cx - 5, top - b * 0.96), (cx, top - b - 5)], RED_L)
+    # 방울
+    px, py = tip
+    L.ell(px - 6, py - 6, px + 6, py + 6, WHT)
+    L.ell(px - 2, py - 2, px + 6, py + 6, WHT_D)
+    L.ell(px - 5, py - 5, px + 3, py + 3, WHT)
+    L.px(px - 3, py - 3, C(255, 255, 255))
+    # 털 테두리: 곡선을 따라
+    rnd = random.Random(4)
+    band(L, f, -1, f.bottom - top, WHT)
+    for x in range(math.floor(l), math.ceil(r) + 1, 4):
+        c = f.curve(x)
+        L.ell(x - 2, top - 2 + c, x + 3, top + 2 + c, WHT)
+        L.ell(x - 2, f.bottom - 2 + c, x + 3, f.bottom + 2 + c, WHT)
+    for x in range(math.floor(l), math.ceil(r) + 1):
+        c = f.curve(x)
+        for y in range((top + f.bottom) // 2 + c, f.bottom + c + 1):
+            if rnd.random() < 0.2:
+                L.px(x, y, WHT_D)
+        if rnd.random() < 0.3:
+            L.px(x, f.bottom - 1 + c, WHT_DD)
+    holly(L, l + 7, top + 1 + f.curve(l + 7))
+    return f
+
+
+def elf_hat(L, f):
+    cx, top, l, r = f.cx, f.top, f.l, f.r
+    b = max(f.dome, 10)
+    L.poly(f.dome_pts(b), GRN)
+    tip = (l - 10, top - b - 17)
+    cone = [(l + 2, top - b * 0.45), (l + 4, top - b * 0.85), (l - 2, top - b - 6), (tip[0], tip[1]),
+            (l + 8, top - b - 10), (cx - 2, top - b - 3), (cx + 6, top - b * 0.9)]
+    L.poly(cone, GRN)
+    a = f.w / 2 - 1
+    for x in range(math.floor(cx) + 4, math.ceil(r)):  # 오른쪽 그늘
+        t = max(0.0, 1 - ((x - cx) / a) ** 2)
+        y0 = round(top + 1 - b * math.sqrt(t)) + 1
+        L.line([(x, y0), (x, top + 1)], GRN_D)
+    L.poly([(l + 1, top - b * 0.8), (l - 2, top - b - 4), (tip[0] + 2, tip[1] + 2), (l + 3, top - b * 0.75)], GRN_L)
+    L.line([(l + 5, top - b * 0.75), (cx - 2, top - b * 0.5)], GRN_DD)  # 천 주름
+    bell(L, tip[0] - 2, tip[1] - 2, 4)
+    # 금색 띠 + 초록 마름모 무늬, 곡선을 따라
+    band(L, f, -1, f.bottom - top, GOLD)
+    for x in range(math.floor(l), math.ceil(r) + 1):
+        c = f.curve(x)
+        L.px(x, top - 1 + c, GOLD_L)
+        L.px(x, f.bottom + c, GOLD_D)
+        L.px(x, f.bottom - 1 + c, GOLD_D)
+    for x in range(math.floor(l) + 3, math.ceil(r) - 4, 8):
+        y = (top + f.bottom) // 2 + f.curve(x + 3)
+        L.poly([(x, y), (x + 3, y - 3), (x + 6, y), (x + 3, y + 3)], GRN_D)
+        L.px(x + 3, y - 1, GRN_L)
+    holly(L, r - 6, top + f.curve(r - 6), -1)
+    return f
 
 
 def antlers(L, cx, ty, w, nose):
@@ -376,19 +473,19 @@ def hand_mask(src, box):
 
 SPECS = {
     1: dict(name="rudolph", label="루돌프",
-            head=lambda L, s: antlers(L, 73, 2, 56, (73, 57)),
+            head=lambda L, s, p: antlers(L, 73, 2, 56, (73, 57)),
             scarf=(73, 82, 46, RED, RED_D, WHT, -1),
             prop=lambda L: candy_cane(L, 15, 250, 320), hand=(3, 258, 28, 300)),
     2: dict(name="elf", label="엘프",
-            head=lambda L, s: elf_hat(L, 75, 14, 60),
+            head=lambda L, s, p: elf_hat(L, Fit(p, 12, 21)),
             scarf=(75, 82, 46, RED, RED_D, GRN, 1),
             prop=lambda L: gift_box(L, 2, 297, 28, 318), hand=(3, 258, 28, 300)),
     3: dict(name="beanie", label="털모자",
-            head=lambda L, s: beanie(L, 73, 18, 66),
+            head=lambda L, s, p: beanie(L, Fit(p, 18, 28)),
             scarf=(72, 86, 52, GRN, GRN_D, WHT, 1),
             prop=lambda L: cocoa_mug(L, -14, 276, 2, 296), hand=(0, 256, 24, 302)),
     4: dict(name="santa", label="산타",
-            head=lambda L, s: santa_hat(L, 75, 14, 60),
+            head=lambda L, s, p: santa_hat(L, Fit(p, 12, 23)),
             scarf=(74, 82, 46, GRN, GRN_D, RED, -1),
             prop=lambda L: gift_sack(L, 15, 292, 38), hand=(3, 258, 28, 300)),
 }
@@ -406,8 +503,12 @@ for k, spec in SPECS.items():
     pr = Layer((W, H)); spec["prop"](pr); base.alpha_composite(outlined(pr))
     hb = spec["hand"]
     base.alpha_composite(hand_mask(src, hb), (OX, OY))
-    hd = Layer((W, H)); spec["head"](hd, skin)
+    prof = head_profile(src)
+    hd = Layer((W, H))
+    fit = spec["head"](hd, skin, prof)
     base.alpha_composite(outlined(hd))
+    if isinstance(fit, Fit):
+        contact_shadow(base, fit)
 
     if GLOW:
         g = Layer((W, H))
