@@ -332,13 +332,13 @@ npm run test:e2e     # 터미널 2: 화면 흐름 검증 8개 (특정 것만: np
 
 ## 연말 장식
 
-눈 내림, 전구 줄, 패널 제목의 호랑가시 잎, 로고의 산타 모자, 트리·선물, 선물 리본, 로그인 화면 파트장님·PL님의 크리스마스 꾸밈(`src/assets/xmas/leader1~4.png`: 루돌프 뿔·사슴 귀·빨간 코와 지팡이 사탕, 엘프 모자와 선물 상자, 니트 털모자와 코코아 머그, 산타 모자와 선물 자루, 모두 목도리)은 `src/xmas.jsx`, `src/xmas.css`, `src/assets/xmas/`에만 있다. 기본 색·테두리·버튼·대사창(방탈출 값)은 `styles.css`에서 바꾸지 않았다. 움직임 줄이기 설정을 켠 기기에서는 눈과 전구가 멈춰 있다.
+눈 내림, 전구 줄, 패널 제목의 호랑가시 잎, 로고의 산타 모자, 트리·선물, 선물 리본, 로그인 화면 파트장님·PL님의 크리스마스 꾸밈(`src/assets/xmas/leader1~4.png`: 산타 모자와 지팡이 사탕, 엘프 모자와 선물 상자, 루돌프 뿔·사슴 귀·빨간 코와 코코아 머그, 산타 모자와 선물 자루, 모두 목도리)은 `src/xmas.jsx`, `src/xmas.css`, `src/assets/xmas/`에만 있다. 기본 색·테두리·버튼·대사창(방탈출 값)은 `styles.css`에서 바꾸지 않았다. 움직임 줄이기 설정을 켠 기기에서는 눈과 전구가 멈춰 있다.
 
 꾸밈 그림은 `tools/xmas/deco.py`(원본 `public/char/boss1~4.png` 위에 1픽셀 해상도로 그림, 모자는 원본의 머리 실루엣을 재서 폭·위치·높이를 맞추고 챙은 머리를 감싸는 곡선, 손 픽셀을 다시 덮어 소품을 쥔 모양)로 만들고, `tools/xmas/export_cards.py`가 사람별 PNG(투명 원본, 4배 확대, 1080×1920 크리스마스 배경 카드)를 내보낸다. Python과 Pillow가 필요하다.
 
 ```
 python3 tools/xmas/deco.py public/char <출력 폴더>          # leader1~4.png
-python3 tools/xmas/export_cards.py <출력 폴더> <내보낼 폴더>  # xmas1_rudolph.png, _x4.png, _card.png …
+python3 tools/xmas/export_cards.py <출력 폴더> <내보낼 폴더>  # xmas1_santa.png, _x4.png, _card.png …
 ```
 
 시즌이 끝나면 `src/main.jsx`의 xmas import 두 줄과 `<Snow />`, `src/App.jsx`의 `<Garland />`·`<XmasFooter />`, `src/pages/Login.jsx`의 장식 몇 줄(`Garland`, `XmasTree`, `Gifts`, `logo-xmas`)을 지우고, 로그인 화면 캐릭터를 `XMAS_LEADERS` 대신 원본 `public/char/boss1~4.png`로 바꾸면 원래 디자인으로 돌아간다.

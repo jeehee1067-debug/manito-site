@@ -3,7 +3,7 @@
 import math, random, sys
 from PIL import Image, ImageDraw, ImageFilter
 SRC, DST = sys.argv[1], sys.argv[2]
-NAMES = {1: "rudolph", 2: "elf", 3: "beanie", 4: "santa"}
+NAMES = {1: "santa", 2: "elf", 3: "rudolph", 4: "santa"}
 INK = (34, 28, 38, 255)
 
 def card(fig, seed):
