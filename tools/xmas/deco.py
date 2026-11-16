@@ -19,6 +19,7 @@ WHT, WHT_D, WHT_DD = C(252, 252, 248), C(216, 224, 236), C(178, 190, 210)
 GOLD, GOLD_D, GOLD_DD, GOLD_L = C(242, 192, 62), C(194, 138, 36), C(140, 92, 22), C(255, 232, 150)
 BRN, BRN_D, BRN_DD, BRN_L = C(146, 96, 54), C(106, 66, 36), C(72, 44, 24), C(190, 138, 84)
 PINK = C(236, 150, 150)
+WINE, WINE_D, WINE_DD, WINE_L = C(150, 28, 58), C(112, 18, 44), C(78, 12, 32), C(196, 76, 100)
 COCOA, COCOA_D = C(122, 72, 44), C(90, 50, 30)
 
 
@@ -273,6 +274,44 @@ def santa_hat(L, f):
     return f
 
 
+def santa_hat_left(L, f):
+    """산타 모자 변형(1번): 와인색, 끝이 왼쪽으로 늘어지고 끝에 금색 방울. 빛은 다른 그림처럼 왼쪽 위에서."""
+    cx, top, l, r = f.cx, f.top, f.l, f.r
+    b = max(f.dome, 10)
+    L.poly(f.dome_pts(b), WINE)
+    a = f.w / 2 - 1
+    for x in range(math.floor(cx) + 5, math.ceil(r)):  # 오른쪽 그늘
+        t = max(0.0, 1 - ((x - cx) / a) ** 2)
+        y0 = round(top + 1 - b * math.sqrt(t)) + 1
+        L.line([(x, y0), (x, top + 1)], WINE_D)
+    # 왼쪽으로 접혀 늘어진 끝(빛을 받는 쪽이라 밝게, 아랫면만 어둡게)
+    tip = (l - 11, top + 2)
+    flop = [(cx + 6, top - b + 2), (cx, top - b - 7), (cx - 8, top - b - 12), (cx - 16, top - b - 11), (l, top - b * 0.5 - 3),
+            (l - 9, top - b * 0.15), (tip[0] - 2, tip[1] - 2), (tip[0] + 4, tip[1] + 1), (l - 1, top - b * 0.05), (l + 4, top - b * 0.3)]
+    L.poly(flop, WINE)
+    L.poly([(l + 4, top - b * 0.3), (l - 1, top - b * 0.05), (tip[0] + 4, tip[1] + 1), (l - 5, top - b * 0.18), (l + 1, top - b * 0.36)], WINE_D)
+    L.line([(cx - 6, top - b - 6), (cx - 10, top - b * 0.55), (l + 3, top - b * 0.28), (l - 2, top - b * 0.05)], WINE_DD)  # 접힌 주름
+    L.line([(cx + 1, top - b - 6), (cx - 8, top - b - 11), (cx - 15, top - b - 10), (l + 1, top - b * 0.5 - 2), (l - 7, top - b * 0.17)], WINE_L)
+    L.line([(cx + 4, top - b + 1), (cx + 9, top - b * 0.75)], WINE_L)
+    bell(L, tip[0], tip[1], 5)
+    # 털 테두리: 곡선을 따라(4번과 같은 방식)
+    rnd = random.Random(7)
+    band(L, f, -1, f.bottom - top, WHT)
+    for x in range(math.floor(l), math.ceil(r) + 1, 4):
+        c = f.curve(x)
+        L.ell(x - 2, top - 2 + c, x + 3, top + 2 + c, WHT)
+        L.ell(x - 2, f.bottom - 2 + c, x + 3, f.bottom + 2 + c, WHT)
+    for x in range(math.floor(l), math.ceil(r) + 1):
+        c = f.curve(x)
+        for y in range((top + f.bottom) // 2 + c, f.bottom + c + 1):
+            if rnd.random() < 0.2:
+                L.px(x, y, WHT_D)
+        if rnd.random() < 0.3:
+            L.px(x, f.bottom - 1 + c, WHT_DD)
+    holly(L, r - 7, top + 1 + f.curve(r - 7), -1)
+    return f
+
+
 def elf_hat(L, f):
     cx, top, l, r = f.cx, f.top, f.l, f.r
     b = max(f.dome, 10)
@@ -472,8 +511,8 @@ def hand_mask(src, box):
 
 
 SPECS = {
-    1: dict(name="santa", label="산타",
-            head=lambda L, s, p: santa_hat(L, Fit(p, 12, 23)),
+    1: dict(name="santa", label="산타(와인)",
+            head=lambda L, s, p: santa_hat_left(L, Fit(p, 12, 23)),
             scarf=(73, 82, 46, RED, RED_D, WHT, -1),
             prop=lambda L: candy_cane(L, 15, 250, 320), hand=(3, 258, 28, 300)),
     2: dict(name="elf", label="엘프",
