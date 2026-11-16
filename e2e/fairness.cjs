@@ -201,6 +201,7 @@ const val = (v) => v.stringValue ?? (v.integerValue !== undefined ? Number(v.int
   const prize = panel(admin, "추첨·시상");
   await prize.locator(".seed-input").fill("11");
   await prize.getByRole("button", { name: "추첨하기" }).click();
+  await prize.getByRole("button", { name: "숫자 11로 추첨 확정" }).click(); // 한 번 더 눌러 확정
   await prize.getByText("현장에서 정한 숫자: 11").waitFor();
   const winners = (await prize.locator(".winner").allInnerTexts()).map((t) => t.trim().split("\n")[0].trim());
   assert.ok(winners.length > 0, "당첨자가 있어야 한다");

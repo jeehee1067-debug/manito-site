@@ -57,9 +57,10 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
   - 피드 공감: `feed.likes`를 1 올리는 것과 `feedLikes/{글ID}_{pid}`(`pid, feedId, at`) 만들기를 한 묶음으로(규칙이 `exists`/`existsAfter`·`getAfter`로 서로 확인). 글마다 한 번, 취소 없음, phase 1~4, 가린 글·무효 글 불가. 공감 표시는 본인·운영자만 읽는다.
 - 수호천사(응모권과 연결됨):
   - `angelVolunteers/{pid}`(`active, at, n`): 본인이 phase 0~1에 지원·취소. 본인·운영자만 읽는다.
-  - `angels/{받는사람}`(`angelPid, at`): 운영자가 phase 1에 연결. 지원 중(`active`)인 사람만, 받는 사람 본인·그 사람의 마니또(`assignments/{angelPid}.receiverPid != 받는사람`)는 안 된다. `angelGifts`가 생기면 바꾸거나 지울 수 없다. 수호천사는 list `where angelPid ==`로 자기 것만 읽고, 받는 사람은 못 읽는다.
+  - `angels/{받는사람}`(`angelPid, at`): 운영자 계정이 phase 1에 쓴다. 규칙은 지원 중(`active`)인 사람만, 받는 사람 본인·그 사람의 마니또(`assignments/{angelPid}.receiverPid != 받는사람`)는 안 된다는 것까지 확인한다. `angelGifts`가 생기면 바꾸거나 지울 수 없다. 수호천사는 list `where angelPid ==`로 자기 것만 읽고, 받는 사람은 못 읽는다.
+  - **연결할 사람은 운영자가 고르지 않는다**(`src/lib/angels.js` `matchAngels`, `Admin.jsx` `linkAngelsNow`): 2·3주차를 열 때(`setWeek`) 자동으로, 그때까지 마니또의 완료 알림이 0건이고 참여 중인 사람에게(명단 순서), 지원 시각(`angelVolunteers.at`)이 이른 순서로. 본인·그 사람의 마니또·이미 연결된 지원자·닫힌 주차의 자기 미션을 다 하지 않은 지원자·불참·수상 제외는 건너뛴다. 순서는 규칙이 아니라 화면이 지킨다(규칙으로는 목록을 훑을 수 없다). 운영자가 넘긴 짝은 `meta/angelSkips`(`pairs: { 받는사람: [지원자] }`, 운영자만 읽고 씀)에 적어 다시 붙지 않게 한다.
   - `angelGifts/{받는사람}_{1|2}`(`receiverPid, k, text, message, createdAt`, 보낸 사람 정보 없음): 연결된 수호천사가 phase 1에 만든다. 받는 사람이 한 번 `confirmed: true, review(10~500자), confirmedAt`을 더한다. 받는 사람은 list, 수호천사는 문서 ID로 get(아직 없는 문서도), 운영자는 전부 읽고 지운다.
-  - `prefs`는 연결된 수호천사도 읽는다. 응모권은 `scoring.js`(`angels`·`angelGifts`), 발표 화면 "숨은 수호천사"(`results.angels`).
+  - `prefs`는 연결된 수호천사도 읽는다. 응모권은 `scoring.js`(`angels`·`angelGifts`), 발표 화면 "숨은 수호천사"(`results.angels`, `order` = 몇 번째로 지원했는지).
 - `results/public.step`: 발표 화면이 넘긴 장면 번호(공개 단계에 운영자가 `draws`와 함께 바꿀 수 있는 유일한 값). 참여자 결과 화면은 `src/lib/reveal.js`의 `buildSlides`로 같은 장면 순서를 계산해 그 장면까지만 보인다(화면에서만 가리는 것 — 직접 읽으면 보인다). 집계 때 `step: 0`과 발표용 값(`guesses`·`noticed`·`story`·`stats`·`likesTop`)을 같이 저장한다.
 - `config/app` 수정 규칙: 단계는 그대로이거나 한 칸 앞으로만, 공개(5)로 넘어가려면 `results/public`이 있어야 한다. 주차는 1~3이고 한 번에 한 칸까지만 올린다. 단서는 줄일 수 없고 한 번에 2개까지, **공개 개수 ≤ 2 × 주차**. `assignVer`·`partExcluded`·`siteMatched`는 phase 0에서만 바꾼다.
 - `results/public`: phase 4에는 통째로 다시 쓸 수 있지만 `draws`는 비어 있어야 하고, phase 5에는 `draws`에 새 칸을 더하는 것만 된다(변경·삭제·재집계 불가). 화면(`Reveal.jsx` `runDrawAll`)은 트랜잭션으로 "아직 안 뽑았을 때"만, 현장 숫자 하나로 정한 다섯 칸(`grand`·`best`·`t4`·`t5`·`t6`, 각 `{ seed, winners }`, `scoring.js` `drawAll`)을 한 번에 쓴다. 결과 화면 "추첨 검증"이 `verifyDraws`로 다시 계산한다(칸이 빠졌거나 숫자가 칸마다 다르면 통과하지 못한다).
@@ -99,7 +100,7 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 - 일정(`SCHEDULE`): 11/17(화) 1주차, 11/24 2주차, 12/1 3주차(칭찬 카드), 단서는 금요일 11/20·11/27·12/4, 12/8(화) 미션 마감·최종 지목, 12/9(수) 송년회에서 집계 후 발표 화면으로 공개·시상·추첨.
 - 단서: 프로필 6문항(고르기 3 + 직접 쓰기 3, `PROFILE_QUESTIONS`. 5번째가 "나만 아는 의외의 TMI"), 매주 금요일 운영자가 전원 동일하게 2개씩 공개(인증 수와 무관하게 — 은신 응모권 공정성 때문). 주차마다 2개까지만(공개 개수 ≤ 2 × 주차). 최종 지목 단계부터 마지막 단서로 마니또의 **파트**가 공개된다(부서 전원이 한 팀이고 파트만 다르다).
 - 응모권: 미션 인증 1(최대 3), 카드 추가분 보통 +1·도전 +2(`cardBonus`, 합계 최대 4), 받는 사람 입력 1(최대 3), 은신 2, 정답 지목 1, 우승 파트 1, 수호천사 1(지원자만, `angelPerMission`, 최대 2). 최대 16장. 정체를 알려주면 둘의 합계가 −1이 되도록 설계됨.
-  - 수호천사: 마니또가 미션을 안 해서 받은 게 없는 사람에게 운영자가 지원자를 연결한다(1.5주씩 마니또를 바꾸는 방식은 사용자와 검토 후 하지 않기로 함). 확인된 수호천사 미션은 받는 사람의 인증 입력(보상과 합쳐 최대 3)으로 치고, "내 미션 수" 조건에는 넣지 않는다.
+  - 수호천사: 마니또가 미션을 안 해서 받은 게 없는 사람에게 지원자를 연결한다(1.5주씩 마니또를 바꾸는 방식은 사용자와 검토 후 하지 않기로 함). **연결은 먼저 지원한 순서대로 자동으로**(사용자가 정함: 운영자 판단이 최대한 적게 들어가도록. 2·3주차를 열 때, 기준은 `src/lib/angels.js`). 운영자 판단이 남는 곳은 "연결 풀고 다음 순번으로"를 누를지뿐이다. 확인된 수호천사 미션은 받는 사람의 인증 입력(보상과 합쳐 최대 3)으로 치고, "내 미션 수" 조건에는 넣지 않는다.
   - 은신은 **내 미션 3건이 모두 인증·인정되고**(`hiddenMinMissions: 3`. 1주만 하고 쉬는 것을 막으려고 1건에서 올림) **단서 6칸을 모두 낸**(`hiddenNeedsClues`, `cluesDoneSet`) 마니또만. 대상 불참·운영자 "받았음"으로 인정된 미션도 3건에 센다. 가입 안 한 사람·중도 이탈·수상 제외는 0장. 3건을 못 채운 마니또는 잃을 은신이 없어 "정체를 알려주면 합계 −1"이 성립하지 않는다(사용자가 알고 정함). 내 미션 화면 "끝까지 해야 받는 응모권" 줄(`TicketSummary`)이 남은 건수를 보여 준다.
   - 카드 추가분은 받는 사람이 **직접 인증한 미션에만**, 그리고 인증할 때 "카드와 다름"(`cardMatch: false`)이 아닐 때만 준다. 대상 불참이나 운영자 확인으로 인정된 미션에는 주지 않는다.
   - "완료를 알린 주차"는 완료 알림(`deliveries`)이 있거나 완료 표시(`giverMissions.done`)가 있는 주차다(둘은 한 묶음으로 저장되지만 예전 자료를 위해 합쳐서 본다).
@@ -127,6 +128,7 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 | `src/lib/assign.js` | 배정(같은 파트 제외. 조건에 맞는 원을 만든 뒤 자리 맞바꾸기로 섞음), 코드 생성 |
 | `src/lib/scoring.js` | 응모권 계산(운영자 확인 `verdicts`·`cardMatch`·단서 6칸 반영), 파트 대항전 순위(주간·최종), 가중 추첨, 현장 숫자 하나로 큰 상부터 한 번에 정하는 추첨(`drawAll`: `seededDraw`·`seededTop`, 정하는 순서 `DRAW_ORDER`)과 검증(`verifyDraws`) |
 | `src/lib/pairs.js` | 운영 화면 짝 현황(마니또별 주차 상태·지목), 운영자가 확인할 주차, 받는 사람 기준 코드(`receiverCodes`), 마니또가 낸 단서(`clueAnswers`·`cluesDoneSet`) |
+| `src/lib/angels.js` | 수호천사 자동 연결 기준: 지원 순서(`angelQueue`), 도움이 필요한 사람(`needyReceivers`), 짝짓기(`matchAngels`), 운영 화면 표시(`angelQueueStatus`) |
 | `src/lib/writes.js` | 쓰기 횟수 `bump()` = `{ n: increment(1) }` |
 | `src/lib/reveal.js` | 송년회 발표 장면 순서(`buildSlides`: 원을 따라 잇는 짝 공개 `pairChain`, 추첨 장면 `drawGo` 뒤 6등 → 1등 발표), 참여자에게 열린 장면(`revealedUpTo`) |
 | `src/pages/Reveal.jsx` | 결과 탭(참여자는 넘긴 장면까지만), 발표 화면(`Presenter`), 한 번에 추첨(`runDrawAll` 트랜잭션), 1~6등 목록(발표된 것만) |

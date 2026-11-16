@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  arrayRemove, arrayUnion, collection, deleteDoc, deleteField, doc, getDoc, getDocs, onSnapshot, serverTimestamp, setDoc, updateDoc, writeBatch,
+  arrayRemove, arrayUnion, collection, deleteDoc, deleteField, doc, getDoc, getDocs, onSnapshot, runTransaction, serverTimestamp, setDoc, updateDoc, writeBatch,
 } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp } from "../App.jsx";
@@ -9,6 +9,7 @@ import { PHASE, PHASES, CLUE_COUNT, LEVEL_LABEL, LOCS, PART_HINT_IDX, RULES_VERS
 import { SLOT_STATUS_LABEL, clueAnswers, cluesDoneSet, pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../lib/pairs.js";
 import { assignManito, assignmentMemo, generateCodes, makeInviteCode } from "../lib/assign.js";
 import { computeTickets, noticedWeeks, partStandings, weeklyPartBoard } from "../lib/scoring.js";
+import { angelQueue, angelQueueStatus, matchAngels, needyReceivers } from "../lib/angels.js";
 import { PRIZES } from "../config/prizes.js";
 import { parseRosterLine, rosterSummary, sameSummary } from "../lib/roster.js";
 
@@ -154,6 +155,8 @@ export default function Admin() {
     if (phase === PHASE.SCORING) {
       const res = await getDoc(doc(db, "results", "public")).catch(() => null);
       if (!res?.exists()) return setStepMsg("아직 집계하지 않았어요. 아래 '집계하기'를 먼저 눌러 주세요. 집계 결과가 있어야 공개 단계로 넘어갈 수 있어요.");
+      // 베스트 후기상은 집계 단계에서만 고를 수 있다(공개 단계에서는 추첨과 발표 진행만 쓸 수 있다)
+      if (!res.data().bestReview && !window.confirm(`${PRIZES.bestReview.label}을 아직 고르지 않았어요.\n\n공개 단계로 넘어가면 고를 수 없고, 그 상은 발표 화면에서 빠져요. 고르지 않고 넘어갈까요?\n(고르려면 "취소"를 누르고 아래 "베스트 후기상 고르기"에서 골라 주세요)`)) return;
     }
     // 미션 시작 전: 가입 안 한 사람이 있으면 그 사람의 마니또는 인증을 받을 수 없어 미션 응모권이 0장이 된다.
     const unjoined = phase === PHASE.SETUP && fullRoster ? fullRoster.filter((r) => !r.uid) : [];
@@ -573,10 +576,18 @@ function Running() {
   async function setWeek(week) {
     if (week === config.week) return;
     if (week < config.week && !window.confirm(`${config.week}주차 → ${week}주차로 내릴까요?\n\n${week + 1}주차부터는 다시 잠겨서, 그 주차의 카드 고르기·완료 알리기·인증이 막혀요. 실수로 올린 것을 되돌릴 때만 쓰세요.`)) return;
+    // 주차를 올리면 그때까지 아무것도 받지 못한 사람에게 수호천사가 자동으로 연결된다(되돌릴 수 없어서 한 번 묻는다)
+    if (week > config.week && !window.confirm(`${week}주차를 열까요?\n\n지금까지 마니또에게 아무것도 받지 못한 사람이 있으면, 수호천사 지원자가 먼저 지원한 순서대로 자동 연결돼요(운영자가 고르지 않아요). 정해진 날에만 눌러 주세요.`)) return;
     try {
       await updateDoc(doc(db, "config", "app"), { week });
     } catch {
-      setBoardMsg("주차를 바꾸지 못했어요. 잠시 뒤 다시 눌러 주세요.");
+      return setBoardMsg("주차를 바꾸지 못했어요. 잠시 뒤 다시 눌러 주세요.");
+    }
+    if (week > config.week) {
+      const made = await linkAngelsNow(week).catch(() => null);
+      setBoardMsg(made == null ? `${week}주차를 열었어요. 수호천사 자동 연결은 하지 못했어요. 아래 "수호천사"에서 "지금 순서대로 연결"을 눌러 주세요.`
+        : made.length ? `${week}주차를 열었어요. 수호천사 ${made.length}명을 지원 순서대로 연결했어요(아래 "수호천사"에서 볼 수 있어요).`
+          : `${week}주차를 열었어요. 수호천사를 연결할 사람은 없었어요.`);
     }
   }
 
@@ -623,7 +634,10 @@ function Running() {
         <div className="chip-row">
           {[1, 2, 3].map((w) => <button key={w} className={config.week === w ? "chip is-on" : "chip"} onClick={() => setWeek(w)}>{w}주차</button>)}
         </div>
-        <p className="small">주차를 올리면 그 주차 미션이 열려요. 3주차는 칭찬 카드예요.</p>
+        <p className="small">
+          주차를 올리면 그 주차 미션이 열려요. 3주차는 칭찬 카드예요. 2·3주차를 열 때, 그때까지 마니또에게 아무것도 받지 못한 사람에게
+          수호천사가 먼저 지원한 순서대로 자동 연결돼요.
+        </p>
       </Panel>
 
       <Panel title={`단서 공개 (${released} / ${CLUE_COUNT})`}>
@@ -852,64 +866,112 @@ function Moderation() {
 // 쪽지 검토: 익명 쪽지로 괴롭히는 일이 없게 운영자가 미션 중에도 쪽지를 본다(운영자는 참여하지 않는다).
 // 받는 사람이 신고한 쪽지(noteFlags)가 먼저 보이고, 가리면 받는 사람 화면에서 내용이 안 보인다.
 // 수호천사: 마니또가 아무것도 안 해서 받은 게 없는 사람에게, "수호천사 지원하기"를 누른 참여자를 몰래 연결한다.
+// 누구를 연결할지는 운영자가 고르지 않는다: 먼저 지원한 순서대로 자동으로 짝짓는다(기준은 src/lib/angels.js).
 // 수호천사가 한 미션을 받는 사람이 확인하면 수호천사는 1건당 응모권 +1(최대 2), 받는 사람은 인증 입력으로 친다(scoring.js).
+
+// 지금 자료를 새로 읽어 angels.js의 기준대로 연결한다. 주차를 올릴 때(자동)와 "지금 순서대로 연결"에서 쓴다.
+// 이미 수호천사가 있는 사람은 덮어쓰지 않는다(운영자 둘이 동시에 눌러도 한 번만).
+async function linkAngelsNow(week) {
+  const [assignments, missions, deliveries, volunteers, angels, roster, skipDoc] = await Promise.all([
+    ...["assignments", "giverMissions", "deliveries", "angelVolunteers", "angels", "roster"].map(readAll),
+    getDoc(doc(db, "meta", "angelSkips")),
+  ]);
+  const delivered = new Set(Object.values(deliveries).filter((d) => d.kind !== "note").map((d) => `${d.receiverPid}_${d.slot}`));
+  const rows = pairRows({ assignments, missions, delivered });
+  const pairs = matchAngels({ rows, volunteers, angels, week, people: angelPeople(Object.entries(roster).map(([pid, r]) => ({ pid, ...r }))), skips: skipDoc.exists() ? skipDoc.data().pairs || {} : {} });
+  const made = [];
+  for (const p of pairs) {
+    try {
+      const ok = await runTransaction(db, async (tx) => {
+        const ref = doc(db, "angels", p.receiverPid);
+        if ((await tx.get(ref)).exists()) return false;
+        tx.set(ref, { angelPid: p.angelPid, at: serverTimestamp() });
+        return true;
+      });
+      if (ok) made.push(p);
+    } catch { /* 그 사이 지원을 취소했으면 보안 규칙이 거부한다. 다음에 다시 맞춘다 */ }
+  }
+  return made;
+}
+const angelPeople = (roster) => roster.map((r) => ({ pid: r.pid, joined: Boolean(r.uid), dropout: Boolean(r.dropout), disqualified: Boolean(r.disqualified) }));
+const stampText = (t) => (t?.toDate ? t.toDate().toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "");
+
 function Angels() {
   const { nameOf, config } = useApp();
   const { ready, rows } = usePairs();
+  const roster = useFullRoster();
   const volunteers = useColl("angelVolunteers");
   const angels = useColl("angels");
   const gifts = useColl("angelGifts");
-  const [pick, setPick] = useState({});
+  const [skips, setSkips] = useState(null); // 운영자가 "다음 순번으로" 넘긴 짝 { 받는사람: [지원자] }
+  const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
-  if (!ready || !volunteers || !angels || !gifts) return null;
+  useEffect(() => onSnapshot(doc(db, "meta", "angelSkips"), (d) => setSkips(d.exists() ? d.data().pairs || {} : {}), () => setSkips({})), []);
+  if (!ready || !roster || !volunteers || !angels || !gifts || !skips) return null;
   const running = config.phase === PHASE.RUNNING;
-  const giverOf = Object.fromEntries(rows.map((r) => [r.receiverPid, r.giverPid]));
-  const active = Object.entries(volunteers).filter(([, v]) => v.active).map(([pid]) => pid);
-  const busy = new Set(Object.values(angels).map((a) => a.angelPid)); // 한 사람에게 한 명씩만 연결
+  const week = config.week || 1;
+  const people = angelPeople(roster);
+  const queue = angelQueueStatus({ rows, volunteers, angels, week, people });
+  const orderOf = Object.fromEntries(queue.map((v) => [v.pid, v.order]));
+  const needy = needyReceivers({ rows, angels, week, people });
+  const pending = matchAngels({ rows, volunteers, angels, week, people, skips }); // 지금 누르면 연결될 짝
   const giftsOf = (r) => [1, 2].map((k) => gifts[`${r}_${k}`]).filter(Boolean);
-  // 받은 게 없는 사람: 내 마니또가 아직 한 주차도 완료를 알리지 않았다
-  const needy = rows.filter((r) => !Object.values(r.slots).some((s) => s.done) && !angels[r.receiverPid]).map((r) => r.receiverPid);
-  async function link(receiverPid) {
-    const angelPid = pick[receiverPid];
-    if (!angelPid) return;
-    if (!window.confirm(`${nameOf(receiverPid)}님에게 ${nameOf(angelPid)}님을 수호천사로 연결할까요?\n\n${nameOf(angelPid)}님의 내 미션 화면에 "수호천사 미션"이 생겨요. ${nameOf(receiverPid)}님은 누가 수호천사인지 몰라요.`)) return;
+  const STATE = { linked: (v) => `연결됨 → ${nameOf(v.receiverPid)}`, waiting: () => "대기", own: () => `${week - 1}주차까지 자기 미션을 다 하지 않아 건너뜀(하면 연결될 수 있어요)` };
+
+  async function runNow() {
+    setBusy(true);
+    setMsg("");
     try {
-      await setDoc(doc(db, "angels", receiverPid), { angelPid, at: serverTimestamp() });
-      setMsg(`${nameOf(receiverPid)} ← ${nameOf(angelPid)} 연결했어요.`);
+      const made = await linkAngelsNow(week);
+      setMsg(made.length ? `지원 순서대로 연결했어요: ${made.map((p) => `${nameOf(p.receiverPid)} ← ${nameOf(p.angelPid)}`).join(", ")}` : "지금 연결할 짝이 없어요.");
     } catch {
-      setMsg("연결하지 못했어요. 지원을 취소했거나, 그 사람의 마니또인지 확인해 주세요.");
+      setMsg("연결하지 못했어요. 잠시 뒤 다시 눌러 주세요.");
+    } finally {
+      setBusy(false);
     }
   }
-  async function unlink(receiverPid) {
-    if (!window.confirm(`${nameOf(receiverPid)}님의 수호천사 연결을 풀까요? (수호천사 미션이 오기 전에만 풀 수 있어요)`)) return;
-    await deleteDoc(doc(db, "angels", receiverPid)).catch(() => setMsg("풀지 못했어요. 이미 수호천사 미션이 왔으면 풀 수 없어요."));
+  // 연결을 풀고 다음 순번에게 넘긴다(수호천사 미션이 오기 전에만). 넘긴 짝은 다시 연결되지 않게 적어 둔다.
+  async function passOn(receiverPid, angelPid) {
+    if (!window.confirm(`${nameOf(receiverPid)}님의 수호천사(${nameOf(angelPid)}님) 연결을 풀고 다음 순번에게 넘길까요?\n\n${nameOf(angelPid)}님은 이 사람에게 다시 연결되지 않아요(다른 사람에게는 순서대로 연결될 수 있어요). 수호천사가 연락이 안 되거나 못 하겠다고 한 경우에만 쓰세요. 수호천사 미션이 오기 전에만 할 수 있어요.`)) return;
+    setBusy(true);
+    setMsg("");
+    try {
+      await deleteDoc(doc(db, "angels", receiverPid));
+      await setDoc(doc(db, "meta", "angelSkips"), { pairs: { [receiverPid]: arrayUnion(angelPid) } }, { merge: true });
+      const made = await linkAngelsNow(week);
+      const next = made.find((p) => p.receiverPid === receiverPid);
+      setMsg(next ? `${nameOf(receiverPid)}님의 수호천사를 다음 순번(${nameOf(next.angelPid)}님)으로 넘겼어요.` : `${nameOf(receiverPid)}님의 연결을 풀었어요. 지금 연결할 수 있는 다음 지원자는 없어요.`);
+    } catch {
+      setMsg("넘기지 못했어요. 이미 수호천사 미션이 왔으면 바꿀 수 없어요.");
+    } finally {
+      setBusy(false);
+    }
   }
   return (
-    <Panel title={`수호천사 (지원 ${active.length}명 · 연결 ${Object.keys(angels).length}명)`}>
+    <Panel title={`수호천사 (지원 ${queue.length}명 · 연결 ${Object.keys(angels).length}명)`}>
       <p className="small">
-        마니또가 미션을 안 해서 받은 게 없는 사람에게, 응모권을 더 받고 싶어 지원한 참여자를 몰래 연결해요. 수호천사가 한 미션을 받는 사람이 확인하면
-        수호천사는 1건당 응모권 +1(최대 2), 받는 사람은 인증 입력으로 쳐요(보상과 합쳐 최대 3이라 이중으로 받지 않아요). 받는 사람 본인과 그 사람의 마니또는 연결할 수 없어요.
-        1주차가 끝나도 아무것도 받지 못한 사람부터 연결하는 것을 권해요. 이 화면에 누가 누구를 돕는지 보이니 주의해 주세요.
+        마니또가 미션을 안 해서 받은 게 없는 사람에게, 응모권을 더 받고 싶어 지원한 참여자를 몰래 연결해요. <b>누구를 연결할지는 운영자가 고르지 않아요.</b>
+        {" "}2·3주차를 열 때, 그때까지 마니또의 완료 알림이 한 건도 없는 사람(가입했고 중도 이탈이 아닌 사람)에게 <b>먼저 지원한 순서대로</b> 자동 연결돼요.
+        받는 사람 본인, 그 사람의 마니또, 닫힌 주차의 자기 미션을 다 하지 않은 지원자는 건너뛰고, 한 사람에게 한 명씩만 연결해요.
+        수호천사가 한 미션을 받는 사람이 확인하면 수호천사는 1건당 응모권 +1(최대 2), 받는 사람은 인증 입력으로 쳐요(보상과 합쳐 최대 3이라 이중으로 받지 않아요).
+        이 화면에 누가 누구를 돕는지 보이니 주의해 주세요.
       </p>
-      <p className="small"><b>지원자</b>: {active.length ? active.map((pid) => `${nameOf(pid)}${busy.has(pid) ? "(연결됨)" : ""}`).join(", ") : "아직 없어요"}</p>
+      <p className="small"><b>지원 순서</b>{queue.length === 0 && ": 아직 없어요"}</p>
+      {queue.length > 0 && (
+        <ol className="plain angel-queue">
+          {queue.map((v) => <li key={v.pid} className="small">{v.order}. {nameOf(v.pid)} <span className="muted">({stampText(v.at)} 지원)</span> · {STATE[v.state](v)}</li>)}
+        </ol>
+      )}
       {running && (
         <>
-          <p className="small"><b>받은 게 없는 사람</b>(마니또의 완료 알림 0건, 수호천사 없음) {needy.length}명</p>
-          <ul className="plain">
-            {needy.map((r) => {
-              const options = active.filter((a) => a !== r && a !== giverOf[r] && !busy.has(a));
-              return (
-                <li key={r} className="row-item inline">
-                  <span>{nameOf(r)}</span>
-                  <select className="pk-input" value={pick[r] || ""} onChange={(e) => setPick({ ...pick, [r]: e.target.value })} aria-label={`${nameOf(r)}님의 수호천사`}>
-                    <option value="">수호천사 고르기</option>
-                    {options.map((a) => <option key={a} value={a}>{nameOf(a)}</option>)}
-                  </select>
-                  <button className="pk-btn sm" disabled={!pick[r]} onClick={() => link(r)}>연결</button>
-                </li>
-              );
-            })}
-          </ul>
+          <p className="small">
+            <b>도움이 필요한 사람</b>(마니또의 완료 알림 0건, 수호천사 없음): {week < 2 ? "2주차가 열리면 그때 정해져요." : needy.length ? needy.map(nameOf).join(", ") : "없어요"}
+          </p>
+          <div className="inline">
+            <button className="pk-btn sm" disabled={busy || pending.length === 0} onClick={runNow}>지금 순서대로 연결 ({pending.length}쌍)</button>
+            {pending.length > 0 && <span className="small">연결될 짝: {pending.map((p) => `${nameOf(p.receiverPid)} ← ${nameOf(p.angelPid)}(지원 ${p.order}번째)`).join(", ")}</span>}
+          </div>
+          <p className="small muted">주차를 열 때 자동으로 연결되므로 보통은 누를 일이 없어요. 그 뒤에 지원자가 생겼거나 자기 미션을 마친 지원자가 있을 때만 짝이 생겨요.</p>
         </>
       )}
       {Object.keys(angels).length > 0 && (
@@ -918,9 +980,9 @@ function Angels() {
             const g = giftsOf(r);
             return (
               <li key={r} className="row-item">
-                <span>{nameOf(r)} ← 수호천사 {nameOf(a.angelPid)} · 미션 {g.length}건, 확인 {g.filter((x) => x.confirmed).length}건</span>
+                <span>{nameOf(r)} ← 수호천사 {nameOf(a.angelPid)} <span className="small muted">({orderOf[a.angelPid] ? `지원 ${orderOf[a.angelPid]}번째` : "지금은 지원 취소·제외 상태"}, {stampText(a.at)} 연결)</span> · 미션 {g.length}건, 확인 {g.filter((x) => x.confirmed).length}건</span>
                 {g.map((x) => <p key={x.k} className="small">{x.k}번: {x.text}{x.message ? ` — "${x.message}"` : ""}{x.confirmed ? ` (확인: ${x.review})` : " (확인 대기)"}</p>)}
-                {running && g.length === 0 && <button className="text-btn" onClick={() => unlink(r)}>연결 풀기</button>}
+                {running && g.length === 0 && <button className="text-btn" disabled={busy} onClick={() => passOn(r, a.angelPid)}>연결 풀고 다음 순번으로</button>}
               </li>
             );
           })}
@@ -1217,8 +1279,8 @@ function Pairs() {
 
 // 응모권 계산에 필요한 자료를 모두 읽어 계산한다. 집계하기와 검산이 같이 쓴다.
 async function calcAll(roster, assignVer) {
-  const [assignments, giverCodes, redemptions, missions, guesses, deliveries, verdicts, clues, midGuesses, toManito, feed, angels, angelGifts] = await Promise.all(
-    ["assignments", "giverCodes", "redemptions", "giverMissions", "guesses", "deliveries", "verdicts", "clues", "midGuesses", "toManito", "feed", "angels", "angelGifts"]
+  const [assignments, giverCodes, redemptions, missions, guesses, deliveries, verdicts, clues, midGuesses, toManito, feed, angels, angelGifts, angelVolunteers] = await Promise.all(
+    ["assignments", "giverCodes", "redemptions", "giverMissions", "guesses", "deliveries", "verdicts", "clues", "midGuesses", "toManito", "feed", "angels", "angelGifts", "angelVolunteers"]
       .map((n) => readAll(n).catch(() => ({}))) // 새 기능 컬렉션(중간 추측·한마디)이 비어 있거나 예전 규칙이어도 집계는 되게
   );
   const people = roster.map((r) => ({
@@ -1269,9 +1331,11 @@ async function calcAll(roster, assignVer) {
     correct: Object.entries(finalGuess).filter(([r, g]) => assignMap[g] === r).length,
     guessed: Object.keys(finalGuess).length,
   };
-  // 송년회 "숨은 수호천사" 장면: 확인된 미션이 1건 이상인 연결
+  // 송년회 "숨은 수호천사" 장면: 확인된 미션이 1건 이상인 연결. order = 몇 번째로 지원했는지(먼저 지원한 순서대로 연결했음을 보이려고)
+  const volunteerOrder = Object.fromEntries(angelQueue(angelVolunteers, people).map((v) => [v.pid, v.order]));
   const angelList = Object.entries(angels).map(([receiverPid, a]) => ({
     angelPid: a.angelPid, receiverPid, done: Object.values(angelGifts).filter((g) => g.receiverPid === receiverPid && g.confirmed).length,
+    ...(volunteerOrder[a.angelPid] ? { order: volunteerOrder[a.angelPid] } : {}),
   })).filter((x) => x.done > 0);
   const extras = { guesses: finalGuess, noticed, story, stats, likesTop: top && top.likes > 0 ? top : null, angels: angelList };
   return { assignments, deliveries, people, tickets, extras };

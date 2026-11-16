@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { assignManito, assignmentMemo, generateCodes } from "../src/lib/assign.js";
+import { angelQueue, needyReceivers, matchAngels, angelQueueStatus } from "../src/lib/angels.js";
 import { computeTickets, weightedDraw, partStandings, weeklyPartBoard, seededDraw, seededTop, drawAll, verifyDraws, DRAW_ORDER, noticedWeeks } from "../src/lib/scoring.js";
 import { pairChain, buildSlides, revealedUpTo } from "../src/lib/reveal.js";
 import { readFileSync } from "node:fs";
@@ -611,6 +612,72 @@ test("추첨: 큰 상부터 정하면 응모권이 많을수록 더 큰 상을 �
   assert.ok(per(16, "any", 8) > per(8, "any", 22) && per(8, "any", 22) > per(2, "any", 24), "응모권이 많을수록 뭐라도 받을 확률이 높다");
   assert.ok(per(8, "t4", 22) > per(2, "t4", 24) * 2, "4등(큰 추첨 상)도 응모권이 많은 쪽이 더 자주");
   assert.ok(per(16, "any", 8) > 0.95, "응모권 최다 그룹은 거의 항상 받는다");
+});
+
+// ── 수호천사 자동 연결 ─────────────────────────────────────────────────────────
+// 원: A → B → C → D → E → F → A (마니또 → 대상). 주차별 완료 알림은 done으로 준다
+function angelRows(done = {}) {
+  const ring = ["A", "B", "C", "D", "E", "F"];
+  return ring.map((g, i) => ({
+    giverPid: g, receiverPid: ring[(i + 1) % ring.length],
+    slots: Object.fromEntries([1, 2, 3].map((s) => [s, { done: (done[g] || []).includes(s) }])),
+  }));
+}
+const at = (seconds, nanoseconds = 0) => ({ seconds, nanoseconds });
+const angelPeople = ["A", "B", "C", "D", "E", "F"].map((pid) => ({ pid, joined: true }));
+
+test("수호천사 순서: 지원 시각이 이른 순서, 취소·불참·수상 제외는 빠진다", () => {
+  const volunteers = {
+    C: { active: true, at: at(300) }, A: { active: true, at: at(100, 5) }, B: { active: true, at: at(100, 2) },
+    D: { active: false, at: at(50) }, // 가장 먼저 눌렀지만 취소
+    E: { active: true, at: at(10) }, F: { active: true, at: at(20) },
+  };
+  const people = angelPeople.map((p) => (p.pid === "E" ? { ...p, dropout: true } : p.pid === "F" ? { ...p, disqualified: true } : p));
+  assert.deepEqual(angelQueue(volunteers, people).map((v) => [v.pid, v.order]), [["B", 1], ["A", 2], ["C", 3]]);
+  // 같은 시각이면 명단 순서(pid)로 — 순서가 실행할 때마다 바뀌지 않게
+  assert.deepEqual(angelQueue({ B: { active: true, at: at(1) }, A: { active: true, at: at(1) } }, angelPeople).map((v) => v.pid), ["A", "B"]);
+  // 명단에 없는 사람·가입 안 한 사람의 지원은 세지 않는다
+  assert.deepEqual(angelQueue({ Z: { active: true, at: at(1) }, A: { active: true, at: at(2) } }, [{ pid: "A", joined: false }]), []);
+});
+
+test("수호천사 대상: 2주차가 열린 뒤, 마니또의 완료 알림이 한 건도 없고 참여 중인 사람만", () => {
+  // A는 1주차를 했고(대상 B는 받음), 나머지 마니또는 아무것도 안 함
+  const rows = angelRows({ A: [1] });
+  assert.deepEqual(needyReceivers({ rows, week: 1, people: angelPeople }), [], "1주차 중에는 연결하지 않는다");
+  assert.deepEqual(needyReceivers({ rows, week: 2, people: angelPeople }), ["A", "C", "D", "E", "F"], "받은 게 있는 B만 빠진다(명단 순서)");
+  // 이미 수호천사가 있는 사람, 가입 안 한 사람, 중도 이탈은 대상이 아니다
+  const people = angelPeople.map((p) => (p.pid === "D" ? { ...p, joined: false } : p.pid === "E" ? { ...p, dropout: true } : p));
+  assert.deepEqual(needyReceivers({ rows, week: 3, people, angels: { C: { angelPid: "A" } } }), ["A", "F"]);
+});
+
+test("수호천사 연결: 먼저 지원한 순서대로, 본인·그 사람의 마니또·자기 미션을 안 한 사람·이미 연결된 사람은 건너뛴다", () => {
+  // 2주차가 열림. 1주차 미션을 한 마니또: A, B, C, D (E, F는 안 함 → E의 대상 F와 F의 대상 A가 받은 게 없다)
+  const rows = angelRows({ A: [1], B: [1], C: [1], D: [1] });
+  assert.deepEqual(needyReceivers({ rows, week: 2, people: angelPeople }), ["A", "F"]);
+  // 지원 순서: F(10) → E(20) → A(30) → B(40) → C(50)
+  const volunteers = { F: { active: true, at: at(10) }, E: { active: true, at: at(20) }, A: { active: true, at: at(30) }, B: { active: true, at: at(40) }, C: { active: true, at: at(50) } };
+  const m = matchAngels({ rows, volunteers, week: 2, people: angelPeople });
+  // F·E는 가장 먼저 지원했지만 자기 1주차 미션을 안 해서 건너뛴다. A는 받는 사람 본인이라 A에게는 못 붙고 다음 차례(F)에게 간다
+  assert.deepEqual(m, [{ receiverPid: "A", angelPid: "B", order: 4 }, { receiverPid: "F", angelPid: "A", order: 3 }]);
+  // E가 뒤늦게 1주차 미션을 하면(F는 받았으니 대상에서 빠지고) 그때부터 E도 연결될 수 있다
+  const late = angelRows({ A: [1], B: [1], C: [1], D: [1], E: [1] });
+  assert.deepEqual(matchAngels({ rows: late, volunteers, week: 2, people: angelPeople }), [{ receiverPid: "A", angelPid: "E", order: 2 }]);
+  // 그 사람의 마니또는 수호천사가 될 수 없다: A의 마니또 F가 자기 미션을 했더라도(그러면 A는 받았으니 대상이 아니다) — 대상 C로 확인
+  const rowsC = angelRows({ A: [1], C: [1], D: [1], E: [1], F: [1] }); // B가 안 해서 C가 받은 게 없다
+  const onlyB = matchAngels({ rows: rowsC, volunteers: { B: { active: true, at: at(1) } }, week: 2, people: angelPeople });
+  assert.deepEqual(onlyB, [], "B는 자기 미션도 안 했고, C의 마니또이기도 하다");
+  // 한 사람에게 한 명씩: 이미 연결된 지원자는 다시 쓰지 않고, 이미 수호천사가 있는 사람은 대상이 아니다
+  const again = matchAngels({ rows, volunteers, week: 2, people: angelPeople, angels: { A: { angelPid: "B" } } });
+  assert.deepEqual(again, [{ receiverPid: "F", angelPid: "A", order: 3 }]);
+  // 운영자가 "다음 순번으로" 넘긴 짝은 다시 붙지 않는다
+  const skipped = matchAngels({ rows, volunteers, week: 2, people: angelPeople, skips: { A: ["B"] } });
+  assert.deepEqual(skipped, [{ receiverPid: "A", angelPid: "C", order: 5 }, { receiverPid: "F", angelPid: "A", order: 3 }]);
+  // 3주차: 1·2주차를 모두 한 지원자만
+  const w3 = angelRows({ A: [1], B: [1, 2], C: [1, 2], D: [1, 2] });
+  assert.deepEqual(matchAngels({ rows: w3, volunteers, week: 3, people: angelPeople }).map((x) => x.angelPid), ["B", "C"], "A는 2주차를 안 해서 건너뛴다");
+  // 운영 화면 표시: 순서와 상태
+  assert.deepEqual(angelQueueStatus({ rows, volunteers, week: 2, people: angelPeople, angels: { A: { angelPid: "B" } } }).map((v) => `${v.order}${v.pid}:${v.state}`),
+    ["1F:own", "2E:own", "3A:waiting", "4B:linked", "5C:waiting"]);
 });
 
 test("보안 규칙의 추가 쪽지 한도가 EXTRA_NOTES_MAX와 같다", () => {
