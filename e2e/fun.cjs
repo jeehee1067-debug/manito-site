@@ -198,7 +198,7 @@ const step = (s) => console.log("▶", s);
   await u[R].getByText("내 추측: 1주차 가나 · 2주차 가나 · 3주차 가나").waitFor();
   console.log(`  ${R}: 1·2·3주차 모두 가나로 추측`);
 
-  step("최종 지목 → 투표 → 집계 → 공개(발표 화면)");
+  step("최종 지목 → 마감 → 집계 → 공개(발표 화면)");
   await advance("최종 지목");
   {
     const r = u[R];
@@ -208,12 +208,10 @@ const step = (s) => console.log("▶", s);
     await sb.getByRole("button", { name: "이 사람으로 지목" }).click();
     await r.getByText("지목했어요.").waitFor();
   }
-  await advance("투표");
-  await admin.getByRole("button", { name: "투표 카드 만들기" }).click();
-  await H.panel(admin, "투표 카드").getByText(/투표 카드 \d+장을 만들었어요/).waitFor();
+  await advance("마감");
   await advance("집계");
   await admin.getByRole("button", { name: "집계하기" }).click();
-  await admin.getByText(/^베스트 마니또: /).waitFor();
+  await admin.getByText(/^응모권 상위/).waitFor();
   await advance("공개");
   await H.tab(admin, "결과");
   await H.panel(admin, "발표 화면").getByRole("button", { name: "발표 화면 열기" }).click();
@@ -264,9 +262,9 @@ const step = (s) => console.log("▶", s);
   {
     const r = u[R];
     await H.tab(r, "결과");
-    await H.panel(r, "시상").getByText("가장 먼저 알아챈 사람").waitFor();
-    await H.panel(r, "시상").getByText("가장 많은 공감을 받은 후기").waitFor();
-    console.log(`  ${R}의 결과 탭 '시상'에도 '가장 먼저 알아챈 사람'·'가장 많은 공감을 받은 후기'가 열림`);
+    await H.panel(r, "그 밖의 기록").getByText("가장 먼저 알아챈 사람").waitFor();
+    await H.panel(r, "그 밖의 기록").getByText("가장 많은 공감을 받은 후기").waitFor();
+    console.log(`  ${R}의 결과 탭 '그 밖의 기록'에도 '가장 먼저 알아챈 사람'·'가장 많은 공감을 받은 후기'가 열림`);
   }
   await pres.getByRole("button", { name: "닫기" }).click();
 

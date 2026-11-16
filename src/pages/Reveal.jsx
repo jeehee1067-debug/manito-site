@@ -4,45 +4,42 @@ import { db } from "../firebase.js";
 import { useApp, Loading } from "../App.jsx";
 import { LEVEL_LABEL, PHASE } from "../lib/constants.js";
 import { PRIZES, TICKET_RULES } from "../config/prizes.js";
-import { seededDraw, verifyDraws } from "../lib/scoring.js";
+import { drawAll, verifyDraws } from "../lib/scoring.js";
 import { DRAW_ORDER, buildSlides, revealedUpTo } from "../lib/reveal.js";
 import { Avatar, Dialogue, Panel } from "../ui.jsx";
 
-// 추첨 결과: 예전 방식은 당첨자 배열, 지금은 { seed, winners }
-const winnersOf = (d) => (Array.isArray(d) ? d : d?.winners || []);
+// 추첨 결과 한 칸: { seed, winners }
+const winnersOf = (d) => d?.winners || [];
 const resultRef = () => doc(db, "results", "public");
+const rankWord = (p) => p.label.split(" ")[0]; // "6등 응모권 추첨" → "6등"
 
-// 검증할 수 있는 추첨: 당첨자는 "현장에서 정한 숫자 + 응모권 표"만으로 정해진다(scoring.js seededDraw).
+// 검증할 수 있는 추첨: 당첨자는 "현장에서 정한 숫자 + 응모권 표"만으로 정해진다(scoring.js drawAll).
+// 숫자 하나로 큰 상부터(1등 → 2등 → 4등 → 5등 → 6등) 한 번에 정해 저장하고, 발표만 6등부터 한 장면씩 한다.
 // 운영자가 미리 여러 번 돌려 보고 마음에 드는 결과를 고를 수 없게, 숫자는 추첨 직전에 참석자에게 받아 화면에 보이면서 넣는다.
 // 추첨 결과는 한 번 쓰면 바꿀 수 없다. 두 번 누르거나 운영자 둘이 동시에 눌러도 덮어쓰지 않게,
-// 서버의 지금 값을 읽어 "아직 안 뽑은 순서"일 때만 쓴다(트랜잭션). 보안 규칙도 이미 있는 추첨 결과의 변경·삭제를 거부한다.
-async function runDraw(step, index, seed) {
+// 서버의 지금 값을 읽어 "아직 안 뽑았을 때"만 쓴다(트랜잭션). 보안 규칙도 이미 있는 추첨 결과의 변경·삭제를 거부한다.
+async function runDrawAll(seed) {
   await runTransaction(db, async (tx) => {
     const cur = (await tx.get(resultRef())).data();
-    const done = cur.draws || {};
-    if (done[step.key]) throw new Error("already");
-    if (DRAW_ORDER.slice(0, index).some((s) => !done[s.key])) throw new Error("order");
-    // 2~4등끼리는 중복 당첨 없음, 대추첨은 전원 대상
-    const exclude = step.tier ? new Set(PRIZES.tiers.flatMap((t) => winnersOf(done[t.key]))) : new Set();
-    tx.update(resultRef(), { [`draws.${step.key}`]: { seed, winners: seededDraw(cur.tickets, step, seed, exclude) } });
+    if (Object.keys(cur.draws || {}).length > 0) throw new Error("already");
+    tx.update(resultRef(), { draws: drawAll(cur.tickets, seed) });
   });
 }
-const drawError = (err) => (err.message === "order" ? "앞 순서 추첨을 먼저 해 주세요."
-  : err.message === "already" ? "이미 추첨한 순서예요. 추첨 결과는 다시 뽑거나 바꿀 수 없어요."
-    : "추첨하지 못했어요. 잠시 뒤 다시 눌러 주세요.");
+const drawError = (err) => (err.message === "already" ? "이미 추첨했어요. 추첨 결과는 다시 뽑거나 바꿀 수 없어요."
+  : "추첨하지 못했어요. 잠시 뒤 다시 눌러 주세요.");
 
-function DrawForm({ step, index, onDrawn }) {
+function DrawForm({ onDrawn }) {
   const [seed, setSeed] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   async function go() {
     const s = seed.trim();
     if (!s) return setMsg("현장에서 정한 숫자를 먼저 넣어 주세요(예: 참석자가 부른 네 자리 숫자).");
-    if (!window.confirm(`${step.label}을 숫자 "${s}"로 추첨할까요?\n\n한 번 뽑으면 다시 뽑을 수 없어요.`)) return;
+    if (!window.confirm(`숫자 "${s}"로 추첨할까요?\n\n${DRAW_ORDER.map(rankWord).join("·")}이 한 번에 정해지고, 다시 뽑을 수 없어요.`)) return;
     setBusy(true);
     setMsg("");
     try {
-      await runDraw(step, index, s);
+      await runDrawAll(s);
       onDrawn?.();
     } catch (err) {
       setMsg(drawError(err));
@@ -54,8 +51,8 @@ function DrawForm({ step, index, onDrawn }) {
     <div className="stack tight">
       <div className="inline">
         <input className="pk-input seed-input" value={seed} maxLength={20} inputMode="numeric"
-          onChange={(e) => setSeed(e.target.value)} placeholder="현장에서 정한 숫자" aria-label={`${step.label} 숫자`} />
-        <button className={step.key === "grand" ? "pk-btn gold" : "pk-btn main"} disabled={busy} onClick={go}>추첨하기</button>
+          onChange={(e) => setSeed(e.target.value)} placeholder="현장에서 정한 숫자" aria-label="추첨 숫자" />
+        <button className="pk-btn gold" disabled={busy} onClick={go}>추첨하기</button>
       </div>
       {msg && <p className="error small" role="alert">{msg}</p>}
     </div>
@@ -91,8 +88,41 @@ export default function Reveal() {
   const myManito = r.pairs.find((p) => p.receiverPid === myPid)?.giverPid;
   const mine = myPid ? r.ticketDetail?.[myPid] : null;
   const revealedPairs = r.pairs.filter((p) => pairOpen(p.receiverPid));
-  const best = r.bestManito || [];
+  const drawn = Object.keys(draws).length > 0;
   const quickest = noticedTop(r.noticed);
+  // 1등부터 6등까지 한 줄씩. 참여자에게는 발표된 것만 보인다(운영자는 모두)
+  const prizeRows = [PRIZES.grand, PRIZES.bestManito, PRIZES.bestReview, ...PRIZES.tiers].map((prize) => {
+    const isBest = prize === PRIZES.bestManito;
+    const isReview = prize === PRIZES.bestReview;
+    let people = []; // 발표된 사람
+    let state = ""; // 아직 보일 것이 없을 때의 안내
+    if (isReview) {
+      if (!r.bestReview) state = "미정";
+      else if (shown.has("bestReview")) people = [r.bestReview.receiverPid];
+      else state = "발표 전";
+    } else if (!drawn) {
+      state = "추첨 전";
+    } else {
+      const all = winnersOf(draws[prize.key]);
+      // 2등은 한 명씩 발표하므로 발표된 사람만, 나머지 순서는 그 장면이 열렸을 때 모두
+      const open = isBest ? Array.from({ length: prize.count }, (_, k) => shown.has(`best${k}`)).every(Boolean) : shown.has(`draw_${prize.key}`);
+      people = isBest ? all.filter((_, k) => shown.has(`best${k}`)) : open ? all : [];
+      if (!open) state = people.length ? "나머지는 발표 전" : "발표 전";
+      else if (all.length === 0) state = "당첨자 없음(응모권이 있는 사람이 앞 순서에서 모두 받았어요)";
+    }
+    return { prize, isBest, isReview, people, state };
+  });
+  const records = [
+    shown.has("detective") && quickest && (
+      <li key="quick"><strong>가장 먼저 알아챈 사람</strong> {quickest.pids.map(nameOf).join(", ")} <span className="small">({quickest.week}주차부터 계속 맞힘)</span></li>
+    ),
+    shown.has("angels") && (r.angels || []).length > 0 && (
+      <li key="angels"><strong>숨은 수호천사</strong> {r.angels.map((a) => `${nameOf(a.angelPid)} → ${nameOf(a.receiverPid)}`).join(", ")}</li>
+    ),
+    shown.has("likesTop") && r.likesTop && (
+      <li key="likes"><strong>가장 많은 공감을 받은 후기</strong> {nameOf(r.likesTop.receiverPid)} <span className="small">(♥ {r.likesTop.likes})</span></li>
+    ),
+  ].filter(Boolean);
 
   return (
     <>
@@ -137,45 +167,45 @@ export default function Reveal() {
         </section>
       )}
 
-      <Panel title="추첨">
+      <Panel title="추첨·시상">
         <p className="small">
-          응모권 수에 비례해 뽑아요. 순서: {DRAW_ORDER.map((s) => s.label).join(" → ")}. 한 번 뽑은 결과는 다시 뽑을 수 없어요.
-          추첨마다 현장에서 숫자 하나를 정해(예: 참석자가 부른 네 자리 숫자) 넣으면, 그 숫자와 응모권 표만으로 당첨자가 정해져요.
-          같은 숫자로 누가 다시 계산해도 같은 결과가 나오니 아래 "추첨 검증"으로 확인할 수 있어요.
+          현장에서 정한 숫자 하나(예: 참석자가 부른 네 자리 숫자)로 큰 상부터 한 번에 정해요: {DRAW_ORDER.map(rankWord).join(" → ")}. 한 사람은 그중 하나만 받아요.
+          {" "}{PRIZES.bestManito.label}는 추첨이 아니라 1등 당첨자를 뺀 응모권 최다 {PRIZES.bestManito.count}명이에요(동점이면 같은 숫자로 가려요).
+          {" "}{PRIZES.bestReview.label}은 운영진이 후기 중에서 뽑아요. 발표는 {rankWord(PRIZES.tiers[PRIZES.tiers.length - 1])}부터 하고, 한 번 뽑은 결과는 다시 뽑을 수 없어요.
+          같은 숫자로 누가 다시 계산해도 같은 결과가 나오니 발표가 끝나면 아래 "추첨 검증"으로 확인할 수 있어요.
         </p>
+        {!drawn && isAdmin && config.phase === PHASE.REVEAL && <DrawForm />}
+        {drawn && <p className="small muted">현장에서 정한 숫자: {draws[DRAW_ORDER[0].key]?.seed}</p>}
         <ol className="draws">
-          {DRAW_ORDER.map((step, i) => (
-            <li key={step.key} className={step.key === "grand" ? "draw grand" : "draw"}>
+          {prizeRows.map(({ prize, isBest, isReview, people, state }) => (
+            <li key={prize.label} className={prize === PRIZES.grand ? "draw grand" : "draw"}>
               <div className="draw-head">
-                <strong>{step.label}</strong>
-                <span className="small">{step.count}명, {step.prize}</span>
+                <strong>{prize.label}</strong>
+                <span className="small">{prize.count}명, {prize.prize}</span>
               </div>
-              {draws[step.key] ? (
-                <>
-                  <div className="winner-row">
-                    {winnersOf(draws[step.key]).map((pid) => (
-                      <span key={pid} className="winner"><Avatar pid={pid} size={48} /><span>{nameOf(pid)}</span></span>
-                    ))}
-                    {winnersOf(draws[step.key]).length === 0 && <span className="small muted">당첨자 없음(앞 순서에서 모두 당첨)</span>}
-                  </div>
-                  {draws[step.key].seed != null && <p className="small muted">현장에서 정한 숫자: {draws[step.key].seed}</p>}
-                </>
-              ) : isAdmin && config.phase === PHASE.REVEAL ? (
-                <DrawForm step={step} index={i} />
-              ) : (
-                <p className="muted small">추첨 전</p>
+              {people.length > 0 && (
+                <div className="winner-row">
+                  {people.map((pid) => (
+                    <span key={pid} className="winner">
+                      <Avatar pid={pid} size={48} /><span>{nameOf(pid)}</span>
+                      {isBest && <span className="small muted">{r.tickets?.[pid] ?? 0}장</span>}
+                    </span>
+                  ))}
+                </div>
               )}
+              {isReview && people.length > 0 && <Dialogue speaker={nameOf(r.bestReview.receiverPid)}>{r.bestReview.review}</Dialogue>}
+              {state && <p className="muted small">{state}</p>}
             </li>
           ))}
         </ol>
-        {Object.keys(draws).length > 0 && (
+        {drawn && (isAdmin || shown.has(`draw_${PRIZES.grand.key}`)) && (
           <div className="stack tight">
-            <button type="button" className="pk-btn sm" onClick={() => setCheck(verifyDraws(r.tickets, draws, DRAW_ORDER))}>추첨 검증</button>
+            <button type="button" className="pk-btn sm" onClick={() => setCheck(verifyDraws(r.tickets, draws))}>추첨 검증</button>
             {check && (
               <ul className="plain">
                 {check.map((x) => (
-                  <li key={x.key} className={x.ok === false ? "error" : "small"}>
-                    {DRAW_ORDER.find((s) => s.key === x.key)?.label}: {x.ok === null ? "숫자 없이 뽑은 예전 방식이라 검증할 수 없어요" : x.ok ? "숫자와 응모권으로 다시 계산한 결과와 같아요" : "다시 계산한 결과와 달라요! 운영진에게 알려 주세요"}
+                  <li key={x.key} className={x.ok ? "small" : "error"}>
+                    {DRAW_ORDER.find((d) => d.key === x.key)?.label}: {x.ok ? "숫자와 응모권으로 다시 계산한 결과와 같아요" : "다시 계산한 결과와 달라요! 운영진에게 알려 주세요"}
                   </li>
                 ))}
               </ul>
@@ -184,39 +214,9 @@ export default function Reveal() {
         )}
       </Panel>
 
-      {(best.some((_, k) => shown.has(`best${k}`)) || shown.has("bestReview") || shown.has("mostTickets") || shown.has("detective")) && (
-        <Panel title="시상">
-          <div className="podium">
-            {best.map((b, i) => shown.has(`best${i}`) && (
-              <div key={b.pid} className={`podium-step rank-${i + 1}`}>
-                <Avatar pid={b.pid} size={96} />
-                <strong>{nameOf(b.pid)}</strong>
-                <span className="small">{PRIZES.bestManito.label} {i + 1}위</span>
-              </div>
-            ))}
-          </div>
-          <ul className="plain awards">
-            {shown.has("bestReview") && (
-              <li>
-                <strong>{PRIZES.bestReview.label}</strong> {r.bestReview ? nameOf(r.bestReview.receiverPid) : "미정"} <span className="small">({PRIZES.bestReview.prize})</span>
-                {r.bestReview && <Dialogue speaker={nameOf(r.bestReview.receiverPid)}>{r.bestReview.review}</Dialogue>}
-              </li>
-            )}
-            {shown.has("mostTickets") && (
-              <li>
-                <strong>{PRIZES.mostTickets.label}</strong> {r.mostTickets ? `${nameOf(r.mostTickets.pid)} (${r.mostTickets.total}장)` : "-"} <span className="small">({PRIZES.mostTickets.prize})</span>
-              </li>
-            )}
-            {shown.has("detective") && quickest && (
-              <li><strong>가장 먼저 알아챈 사람</strong> {quickest.pids.map(nameOf).join(", ")} <span className="small">({quickest.week}주차부터 계속 맞힘)</span></li>
-            )}
-            {shown.has("angels") && (r.angels || []).length > 0 && (
-              <li><strong>숨은 수호천사</strong> {r.angels.map((a) => `${nameOf(a.angelPid)} → ${nameOf(a.receiverPid)}`).join(", ")}</li>
-            )}
-            {shown.has("likesTop") && r.likesTop && (
-              <li><strong>가장 많은 공감을 받은 후기</strong> {nameOf(r.likesTop.receiverPid)} <span className="small">(♥ {r.likesTop.likes})</span></li>
-            )}
-          </ul>
+      {records.length > 0 && (
+        <Panel title="그 밖의 기록">
+          <ul className="plain awards">{records}</ul>
         </Panel>
       )}
 
@@ -470,23 +470,22 @@ function Slide({ r, slide, nameOf, pairCount }) {
           <h1 className="pres-title pop delay">{nameOf(r.bestReview.receiverPid)}</h1>
         </div>
       );
-    case "mostTickets":
-      return (
-        <div className="pres-center">
-          <p className="pres-kicker">{PRIZES.mostTickets.label} · {PRIZES.mostTickets.prize}</p>
-          <Avatar pid={r.mostTickets.pid} size={160} />
-          <h1 className="pres-title pop delay">{nameOf(r.mostTickets.pid)}</h1>
-          <p className="pres-sub">응모권 {r.mostTickets.total}장</p>
-        </div>
-      );
     case "best": {
-      const b = r.bestManito[slide.rank];
+      const done = Boolean(r.draws?.[PRIZES.bestManito.key]);
+      const pid = winnersOf(r.draws?.[PRIZES.bestManito.key])[slide.rank];
       return (
         <div className="pres-center">
-          <p className="pres-kicker">{PRIZES.bestManito.label} {slide.rank + 1}위 · {PRIZES.bestManito.prize}</p>
-          <p className="pres-sub drum">두구두구…</p>
-          <div className="pop delay"><Avatar pid={b.pid} size={200} /></div>
-          <h1 className="pres-title pop delay">{nameOf(b.pid)}</h1>
+          <p className="pres-kicker">{PRIZES.bestManito.label} · {PRIZES.bestManito.prize}</p>
+          {!done ? <p className="pres-sub">아직 추첨 전이에요. "응모권 추첨" 장면에서 숫자를 넣어 주세요.</p>
+            : !pid ? <p className="pres-sub">수상자 없음 (응모권이 있는 사람이 모자라요)</p>
+              : (
+                <>
+                  <p className="pres-sub drum">응모권이 가장 많은 {PRIZES.bestManito.count}명 · 두구두구…</p>
+                  <div className="pop delay"><Avatar pid={pid} size={200} /></div>
+                  <h1 className="pres-title pop delay">{nameOf(pid)}</h1>
+                  <p className="pres-sub pop delay">응모권 {r.tickets?.[pid] ?? 0}장</p>
+                </>
+              )}
         </div>
       );
     }
@@ -503,8 +502,10 @@ function Slide({ r, slide, nameOf, pairCount }) {
           </div>
         </div>
       );
+    case "drawGo":
+      return <DrawGoSlide r={r} />;
     case "draw":
-      return <DrawSlide r={r} step={slide.step} index={slide.index} nameOf={nameOf} />;
+      return <DrawSlide r={r} step={slide.step} nameOf={nameOf} />;
     default:
       return (
         <div className="pres-center">
@@ -515,34 +516,48 @@ function Slide({ r, slide, nameOf, pairCount }) {
   }
 }
 
-// 추첨 장면: 숫자를 넣고 추첨하면 응모권이 있는 사람 이름이 잠깐 돌아간 뒤 당첨자가 나온다.
-// (돌아가는 이름은 연출일 뿐, 당첨자는 숫자와 응모권 표로 이미 정해져 저장된 것이다)
-function DrawSlide({ r, step, index, nameOf }) {
-  const done = Boolean(r.draws?.[step.key]); // 당첨자가 0명인 추첨(앞 순서에서 모두 당첨)도 뽑은 것이다
+// 추첨 장면: 숫자 하나를 넣으면 1·2·4·5·6등이 한 번에 정해져 저장된다. 발표는 다음 장면부터 작은 상 → 큰 상 순서로.
+function DrawGoSlide({ r }) {
+  const done = Object.keys(r.draws || {}).length > 0;
+  return (
+    <div className="pres-center wide">
+      <p className="pres-kicker">응모권 추첨</p>
+      <h1 className="pres-title">숫자 하나로 한 번에!</h1>
+      <p className="pres-sub">현장에서 정한 숫자를 넣으면 큰 상부터 차례로 정해져요. 한 사람은 하나만 받고, 발표는 {rankWord(PRIZES.tiers[PRIZES.tiers.length - 1])}부터 합니다.</p>
+      {done
+        ? <p className="pres-sub pop">추첨 완료! 현장에서 정한 숫자 {r.draws[DRAW_ORDER[0].key]?.seed} · 다음 장면부터 발표합니다</p>
+        : <DrawForm />}
+    </div>
+  );
+}
+
+// 발표 장면: 장면에 들어오면 응모권이 있는 사람 이름이 잠깐 돌아간 뒤 당첨자가 나온다.
+// (돌아가는 이름은 연출일 뿐, 당첨자는 추첨 장면에서 숫자와 응모권 표로 이미 정해져 저장된 것이다)
+function DrawSlide({ r, step, nameOf }) {
+  const done = Boolean(r.draws?.[step.key]); // 당첨자가 0명인 순서(앞 순서에서 모두 받음)도 뽑은 것이다
   const drawn = winnersOf(r.draws?.[step.key]);
-  const [spinning, setSpinning] = useState(false);
+  const [spinning, setSpinning] = useState(true);
   const [flash, setFlash] = useState("");
   const pool = useMemo(() => Object.entries(r.tickets || {}).filter(([, n]) => n > 0).map(([pid]) => pid), [r.tickets]);
+  const spinMs = step.key === PRIZES.grand.key ? 3000 : 1500;
   useEffect(() => {
-    if (!spinning || pool.length === 0) return undefined;
+    if (!done || !spinning) return undefined;
+    if (pool.length === 0) { setSpinning(false); return undefined; }
     const t = setInterval(() => setFlash(pool[Math.floor(Math.random() * pool.length)]), 80);
-    const stop = setTimeout(() => setSpinning(false), 2500);
+    const stop = setTimeout(() => setSpinning(false), spinMs);
     return () => { clearInterval(t); clearTimeout(stop); };
-  }, [spinning, pool]);
+  }, [done, spinning, pool, spinMs]);
   return (
     <div className="pres-center wide">
       <p className="pres-kicker">{step.prize} · {step.count}명</p>
       <h1 className="pres-title">{step.label}</h1>
-      {!done && <DrawForm step={step} index={index} onDrawn={() => setSpinning(true)} />}
-      {spinning && <p className="pres-spin">{flash ? nameOf(flash) : "…"}</p>}
+      {!done && <p className="pres-sub">아직 추첨 전이에요. "응모권 추첨" 장면에서 숫자를 넣어 주세요.</p>}
+      {done && spinning && <p className="pres-spin">{flash ? nameOf(flash) : "…"}</p>}
       {done && !spinning && (
-        <>
-          <div className="pres-row winners">
-            {drawn.map((pid) => <span key={pid} className="pres-person pop"><Avatar pid={pid} size={drawn.length > 6 ? 64 : 110} /><b>{nameOf(pid)}</b></span>)}
-            {drawn.length === 0 && <p className="pres-sub">당첨자 없음 (응모권이 있는 사람이 앞 순서에서 모두 당첨됐어요)</p>}
-          </div>
-          {r.draws[step.key].seed != null && <p className="pres-sub small">현장에서 정한 숫자 {r.draws[step.key].seed}</p>}
-        </>
+        <div className="pres-row winners">
+          {drawn.map((pid) => <span key={pid} className="pres-person pop"><Avatar pid={pid} size={drawn.length > 6 ? 64 : 110} /><b>{nameOf(pid)}</b></span>)}
+          {drawn.length === 0 && <p className="pres-sub">당첨자 없음 (응모권이 있는 사람이 앞 순서에서 모두 받았어요)</p>}
+        </div>
       )}
     </div>
   );

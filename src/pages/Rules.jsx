@@ -1,6 +1,6 @@
 import { useApp } from "../App.jsx";
 import { Panel } from "../ui.jsx";
-import { PRIZES, TICKET_RULES as R, SCORE_WEIGHTS as W } from "../config/prizes.js";
+import { PRIZES, TICKET_RULES as R } from "../config/prizes.js";
 import { EXTRA_NOTES_MAX, PROFILE_QUESTIONS, REVIEW_MIN, SCHEDULE, SPEND_GUIDE_WON, clueScheduleText, scheduleLabel, todayYmd } from "../lib/constants.js";
 
 // 참여자에게 보여 주는 규칙. 숫자는 prizes.js·constants.js에서 가져오므로 그쪽을 바꾸면 여기도 같이 바뀐다.
@@ -10,7 +10,9 @@ export default function Rules() {
   const partsInUse = roster.some((r) => r.part);
   const max = R.maxMissions * R.perRedeemedMission + R.maxCardBonus + R.hidden + R.maxReceiverEntries * R.perReceiverEntry + R.correctGuess
     + (partsInUse ? R.partBonus : 0) + R.maxAngel * R.angelPerMission;
-  const pct = (x) => `${Math.round(x * 100)}%`;
+  const rank = (p) => p.label.split(" ")[0]; // "6등 응모권 추첨" → "6등"
+  const drawOrder = [PRIZES.grand, PRIZES.bestManito, ...PRIZES.tiers]; // 정하는 순서(큰 상부터)
+  const allMissions = R.hiddenMinMissions >= R.maxMissions;
 
   return (
     <>
@@ -19,7 +21,7 @@ export default function Rules() {
           <li>나는 한 사람의 <b>마니또</b>이고, 동시에 다른 누군가가 내 마니또예요.</li>
           <li><b>마니또로서</b> 매주 미션을 하나씩 해요(1·2주차는 카드 고르기, 3주차는 칭찬 카드). 대상이 인증 코드와 후기로 인증해 주면 응모권이 쌓여요.</li>
           <li><b>받는 사람으로서</b> 받은 미션을 인증하고, 매주 공개되는 단서로 내 마니또를 추리해 마지막에 지목해요.</li>
-          <li>12월 9일 송년회에서 정체를 공개하고, 응모권으로 추첨해요.</li>
+          <li>12월 9일 송년회에서 정체를 공개하고, 응모권으로 시상·추첨해요. 응모권이 많을수록 큰 상에 가까워져요.</li>
         </ol>
       </Panel>
 
@@ -48,7 +50,7 @@ export default function Rules() {
           <tbody>
             <tr><th rowSpan={3}>마니또로서</th><td>내 미션이 인증될 때마다</td><td className="num">{R.perRedeemedMission}장 (최대 {R.maxMissions})</td></tr>
             <tr><td>고른 카드가 보통이나 도전이고 대상이 직접 인증하면 추가로(대상이 "받은 것이 카드와 달라요"로 인증하면 없음)</td><td className="num">보통 +{R.cardBonus.normal}장, 도전 +{R.cardBonus.hard}장 (합계 최대 {R.maxCardBonus})</td></tr>
-            <tr><td>끝까지 안 들키면(대상이 나를 지목하지 못함). 내 미션이 {R.hiddenMinMissions}건 이상 인증되고{R.hiddenNeedsClues ? ", 프로필을 다 채워 단서 6개가 대상에게 간 경우만" : " 경우만"}</td><td className="num">{R.hidden}장</td></tr>
+            <tr><td>끝까지 안 들키면(대상이 나를 지목하지 못함). {allMissions ? `내 미션 ${R.maxMissions}건이 모두 인증되고` : `내 미션이 ${R.hiddenMinMissions}건 이상 인증되고`}{R.hiddenNeedsClues ? ", 프로필을 다 채워 단서 6개가 대상에게 간 경우만" : " 경우만"}</td><td className="num">{R.hidden}장</td></tr>
             <tr><th rowSpan={2}>받는 사람으로서</th><td>받은 미션을 인증할 때마다(코드 + 후기 {REVIEW_MIN}자 이상). 수호천사가 보낸 것을 "받았어요"로 확인한 것도 쳐요</td><td className="num">{R.perReceiverEntry}장 (최대 {R.maxReceiverEntries})</td></tr>
             <tr><td>내 마니또를 맞히면</td><td className="num">{R.correctGuess}장</td></tr>
             <tr><th>수호천사 (지원자)</th><td>지원해서 연결되면, 도와준 사람이 확인한 수호천사 미션마다</td><td className="num">{R.angelPerMission}장 (최대 {R.maxAngel})</td></tr>
@@ -57,6 +59,11 @@ export default function Rules() {
             )}
           </tbody>
         </table>
+        <p><b>끝까지 해야 받는 것이 있어요.</b></p>
+        <ul className="rules-list">
+          <li>은신 {R.hidden}장은 {allMissions ? `3주 미션 ${R.maxMissions}건을 모두 한` : `미션을 ${R.hiddenMinMissions}건 이상 한`} 마니또만 받아요. 한두 번만 하고 쉬면 그 미션의 응모권만 남아요.</li>
+          <li>{PRIZES.bestManito.label}({PRIZES.bestManito.prize})는 응모권이 가장 많은 {PRIZES.bestManito.count}명이고, 추첨도 응모권이 많을수록 큰 상에 가까워요(아래 "상품과 추첨").</li>
+        </ul>
         <p><b>상대방 때문에 손해 보지 않아요.</b></p>
         <ul className="rules-list">
           <li>내 마니또가 미션을 안 보낸 주차는 인증 입력 대신 {R.compPerMissedWeek}장을 받아요(인증 입력과 합쳐 최대 {R.maxReceiverEntries}장, 내 미션이 {R.compMinMissions}건 이상 인증된 사람만).</li>
@@ -85,23 +92,18 @@ export default function Rules() {
       <Panel title="상품과 추첨">
         <table className="rules-table">
           <tbody>
-            {PRIZES.tiers.map((t) => <tr key={t.key}><th>{t.label}</th><td>{t.count}명, {t.prize}</td></tr>)}
-            <tr><th>{PRIZES.grand.label}</th><td>{PRIZES.grand.count}명, {PRIZES.grand.prize}</td></tr>
-            <tr><th>{PRIZES.bestManito.label}</th><td>{PRIZES.bestManito.count}명, {PRIZES.bestManito.prize}</td></tr>
-            <tr><th>{PRIZES.bestReview.label}</th><td>{PRIZES.bestReview.count}명, {PRIZES.bestReview.prize} (운영진이 후기 중에서 선정)</td></tr>
-            <tr><th>{PRIZES.mostTickets.label}</th><td>{PRIZES.mostTickets.count}명, {PRIZES.mostTickets.prize} (동점이면 무작위)</td></tr>
+            <tr><th>{PRIZES.grand.label}</th><td>{PRIZES.grand.count}명, {PRIZES.grand.prize}</td><td>응모권 수에 비례해 추첨</td></tr>
+            <tr><th>{PRIZES.bestManito.label}</th><td>{PRIZES.bestManito.count}명, {PRIZES.bestManito.prize}</td><td>응모권이 가장 많은 {PRIZES.bestManito.count}명(1등 당첨자 제외)</td></tr>
+            <tr><th>{PRIZES.bestReview.label}</th><td>{PRIZES.bestReview.count}명, {PRIZES.bestReview.prize}</td><td>운영진이 후기 중에서 선정</td></tr>
+            {PRIZES.tiers.map((t) => <tr key={t.key}><th>{t.label}</th><td>{t.count}명, {t.prize}</td><td>응모권 수에 비례해 추첨</td></tr>)}
           </tbody>
         </table>
         <ul className="rules-list">
-          <li>추첨은 송년회 현장에서, 응모권 수에 비례해 뽑아요. 순서는 {PRIZES.tiers.map((t) => t.label.replace("응모권 추첨 ", "")).join(" → ")} → {PRIZES.grand.label}.</li>
-          <li>추첨마다 현장에서 숫자 하나를 정해(예: 참석자가 부른 숫자) 넣고, 그 숫자와 응모권 표만으로 당첨자가 정해져요. 결과 탭의 "추첨 검증"으로 누구나 다시 계산해 같은지 확인할 수 있어요(운영진이 결과를 고를 수 없어요).</li>
-          <li>{PRIZES.tiers.map((t) => t.label.replace("응모권 추첨 ", "")).join("·")}끼리는 중복 당첨이 없고, {PRIZES.grand.label}은 앞에서 당첨된 사람도 대상이에요.</li>
-          <li>
-            {PRIZES.bestManito.label}: 미션 완수율 {pct(W.completion)} + 전체 투표 {pct(W.vote)} + 운영진 평가 {pct(W.admin)}.
-            투표는 받은 사람들이 남긴 후기를 익명 카드로 보고 해요{partsInUse ? "(자기 파트 카드는 안 보여요)" : ""}.
-            {partsInUse && " 파트 인원이 다르면 카드마다 볼 수 있는 사람 수가 달라서, 득표는 표 수 그대로가 아니라 \"볼 수 있었던 사람들이 고르게 찍었을 때 받을 표 수\"와 비교한 비율로 계산해요."}
-            {" "}동점이면 인증된 미션이 많은 쪽, 투표 점수가 높은 쪽, 운영진 평가가 높은 쪽 순이고 그래도 같으면 무작위예요.
-          </li>
+          <li>추첨은 송년회 현장에서 해요. 참석자가 부른 숫자 하나를 넣으면, 그 숫자와 응모권 표만으로 큰 상부터({drawOrder.map(rank).join(" → ")}) 한 번에 정해져요. 발표는 {rank(PRIZES.tiers[PRIZES.tiers.length - 1])}부터 해요.</li>
+          <li><b>한 사람은 {drawOrder.map(rank).join("·")} 중 하나만 받아요.</b> 큰 상부터 정하고, 받은 사람은 다음 순서에서 빠져요. 그래서 응모권이 많을수록 큰 상에 가깝고, 무엇이든 받을 가능성도 커요.</li>
+          <li>{PRIZES.bestManito.label}는 추첨이 아니에요. 1등 당첨자를 뺀 사람 중 응모권이 가장 많은 {PRIZES.bestManito.count}명이고, 경계에서 동점이면 같은 추첨 숫자로 가려요.</li>
+          <li>{PRIZES.bestReview.label}은 운영진이 뽑는 상이라 추첨과 따로예요(다른 상과 겹칠 수 있어요).</li>
+          <li>결과 탭의 "추첨 검증"으로 누구나 같은 숫자로 다시 계산해 결과가 같은지 확인할 수 있어요(운영진이 결과를 고를 수 없어요).</li>
         </ul>
       </Panel>
 
@@ -129,12 +131,11 @@ export default function Rules() {
       <Panel title="지켜 주세요">
         <p className="small">아래가 확인되면 응모권·수상에서 제외될 수 있어요.</p>
         <ul className="rules-list">
-          <li>송년회 공개 전에 정체를 알려주거나 캐묻기(투표 기간 포함. "마니또에게 한마디"로 슬쩍 찔러보는 것은 괜찮아요)</li>
+          <li>송년회 공개 전에 정체를 알려주거나 캐묻기("마니또에게 한마디"로 슬쩍 찔러보는 것은 괜찮아요)</li>
           <li>하지 않은 미션을 완료로 알리거나, 받지 않은 미션을 인증하기, 받고도 "받은 게 없어요"로 알리기</li>
           <li>내가 누구를 맡았는지 다른 사람에게 알려주거나 서로 맞춰 보기(정체를 알려주는 것과 같아요)</li>
           <li>단서를 거짓으로 답하기</li>
           <li>사이트를 일부러 반복 요청해 멈추게 하기(반복해서 저장한 기록은 누가 했는지 운영진에게 남아요)</li>
-          <li>투표 기간에 자기 카드에 표를 부탁하기</li>
         </ul>
         <p className="small">내용이 없는 후기는 운영진이 무효 처리할 수 있어요(무효가 되면 그 미션의 응모권도 빠져요).</p>
       </Panel>
@@ -143,7 +144,7 @@ export default function Rules() {
         <ul className="rules-list">
           <li><b>다른 참여자</b>: 이름·근무지{partsInUse ? "·파트" : ""}, 익명 피드의 후기{partsInUse ? ", 파트별 미션 합계" : ""}만 봐요. 익명 피드의 글에는 누가 썼는지(받는 사람)가 저장돼 있지 않아요. 내가 미션을 몇 개 했는지도 다른 참여자는 볼 수 없어요. 내 짝, 인증 코드, 쪽지, 메일 주소, 누가 어떤 후기에 공감했는지는 볼 수 없어요. 내 프로필 답은 내 대상에게만 매주 단서로 공개돼요.</li>
           <li><b>내 마니또</b>: 내가 입력한 인증(코드·후기)은 나와 그 미션을 보낸 마니또만 다시 볼 수 있어요. "내 마니또에게 알려 줄 것"과 "마니또에게 한마디"도 내 마니또만 봐요("내 마니또에게 알려 줄 것"은 나에게 연결된 수호천사도 봐요).</li>
-          <li><b>운영자·공동 운영자</b>: 마니또에 참여하지 않는 계정이에요. 그래서 누가 누구의 마니또인지, 주차별 진행 상황, 최종 지목과 주차별 추측, 수호천사 지원·연결과 수호천사 미션, 후기, 쪽지(괴롭힘 확인용)와 마니또에게 한마디, 단서(거짓 단서 확인용), 내 마니또에게 알려 줄 것, 공감 표시, 가입한 메일을 처음부터 볼 수 있어요. 프로필 답도 볼 수 있고, 투표 내용은 집계 단계부터 봐요. 기분 나쁜 쪽지는 추리 보드에서 "이 쪽지 신고"로 알려 주세요.</li>
+          <li><b>운영자·공동 운영자</b>: 마니또에 참여하지 않는 계정이에요. 그래서 누가 누구의 마니또인지, 주차별 진행 상황, 최종 지목과 주차별 추측, 수호천사 지원·연결과 수호천사 미션, 후기, 쪽지(괴롭힘 확인용)와 마니또에게 한마디, 단서(거짓 단서 확인용), 내 마니또에게 알려 줄 것, 공감 표시, 가입한 메일을 처음부터 볼 수 있어요. 프로필 답도 볼 수 있어요. 기분 나쁜 쪽지는 추리 보드에서 "이 쪽지 신고"로 알려 주세요.</li>
           <li><b>사이트 관리 계정</b>(Firebase 콘솔): 저장된 데이터를 기술적으로 직접 열어 볼 수 있어요(서버 없이 운영하는 방식의 한계예요).</li>
         </ul>
       </Panel>

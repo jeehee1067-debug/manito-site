@@ -1,4 +1,4 @@
-import { TICKET_RULES as R, SCORE_WEIGHTS as W } from "../config/prizes.js";
+import { PRIZES, TICKET_RULES as R } from "../config/prizes.js";
 import { secureRandom, seededRandom } from "./random.js";
 
 /**
@@ -180,61 +180,6 @@ export function weeklyPartBoard(people, doneCounts, week) {
   return rankParts(byPart);
 }
 
-/**
- * 투표 집계. 투표 화면은 내 파트 카드를 숨기므로(Vote.jsx) 파트 인원이 다르면 카드마다 볼 수 있는 사람 수가 다르다.
- * 그래서 표 수를 그대로 쓰지 않고 "기대 득표"로 나눈다.
- *   기대 득표 = 그 카드를 볼 수 있었던 투표자마다 (고른 수 ÷ 그 사람에게 보인 카드 수)를 더한 값
- *             = 모두가 보이는 카드 중에서 고르게 찍었을 때 받는 표 수
- * 파트 인원이 모두 같으면(또는 파트가 없으면) 기대 득표가 카드마다 같아서 표 수 그대로 비교하는 것과 같다.
- * 화면에서 고를 수 없는 표(내 파트 카드, 없는 카드, 같은 카드 중복)와 내 카드에 준 표는 세지 않는다. 보안 규칙은 장수(3장)만 확인하기 때문이다.
- * cards: [{ cardId, giverPid }], votes: { voterPid: [cardId] }, partOf: { pid: part }
- * 반환: { count: { cardId: 표 수 }, expected: { cardId: 기대 득표 } }
- */
-export function tallyVotes(cards, votes, partOf = {}) {
-  const sees = (voter, card) => card.giverPid !== voter && (!partOf[voter] || partOf[card.giverPid] !== partOf[voter]);
-  const count = Object.fromEntries(cards.map((c) => [c.cardId, 0]));
-  const expected = { ...count };
-  for (const [voter, ids] of Object.entries(votes)) {
-    const visible = cards.filter((c) => sees(voter, c));
-    const ok = new Set(visible.map((c) => c.cardId));
-    const picks = [...new Set(ids || [])].filter((id) => ok.has(id));
-    if (!picks.length) continue;
-    for (const id of picks) count[id]++;
-    for (const c of visible) expected[c.cardId] += picks.length / visible.length;
-  }
-  return { count, expected };
-}
-
-/**
- * 베스트 마니또 점수: 완수율·전체 투표·운영진 평가
- * cards: [{ cardId, giverPid }], votes: { voterPid: [cardId] }, adminEval: { cardId: 0~10 }, partOf: { pid: part }
- * disqualified: 수상 대상이 아닌 마니또(수상 제외·불참). 이 사람들의 카드는 처음부터 없는 것으로 보고 집계한다.
- *   그 카드에 간 표는 버리고, 그 카드가 표를 많이 받았어도 다른 카드의 투표 점수가 낮아지지 않는다.
- * 투표 점수 = (표 수 ÷ 기대 득표)를 수상 대상 카드 중 가장 높은 카드가 1이 되게 맞춘 값(tallyVotes 설명 참고).
- * 동점이면 인증된 미션이 많은 쪽 → 투표 점수가 높은 쪽 → 운영진 평가가 높은 쪽 → 무작위(집계할 때 한 번 뽑아 결과에 저장).
- */
-export function rankBestManito({ cards, votes, adminEval, tickets, disqualified = new Set(), partOf = {}, rand = secureRandom }) {
-  const eligible = cards.filter((c) => !disqualified.has(c.giverPid));
-  const { count, expected } = tallyVotes(eligible, votes, partOf);
-  const lift = (id) => (expected[id] > 0 ? count[id] / expected[id] : 0);
-  const maxLift = Math.max(0, ...eligible.map((c) => lift(c.cardId))) || 1;
-  const EPS = 1e-9;
-  return eligible
-    .map((c) => {
-      const completion = tickets[c.giverPid]?.completion || 0;
-      const vote = lift(c.cardId) / maxLift;
-      const evalScore = Math.min(10, Math.max(0, Number(adminEval[c.cardId] || 0)));
-      const score = W.completion * completion + W.vote * vote + W.admin * (evalScore / 10);
-      return { ...c, completion, votes: count[c.cardId], vote, admin: evalScore, score, tieBreak: rand() };
-    })
-    .sort((a, b) =>
-      Math.abs(b.score - a.score) > EPS ? b.score - a.score
-        : b.completion !== a.completion ? b.completion - a.completion
-          : Math.abs(b.vote - a.vote) > EPS ? b.vote - a.vote
-            : b.admin !== a.admin ? b.admin - a.admin
-              : b.tieBreak - a.tieBreak);
-}
-
 // 응모권 수에 비례한 비복원 추첨
 export function weightedDraw(entries, count, rand = secureRandom, exclude = new Set()) {
   const pool = entries.filter((e) => e.weight > 0 && !exclude.has(e.pid)).map((e) => ({ ...e }));
@@ -254,7 +199,7 @@ export function weightedDraw(entries, count, rand = secureRandom, exclude = new 
  * 검증할 수 있는 추첨: 현장에서 정한 숫자(seed)와 응모권 표만으로 결과가 정해진다.
  * 같은 seed·같은 응모권이면 누가 다시 계산해도 같은 당첨자가 나온다(결과 화면의 "추첨 검증").
  * 운영자가 미리 여러 번 돌려 보고 고를 수 없게, seed는 추첨 직전에 현장에서 정한다(예: 참석자가 부른 숫자).
- * tickets: { pid: 장수 }, step: { key, count }, exclude: 이미 당첨된 사람(2~4등끼리 중복 없음)
+ * tickets: { pid: 장수 }, step: { key, count }, exclude: 앞 순서에서 이미 받은 사람
  */
 export function seededDraw(tickets, step, seed, exclude = new Set()) {
   const entries = Object.entries(tickets).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([pid, weight]) => ({ pid, weight }));
@@ -262,32 +207,59 @@ export function seededDraw(tickets, step, seed, exclude = new Set()) {
 }
 
 /**
- * 추첨 검증: 저장된 추첨 결과(draws)를 seed로 다시 계산해 같은지 본다.
- * order: 추첨 순서 [{ key, count, tier }] (tier = true면 2~4등처럼 서로 중복 당첨이 없는 순서)
- * 반환: [{ key, ok, expected, saved }] (seed가 없는 예전 방식 결과는 ok = null)
+ * 응모권이 많은 순으로 count명(2등 베스트 마니또). 추첨이 아니라 순위이고, 경계에서 동점일 때만 seed로 가른다.
+ * 반환은 응모권이 많은 순서. 응모권 0장과 exclude(1등 당첨자)는 뺀다.
  */
-export function verifyDraws(tickets, draws, order) {
-  const won = new Set();
-  return order.filter((s) => draws?.[s.key]).map((s) => {
-    const d = draws[s.key];
-    const saved = Array.isArray(d) ? d : d.winners || [];
-    if (Array.isArray(d) || d.seed == null) {
-      if (s.tier) saved.forEach((p) => won.add(p));
-      return { key: s.key, ok: null, expected: null, saved };
-    }
-    const expected = seededDraw(tickets, s, d.seed, s.tier ? won : new Set());
-    if (s.tier) saved.forEach((p) => won.add(p));
-    return { key: s.key, ok: JSON.stringify(expected) === JSON.stringify(saved), expected, saved };
-  });
+export function seededTop(tickets, step, seed, exclude = new Set()) {
+  const rand = seededRandom(`${String(seed).trim()}|${step.key}`);
+  return Object.entries(tickets)
+    .filter(([pid, n]) => n > 0 && !exclude.has(pid))
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([pid, n]) => ({ pid, n, tie: rand() }))
+    .sort((a, b) => b.n - a.n || a.tie - b.tie)
+    .slice(0, step.count)
+    .map((x) => x.pid);
 }
 
-// 최다 응모권상: 최댓값 동점자 중 무작위 1명
-export function pickMostTickets(tickets, rand = secureRandom) {
-  const rows = Object.entries(tickets).filter(([, t]) => t.total > 0);
-  if (!rows.length) return null;
-  const max = Math.max(...rows.map(([, t]) => t.total));
-  const tied = rows.filter(([, t]) => t.total === max).map(([pid]) => pid);
-  return { pid: tied[Math.floor(rand() * tied.length)], total: max, tiedCount: tied.length };
+// 정하는 순서(큰 상부터). kind: "draw" = 응모권 수에 비례한 추첨, "top" = 응모권이 많은 순
+export const DRAW_ORDER = [
+  { ...PRIZES.grand, kind: "draw" },
+  { ...PRIZES.bestManito, kind: "top" },
+  ...PRIZES.tiers.map((t) => ({ ...t, kind: "draw" })),
+];
+
+/**
+ * 한 번에 추첨: 현장 숫자 하나로 큰 상부터 차례로 정한다. 앞에서 받은 사람은 뒤 순서에서 빠진다(한 사람은 하나만).
+ * 작은 상부터 뽑으면 응모권이 많은 사람일수록 작은 상에 먼저 뽑혀 큰 상 기회를 잃기 때문에 큰 상부터 정한다.
+ * 반환: { grand: { seed, winners }, best: { seed, winners }, t4: …, t5: …, t6: … } (results/public.draws에 그대로 저장)
+ */
+export function drawAll(tickets, seed, order = DRAW_ORDER) {
+  const s = String(seed).trim();
+  const won = new Set();
+  const out = {};
+  for (const step of order) {
+    const winners = step.kind === "top" ? seededTop(tickets, step, s, won) : seededDraw(tickets, step, s, won);
+    winners.forEach((pid) => won.add(pid));
+    out[step.key] = { seed: s, winners };
+  }
+  return out;
+}
+
+/**
+ * 추첨 검증: 저장된 결과(draws)를 저장된 숫자로 다시 계산해 같은지 본다.
+ * 반환: [{ key, ok, expected, saved }]. 한 번에 뽑은 결과가 아니면(칸이 빠졌거나 숫자가 칸마다 다르면) 모두 ok = false.
+ */
+export function verifyDraws(tickets, draws, order = DRAW_ORDER) {
+  const have = order.filter((s) => draws?.[s.key]);
+  if (have.length === 0) return [];
+  const seeds = new Set(have.map((s) => draws[s.key].seed ?? null));
+  const seed = have.length === order.length && seeds.size === 1 ? [...seeds][0] : null;
+  const expected = seed == null ? null : drawAll(tickets, seed, order);
+  return order.map((s) => {
+    const saved = draws?.[s.key]?.winners || [];
+    const exp = expected ? expected[s.key].winners : null;
+    return { key: s.key, ok: exp != null && JSON.stringify(exp) === JSON.stringify(saved), expected: exp, saved };
+  });
 }
 
 /**

@@ -8,7 +8,7 @@ import { Panel } from "../ui.jsx";
 import { PHASE, PHASES, CLUE_COUNT, LEVEL_LABEL, LOCS, PART_HINT_IDX, RULES_VERSION } from "../lib/constants.js";
 import { SLOT_STATUS_LABEL, clueAnswers, cluesDoneSet, pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../lib/pairs.js";
 import { assignManito, assignmentMemo, generateCodes, makeInviteCode } from "../lib/assign.js";
-import { computeTickets, noticedWeeks, partStandings, pickMostTickets, rankBestManito, weeklyPartBoard } from "../lib/scoring.js";
+import { computeTickets, noticedWeeks, partStandings, weeklyPartBoard } from "../lib/scoring.js";
 import { PRIZES } from "../config/prizes.js";
 import { parseRosterLine, rosterSummary, sameSummary } from "../lib/roster.js";
 
@@ -24,8 +24,8 @@ async function commitInChunks(ops) {
 const NEXT_PHASE_NOTE = {
   0: "미션 진행을 시작합니다. 시작 후에는 명단 추가·삭제와 재배정을 할 수 없어요.",
   1: "미션 진행을 마감하고 최종 지목을 받습니다. 이후 인증·미션 완료는 막혀요. 파트 순위도 지금 숫자로 마지막 발표를 해요.",
-  2: "지목을 마감하고 투표를 엽니다. 넘어간 뒤 '투표 카드 만들기'를 눌러 주세요.",
-  3: "투표를 마감하고 집계 단계로 넘어갑니다.",
+  2: "최종 지목을 마감합니다. 이후에는 지목을 바꿀 수 없어요.",
+  3: "집계 단계로 넘어갑니다. 수상 제외·중도 이탈 표시와 '받은 게 없어요' 확인을 마무리해 주세요.",
   4: "공개 단계로 넘어갑니다. 참여자 결과 탭은 결과 탭의 '발표 화면'에서 넘긴 장면까지만 열려요(한 번에 열려면 '발표 없이 모두 공개'). 넘어간 뒤에는 다시 집계할 수 없어요.",
 };
 
@@ -187,11 +187,10 @@ export default function Admin() {
       {phase === PHASE.SETUP && <Setup />}
       {phase === PHASE.RUNNING && <Running />}
       {phase === PHASE.GUESSING && <GuessStatus />}
-      {phase >= PHASE.RUNNING && phase <= PHASE.VOTING && <Unresolved />}
+      {phase >= PHASE.RUNNING && phase <= PHASE.CLOSED && <Unresolved />}
       {phase >= PHASE.RUNNING && <Angels />}
       <Pairs />
       {phase >= PHASE.RUNNING && phase <= PHASE.SCORING && <Moderation />}
-      {phase === PHASE.VOTING && <VotingAdmin />}
       {phase === PHASE.SCORING && <Scoring />}
       {phase >= PHASE.RUNNING && <Accounts />}
       {phase >= PHASE.RUNNING && <WriteCounts />}
@@ -1013,11 +1012,10 @@ function WriteCounts() {
   async function load() {
     setBusy(true);
     const names = ["progress", "giverMissions", "profiles", "avatars", "reports", "guesses", "clues", "assignments", "users", "prefs", "midGuesses", "angelVolunteers"];
-    if (config.phase >= PHASE.SCORING) names.push("votes");
     const data = Object.fromEntries(await Promise.all(names.map(async (n) => [n, await readAll(n).catch(() => ({}))])));
     const sum = {};
     const add = (pid, n) => { if (pid && n) sum[pid] = (sum[pid] || 0) + n; };
-    for (const n of ["progress", "giverMissions", "profiles", "avatars", "guesses", "votes", "prefs", "midGuesses", "angelVolunteers"]) {
+    for (const n of ["progress", "giverMissions", "profiles", "avatars", "guesses", "prefs", "midGuesses", "angelVolunteers"]) {
       Object.entries(data[n] || {}).forEach(([pid, d]) => add(pid, d.n));
     }
     Object.entries(data.reports).forEach(([id, d]) => add(id.split("_")[0], d.n));
@@ -1050,85 +1048,11 @@ async function readAll(name) {
   return Object.fromEntries(s.docs.map((d) => [d.id, d.data()]));
 }
 
-function VotingAdmin() {
-  const fullRoster = useFullRoster();
-  const [cards, setCards] = useState([]);
-  const [evals, setEvals] = useState({});
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState("");
-
-  useEffect(() => {
-    const offs = [
-      onSnapshot(collection(db, "voteCards"), (s) => setCards(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
-      onSnapshot(collection(db, "adminEval"), (s) => setEvals(Object.fromEntries(s.docs.map((d) => [d.id, d.data().score])))),
-    ];
-    return () => offs.forEach((o) => o());
-  }, []);
-
-  async function buildCards() {
-    if (cards.length && !window.confirm("투표 카드를 다시 만들까요? 이미 받은 투표와 평가는 무효가 돼요.")) return;
-    setBusy(true);
-    const [giverCodes, redemptions, oldViews] = await Promise.all([readAll("giverCodes"), readAll("redemptions"), readAll("voteViews")]);
-    const ops = cards.map((c) => (b) => { b.delete(doc(db, "voteCards", c.id)); b.delete(doc(db, "cardOwners", c.id)); });
-    Object.keys(oldViews).forEach((id) => ops.push((b) => b.delete(doc(db, "voteViews", id))));
-    const made2 = []; // [{ cardId, part }] 카드 주인의 파트(카드 문서에는 넣지 않는다)
-    // 수상 대상이 아닌 마니또(가입 안 함·중도 이탈·수상 제외)는 카드를 만들지 않는다. 뽑힐 수 없는 카드에 표가 가지 않게.
-    const byPid = Object.fromEntries(fullRoster.map((r) => [r.pid, r]));
-    const eligible = (pid) => Boolean(byPid[pid]?.uid) && !byPid[pid].dropout && !byPid[pid].disqualified;
-    let made = 0;
-    let skipped = 0;
-    for (const [giverPid, { codes }] of Object.entries(giverCodes)) {
-      if (!eligible(giverPid)) { skipped++; continue; }
-      const reviews = Object.values(codes).map((c) => redemptions[c]).filter((r) => r && !r.voided).map((r) => r.review);
-      const cardId = doc(collection(db, "voteCards")).id;
-      // 카드에는 후기만 넣는다(주인의 파트가 있으면 참여자가 카드 주인을 좁힐 수 있다)
-      ops.push((b) => b.set(doc(db, "voteCards", cardId), { reviews }));
-      ops.push((b) => b.set(doc(db, "cardOwners", cardId), { giverPid }));
-      made2.push({ cardId, part: byPid[giverPid].part || null });
-      made++;
-    }
-    // 파트별로 보이는 카드 목록: 내 파트 카드는 빼고. 참여자는 자기 파트의 목록만 읽는다(보안 규칙).
-    // 파트 이름은 참여자 화면의 명단 요약(public/roster)과 같은 값을 쓴다.
-    const partsInUse = [...new Set(fullRoster.map((r) => r.part).filter(Boolean))];
-    for (const part of partsInUse) {
-      const viewId = doc(collection(db, "voteViews")).id;
-      ops.push((b) => b.set(doc(db, "voteViews", viewId), { part, cardIds: made2.filter((c) => c.part !== part).map((c) => c.cardId) }));
-    }
-    await commitInChunks(ops);
-    setMsg(`투표 카드 ${made}장을 만들었어요.${skipped ? ` 수상 대상이 아닌 마니또 ${skipped}명(가입 안 함·중도 이탈·수상 제외)은 뺐어요.` : ""}`);
-    setBusy(false);
-  }
-
-  return (
-    <Panel title="투표 카드">
-      <p className="small">
-        마니또별로 인증된 후기를 묶어 익명 카드로 만들어요. 운영진 평가(0~10)는 베스트 마니또 점수의 20%예요.
-        수상 대상이 아닌 마니또(가입 안 함·중도 이탈·수상 제외)는 카드에서 빠져요. 수상 제외·중도 이탈 표시를 먼저 끝내고 만들어 주세요
-        (카드를 만든 뒤에 제외한 사람은 집계에서 빠지고, 그 카드에 간 표는 세지 않아요).
-      </p>
-      <button className="pk-btn main" onClick={buildCards} disabled={busy || !fullRoster}>{cards.length ? "투표 카드 다시 만들기" : "투표 카드 만들기"}</button>
-      {msg && <p className="note" role="status">{msg}</p>}
-      <ul className="plain">
-        {cards.map((c) => (
-          <li key={c.id} className="row-item">
-            {c.reviews.length ? c.reviews.map((r, i) => <p key={i}>{r}</p>) : <p className="muted">후기 없음</p>}
-            <label className="inline">
-              운영진 평가
-              <input className="pk-input num" type="number" min={0} max={10} value={evals[c.id] ?? ""} onChange={(e) =>
-                setDoc(doc(db, "adminEval", c.id), { score: Math.max(0, Math.min(10, Number(e.target.value))) })} />
-            </label>
-          </li>
-        ))}
-      </ul>
-    </Panel>
-  );
-}
-
 // 받은 게 없어요 확인 / 집계 전 확인: 마니또가 완료를 알렸는데 인증이 없는 주차를 운영자가 주차별로 확인한다.
 //  받았음: 그 마니또의 미션으로 인정한다(카드 추가분은 없음). 받는 사람의 인증 입력 응모권은 생기지 않는다.
 //  못 받음: 마니또의 미션으로 치지 않고, 받는 사람에게 그 주차 보상 1장을 준다(마니또가 안 보낸 주차와 같게).
 //  확인하지 않으면: 어느 쪽에도 응모권이 생기지 않는다. 단, 대상이 가입 안 함·중도 이탈이면 확인 없이도 마니또의 미션으로 인정된다.
-// all = false(미션 진행~투표 단계): 받는 사람이 "받은 게 없어요"로 신고했거나 이미 확인한 주차만 보인다.
+// all = false(미션 진행~마감 단계): 받는 사람이 "받은 게 없어요"로 신고했거나 이미 확인한 주차만 보인다.
 // all = true(집계 단계): 인증이 없는 완료 알림을 모두 보인다(신고하지 않고 인증만 안 한 경우 포함).
 function Unresolved({ all = false }) {
   const { nameOf } = useApp();
@@ -1293,8 +1217,8 @@ function Pairs() {
 
 // 응모권 계산에 필요한 자료를 모두 읽어 계산한다. 집계하기와 검산이 같이 쓴다.
 async function calcAll(roster, assignVer) {
-  const [assignments, giverCodes, redemptions, missions, guesses, votes, owners, evals, deliveries, verdicts, clues, midGuesses, toManito, feed, angels, angelGifts] = await Promise.all(
-    ["assignments", "giverCodes", "redemptions", "giverMissions", "guesses", "votes", "cardOwners", "adminEval", "deliveries", "verdicts", "clues", "midGuesses", "toManito", "feed", "angels", "angelGifts"]
+  const [assignments, giverCodes, redemptions, missions, guesses, deliveries, verdicts, clues, midGuesses, toManito, feed, angels, angelGifts] = await Promise.all(
+    ["assignments", "giverCodes", "redemptions", "giverMissions", "guesses", "deliveries", "verdicts", "clues", "midGuesses", "toManito", "feed", "angels", "angelGifts"]
       .map((n) => readAll(n).catch(() => ({}))) // 새 기능 컬렉션(중간 추측·한마디)이 비어 있거나 예전 규칙이어도 집계는 되게
   );
   const people = roster.map((r) => ({
@@ -1350,7 +1274,7 @@ async function calcAll(roster, assignVer) {
     angelPid: a.angelPid, receiverPid, done: Object.values(angelGifts).filter((g) => g.receiverPid === receiverPid && g.confirmed).length,
   })).filter((x) => x.done > 0);
   const extras = { guesses: finalGuess, noticed, story, stats, likesTop: top && top.likes > 0 ? top : null, angels: angelList };
-  return { assignments, votes, owners, evals, deliveries, people, tickets, extras };
+  return { assignments, deliveries, people, tickets, extras };
 }
 
 function Scoring() {
@@ -1384,19 +1308,7 @@ function Scoring() {
     }
   }
   async function computeAndSave() {
-    const { assignments, votes, owners, evals, deliveries, people, tickets, extras } = await calcAll(roster, config.assignVer);
-    // 수상 제외·불참(가입 안 함, 중도 이탈)은 베스트 마니또에서도 뺀다
-    const disqualified = new Set(people.filter((p) => p.disqualified || !p.joined || p.dropout).map((p) => p.pid));
-    const ranked = rankBestManito({
-      cards: Object.entries(owners).map(([cardId, o]) => ({ cardId, giverPid: o.giverPid })),
-      // 수상 대상이 아닌 사람(가입 안 함·중도 이탈·수상 제외)의 표는 세지 않는다
-      votes: Object.fromEntries(Object.entries(votes).filter(([v]) => !disqualified.has(v)).map(([v, x]) => [v, x.cardIds || []])),
-      adminEval: Object.fromEntries(Object.entries(evals).map(([c, e]) => [c, e.score])),
-      tickets,
-      disqualified,
-      partOf: Object.fromEntries(people.map((p) => [p.pid, p.part])), // 내 파트 카드는 못 보므로 파트 인원 차이를 보정한다
-    });
-    const most = pickMostTickets(tickets);
+    const { assignments, deliveries, people, tickets, extras } = await calcAll(roster, config.assignVer);
     // 칭찬 벽: 받는 사람마다 1건(예전 방식으로 여러 건이 쌓였어도), 운영진이 가린 것은 빼고, 너무 길면 자른다
     const praiseBy = {};
     Object.values(deliveries)
@@ -1411,8 +1323,6 @@ function Scoring() {
       tickets: Object.fromEntries(Object.entries(tickets).map(([pid, t]) => [pid, t.total])),
       ticketDetail: tickets,
       partBoard: partStandings(people, tickets).map(({ part, members, done, max, winner }) => ({ part, members, done, max, winner })),
-      bestManito: ranked.slice(0, PRIZES.bestManito.count).map((r) => ({ pid: r.giverPid, score: Math.round(r.score * 1000) / 1000, votes: r.votes })),
-      mostTickets: most,
       bestReview: result?.bestReview || null,
       praises,
       ...extras, // 발표용: 최종 지목, 알아챈 주차, 마니또별 미션 이야기, 숫자, 공감 1위 후기
@@ -1442,8 +1352,10 @@ function Scoring() {
       <Unresolved all />
       <Panel title="집계">
         <p className="small">
-          응모권, 베스트 마니또 순위, 최다 응모권상, 칭찬 벽을 계산해요. 위 "집계 전 확인"과 수상 제외·중도 이탈 표시를 먼저 끝내고 누르세요.
-          다시 누르면 다시 계산돼요(동점을 무작위로 가른 것도 다시 뽑아요). 집계해야 공개 단계로 넘어갈 수 있고, 공개 단계로 넘어간 뒤에는 다시 집계할 수 없어요.
+          응모권, 파트 대항전 순위, 칭찬 벽을 계산해요. 위 "집계 전 확인"과 수상 제외·중도 이탈 표시를 먼저 끝내고 누르세요.
+          다시 누르면 다시 계산돼요. 집계해야 공개 단계로 넘어갈 수 있고, 공개 단계로 넘어간 뒤에는 다시 집계할 수 없어요.
+          {" "}{PRIZES.grand.label}·{PRIZES.bestManito.label}와 4~6등은 공개 단계의 발표 화면에서 현장 숫자 하나로 한 번에 정해요
+          ({PRIZES.bestManito.label}는 1등 당첨자를 뺀 응모권 최다 {PRIZES.bestManito.count}명).
         </p>
         <div className="reveal-row">
           <button className="pk-btn main" onClick={compute} disabled={busy || !fullRoster}>{result ? "다시 집계" : "집계하기"}</button>
@@ -1455,8 +1367,9 @@ function Scoring() {
           : <p className="error" role="alert">검산: {audit.length}명이 달라요 — {audit.map((x) => `${nameOf(x.pid)} 저장 ${x.saved}장/다시 계산 ${x.now}장`).join(", ")}. 집계 뒤에 확인·제외 표시가 바뀌었으면 다시 집계하세요.</p>)}
         {result && (
           <ul className="plain">
-            <li>베스트 마니또: {result.bestManito.map((b, i) => `${i + 1}위 ${nameOf(b.pid)}(${b.score})`).join(", ")}</li>
-            <li>최다 응모권상: {result.mostTickets ? `${nameOf(result.mostTickets.pid)} ${result.mostTickets.total}장 (동점 ${result.mostTickets.tiedCount}명 중)` : "-"}</li>
+            <li>응모권 상위({PRIZES.bestManito.label} 후보, 1등 당첨자는 빠져요): {Object.entries(result.tickets || {}).filter(([, n]) => n > 0)
+              .sort((x, y) => y[1] - x[1] || nameOf(x[0]).localeCompare(nameOf(y[0]), "ko")).slice(0, PRIZES.bestManito.count + 3)
+              .map(([pid, n]) => `${nameOf(pid)} ${n}장`).join(", ") || "-"}</li>
             <li>파트 대항전: {(result.partBoard || []).length
               ? result.partBoard.map((x) => `${x.part} ${x.done}/${x.max}${x.winner ? " (우승)" : ""}`).join(", ")
               : "파트가 입력되지 않아 없음"}</li>

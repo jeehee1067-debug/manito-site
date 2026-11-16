@@ -1,5 +1,6 @@
-export const PHASES = ["준비", "미션 진행", "최종 지목", "투표", "집계", "공개"];
-export const PHASE = { SETUP: 0, RUNNING: 1, GUESSING: 2, VOTING: 3, SCORING: 4, REVEAL: 5 };
+export const PHASES = ["준비", "미션 진행", "최종 지목", "마감", "집계", "공개"];
+// 마감(3): 지목까지 끝나고 집계를 기다리는 단계. 예전에는 투표 단계였다(투표는 없앴고, 단계는 한 칸씩만 넘어가므로 번호는 그대로 둔다)
+export const PHASE = { SETUP: 0, RUNNING: 1, GUESSING: 2, CLOSED: 3, SCORING: 4, REVEAL: 5 };
 
 export const REVIEW_MIN = 20;
 // 근무지: 방탈출과 같은 구분. 옵션으로 같은 근무지끼리만 마니또 짝을 지을 수 있다(실물 미션이 가능하게).
@@ -51,7 +52,7 @@ export const SCHEDULE = [
   { date: "2026-11-27", text: "단서 2개 공개" },
   { date: "2026-12-01", text: "3주차 시작 (전원 칭찬 카드)" },
   { date: "2026-12-04", text: "단서 2개 공개" },
-  { date: "2026-12-08", text: "미션 마감 · 최종 지목(마지막 단서: 파트) · 베스트 마니또 투표" },
+  { date: "2026-12-08", text: "미션 마감 · 최종 지목(마지막 단서: 파트)" },
   { date: "2026-12-09", text: "송년회: 응모권 집계, 정체 공개, 시상, 추첨" },
 ];
 const WEEKDAY = ["일", "월", "화", "수", "목", "금", "토"];

@@ -12,7 +12,6 @@ import MyMission from "./pages/MyMission.jsx";
 import Detective from "./pages/Detective.jsx";
 import Feed from "./pages/Feed.jsx";
 import PartBoard from "./pages/PartBoard.jsx";
-import Vote from "./pages/Vote.jsx";
 import Reveal from "./pages/Reveal.jsx";
 import Admin from "./pages/Admin.jsx";
 import Rules from "./pages/Rules.jsx";
@@ -309,7 +308,6 @@ function Session({ user, logout }) {
   const tabs = [];
   if (ctx.myPid) {
     tabs.push(["mission", "내 미션"], ["detective", "추리 보드"], ["feed", "피드"], ["board", "파트 순위"]);
-    if (phase >= PHASE.VOTING) tabs.push(["vote", "투표"]);
     tabs.push(["profile", "내 프로필"]);
   }
   if (ctx.myPid || ctx.isAdmin) tabs.push(["rules", "규칙"]);
@@ -328,7 +326,6 @@ function Session({ user, logout }) {
   else if (current === "detective") body = <Detective />;
   else if (current === "feed") body = <Feed />;
   else if (current === "board") body = <PartBoard />;
-  else if (current === "vote") body = <Vote />;
   else if (current === "profile") body = <Profile />;
   else if (current === "rules") body = <Rules />;
   else if (current === "reveal") body = <Reveal />;
