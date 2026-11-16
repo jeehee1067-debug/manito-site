@@ -135,12 +135,13 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 | `src/ui.jsx` | 패널·대사창·캐릭터 공통 컴포넌트 |
 | `src/firebase.js` | Firebase 연결. `npm run dev:emu`(`.env.emulator`)일 때만 에뮬레이터 연결. `appCheckSiteKey`가 있으면 App Check. `?longpoll`로 연 기기는 Firestore 긴 폴링(사내 프록시 대비) |
 | `src/xmas.jsx`, `src/xmas.css`, `src/assets/xmas/` | 연말·크리스마스 장식(시즌 한정). 빼는 방법은 README "연말 장식" |
+| `tools/xmas/` | 크리스마스 꾸밈 캐릭터(`leader1~4.png`)와 사람별 PNG(투명·4배·카드)를 만드는 Python 스크립트 |
 | `tests/rules.test.js` | 보안 규칙 테스트 |
 | `e2e/` | 화면 흐름 검증(`npm run test:e2e`, `run-all.cjs`가 8개를 차례로). 로컬 에뮬레이터 데이터를 지우고 시작한다 |
 | `src/pages/*` | 화면 |
 | `src/styles.css` | 방탈출 `assets/css/style.css`의 색·테두리·버튼·대사창 값을 따름. 시즌 장식은 여기 넣지 말고 `xmas.css`에 |
 | `public/char/p1~p4.png` | 방탈출 참가자 캐릭터 |
-| `public/char/boss1~4.png` | 방탈출 파트장님·PL님(로그인 화면 주인공 원본). 연말에는 `src/assets/xmas/leader1~4.png`(소품 얹은 그림)를 쓴다 |
+| `public/char/boss1~4.png` | 방탈출 파트장님·PL님(로그인 화면 주인공 원본). 연말에는 `src/assets/xmas/leader1~4.png`(`tools/xmas/deco.py`로 꾸민 그림)를 쓴다 |
 
 ## 아직 안 된 것
 
