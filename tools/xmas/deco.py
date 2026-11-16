@@ -170,12 +170,6 @@ def elf_hat(L, cx, by, w):
     holly(L, r - 6, by, -1)
 
 
-def elf_ears(L, left_x, right_x, top_y, skin, skin_d):
-    """뾰족한 엘프 귀(원래 귀 위에)."""
-    for side, x in ((-1, left_x), (1, right_x)):
-        L.poly([(x, top_y + 2), (x + side * 11, top_y - 12), (x + side * 9, top_y - 6), (x + side * 4, top_y + 6), (x, top_y + 14)], skin)
-        L.line([(x + side * 1, top_y + 4), (x + side * 8, top_y - 7)], skin_d)
-        L.px(x + side * 9, top_y - 10, skin_d)
 
 
 def beanie(L, cx, by, w):
@@ -386,7 +380,7 @@ SPECS = {
             scarf=(73, 82, 46, RED, RED_D, WHT, -1),
             prop=lambda L: candy_cane(L, 15, 250, 320), hand=(3, 258, 28, 300)),
     2: dict(name="elf", label="엘프",
-            head=lambda L, s: (elf_ears(L, 49, 101, 42, *s), elf_hat(L, 75, 14, 60)),
+            head=lambda L, s: elf_hat(L, 75, 14, 60),
             scarf=(75, 82, 46, RED, RED_D, GRN, 1),
             prop=lambda L: gift_box(L, 2, 297, 28, 318), hand=(3, 258, 28, 300)),
     3: dict(name="beanie", label="털모자",
@@ -413,12 +407,7 @@ for k, spec in SPECS.items():
     hb = spec["hand"]
     base.alpha_composite(hand_mask(src, hb), (OX, OY))
     hd = Layer((W, H)); spec["head"](hd, skin)
-    if k == 2:  # 엘프 귀는 피부색 테두리, 모자는 잉크 테두리
-        ears = Layer((W, H)); elf_ears(ears, 49, 101, 42, *skin)
-        base.alpha_composite(outlined(ears, skin[1]))
-        hat = Layer((W, H)); elf_hat(hat, 75, 14, 60); base.alpha_composite(outlined(hat))
-    else:
-        base.alpha_composite(outlined(hd))
+    base.alpha_composite(outlined(hd))
 
     if GLOW:
         g = Layer((W, H))
