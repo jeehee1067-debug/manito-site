@@ -8,6 +8,9 @@ import { Avatar, Dialogue, Panel } from "../ui.jsx";
 import { LEVEL_LABEL, PHASE, PRAISE_SLOT, PROFILE_QUESTIONS, REVIEW_MIN, CLUE_COUNT, PART_HINT_IDX, clueScheduleText } from "../lib/constants.js";
 import { normalizeCode } from "../lib/random.js";
 import { bump } from "../lib/writes.js";
+import { TICKET_RULES } from "../config/prizes.js";
+
+const CARD_BONUS = TICKET_RULES.cardBonus; // 카드 추가 응모권(보통·도전만)
 
 export default function Detective() {
   const { myPid, config, roster, inbox: items } = useApp();
@@ -30,7 +33,7 @@ export default function Detective() {
       <AngelInbox />
       <CodeEntry myPid={myPid} items={items} />
       <ToManito myPid={myPid} />
-      <MyRedemptions myPid={myPid} />
+      <MyRedemptions myPid={myPid} items={items} />
       <Clues myPid={myPid} partsInUse={partsInUse} hintOpen={hintOpen} hintPart={hintPart} />
       <Suspects myPid={myPid} hintPart={hintOpen ? hintPart : null} />
     </>
@@ -81,13 +84,13 @@ function AngelInbox() {
   const [review, setReview] = useState({});
   const [error, setError] = useState("");
   if (!angelInbox.length) return null;
-  const running = config.phase === PHASE.RUNNING;
+  const running = config.phase === PHASE.RUNNING || config.phase === PHASE.GUESSING; // 확인은 최종 지목 단계가 끝날 때까지
   async function confirm(g) {
     const text = (review[g.id] || "").trim();
     if (text.length < 10) return setError("후기를 10자 이상 써 주세요.");
     setError("");
     await updateDoc(doc(db, "angelGifts", g.id), { confirmed: true, review: text, confirmedAt: serverTimestamp() })
-      .catch(() => setError("확인하지 못했어요. 미션 진행 기간인지 확인해 주세요."));
+      .catch(() => setError("확인하지 못했어요. 확인은 최종 지목이 마감되기 전까지 할 수 있어요."));
   }
   return (
     <Panel title="수호천사가 보낸 것">
@@ -208,7 +211,7 @@ function ReportBox({ myPid, slot, phase }) {
       <p className="small">
         <b>{slot}주차</b>: 마니또가 미션을 했다고 알렸는데 아직 인증하지 않았어요. 받았다면 아래 "인증하기"에 코드와 후기를 입력해 주세요.
       </p>
-      {verdict === "received" && <p className="small note">운영진 확인: 전달된 것으로 확인됐어요. {phase === PHASE.RUNNING ? "코드를 찾으면 지금이라도 인증할 수 있어요." : ""}</p>}
+      {verdict === "received" && <p className="small note">운영진 확인: 전달된 것으로 확인됐어요. {phase === PHASE.RUNNING || phase === PHASE.GUESSING ? "코드를 찾으면 지금이라도 인증할 수 있어요." : ""}</p>}
       {verdict === "missing" && <p className="small note">운영진 확인: 못 받은 것으로 처리됐어요. 이 주차는 인증 입력 대신 응모권 1장으로 보상돼요(내 미션이 1건 이상 인증된 경우).</p>}
       {!verdict && reported && (
         <p className="small">
@@ -232,7 +235,8 @@ function CodeEntry({ myPid, items }) {
   const [busy, setBusy] = useState(false);
   const [slotOf, setSlotOf] = useState(null); // 입력한 코드의 주차(나에게 온 코드일 때)
   const [cardMatch, setCardMatch] = useState(true);
-  const running = config.phase === PHASE.RUNNING;
+  // 미션(완료 알리기)은 미션 진행 단계에 마감되지만, 인증은 최종 지목 단계가 끝날 때까지 받는다(마감 직전에 온 미션을 인증할 시간)
+  const running = config.phase === PHASE.RUNNING || config.phase === PHASE.GUESSING;
   // 4자리를 다 넣으면 어느 주차 코드인지 확인하고, 그 주차에 마니또가 고른 카드를 보여 준다(받은 것과 맞는지 확인)
   const typed = normalizeCode(code);
   useEffect(() => {
@@ -281,7 +285,8 @@ function CodeEntry({ myPid, items }) {
 
   return (
     <Panel title="인증하기">
-      {!running && <p className="muted">인증은 미션 진행 기간에만 할 수 있어요.</p>}
+      {!running && <p className="muted">인증은 미션 진행 기간과 최종 지목 기간에 할 수 있어요.</p>}
+      {config.phase === PHASE.GUESSING && <p className="small note">미션은 마감됐어요. 받은 미션은 최종 지목이 마감되기 전까지 인증할 수 있어요.</p>}
       <form className="stack" onSubmit={submit}>
         <label>
           <span className="panel-label">인증 코드</span>
@@ -309,27 +314,69 @@ function CodeEntry({ myPid, items }) {
   );
 }
 
-function MyRedemptions({ myPid }) {
+function MyRedemptions({ myPid, items }) {
+  const { config } = useApp();
   const [rows, setRows] = useState([]);
   useEffect(() => {
     return onSnapshot(query(collection(db, "redemptions"), where("receiverPid", "==", myPid)), (s) =>
       setRows(s.docs.map((d) => ({ code: d.id, ...d.data() })).sort((a, b) => a.slot - b.slot))
     );
   }, [myPid]);
+  // 카드 확인도 인증과 같은 기간(미션 진행 ~ 최종 지목 마감)에만 받는다(보안 규칙)
+  const open = config.phase === PHASE.RUNNING || config.phase === PHASE.GUESSING;
+  // 완료 알림보다 먼저 인증해서 카드를 못 보고 인증한 미션: 알림이 온 뒤 그 카드를 보여 주고 한 번 확인받는다.
+  // 추가 응모권이 있는 카드(보통·도전)만 묻는다. 확인이 없으면 마니또의 카드 추가분이 붙지 않는다(scoring.js).
+  const cardToCheck = (r) => (r.cardMatch === undefined && !r.voided
+    ? items.find((it) => it.kind === "mission" && it.slot === r.slot && it.card && CARD_BONUS[it.card.level] > 0)?.card
+    : null) || null;
 
   if (!rows.length) return null;
   return (
     <Panel title="내가 인증한 것">
       <ul className="plain">
-        {rows.map((r) => (
-          <li key={r.code} className="row-item">
-            <p>{r.review}</p>
-            {r.voided && <p className="error small">운영진이 무효 처리한 인증이에요.</p>}
-            {r.feedId && <Thanks feedId={r.feedId} />}
-          </li>
-        ))}
+        {rows.map((r) => {
+          const card = cardToCheck(r);
+          return (
+            <li key={r.code} className="row-item">
+              <p>{r.review}</p>
+              {r.voided && <p className="error small">운영진이 무효 처리한 인증이에요.</p>}
+              {card && open && <CardCheck code={r.code} slot={r.slot} card={card} />}
+              {r.cardMatch === false && <p className="small muted">받은 것이 마니또가 고른 카드와 달랐다고 표시했어요.</p>}
+              {r.feedId && <Thanks feedId={r.feedId} />}
+            </li>
+          );
+        })}
       </ul>
     </Panel>
+  );
+}
+
+// 나중 카드 확인: 인증할 때는 마니또의 완료 알림이 아직 없어 카드를 못 봤던 미션. 한 번만 남길 수 있다(보안 규칙).
+function CardCheck({ code, slot, card }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const answer = async (cardMatch) => {
+    setBusy(true);
+    setError("");
+    try {
+      await updateDoc(doc(db, "redemptions", code), { cardMatch });
+    } catch {
+      setError("저장하지 못했어요. 잠시 뒤 다시 눌러 주세요.");
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="card-check">
+      <p className="small">
+        <b>{slot}주차 카드 확인</b> 인증한 뒤에 마니또의 완료 알림이 왔어요. 마니또가 고른 카드: <b>{LEVEL_LABEL[card.level] || card.level}</b> · {card.text}
+      </p>
+      <p className="small">받은 것이 이 카드 내용과 같았나요? (같았다고 해야 마니또가 카드 추가 응모권을 받아요. 한 번만 고를 수 있어요)</p>
+      <span className="inline">
+        <button type="button" className="pk-btn" disabled={busy} onClick={() => answer(true)}>카드와 같았어요</button>
+        <button type="button" className="pk-btn" disabled={busy} onClick={() => answer(false)}>카드와 달랐어요</button>
+      </span>
+      {error && <p className="error small" role="alert">{error}</p>}
+    </div>
   );
 }
 

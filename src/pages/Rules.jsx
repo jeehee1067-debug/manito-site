@@ -49,7 +49,7 @@ export default function Rules() {
         <table className="rules-table">
           <tbody>
             <tr><th rowSpan={3}>마니또로서</th><td>내 미션이 인증될 때마다</td><td className="num">{R.perRedeemedMission}장 (최대 {R.maxMissions})</td></tr>
-            <tr><td>고른 카드가 보통이나 도전이고 대상이 직접 인증하면 추가로(대상이 "받은 것이 카드와 달라요"로 인증하면 없음)</td><td className="num">보통 +{R.cardBonus.normal}장, 도전 +{R.cardBonus.hard}장 (합계 최대 {R.maxCardBonus})</td></tr>
+            <tr><td>고른 카드가 보통이나 도전이고, 대상이 인증하면서 받은 것이 그 카드와 같다고 확인하면 추가로(대상이 "카드와 달라요"라고 하면 없음)</td><td className="num">보통 +{R.cardBonus.normal}장, 도전 +{R.cardBonus.hard}장 (합계 최대 {R.maxCardBonus})</td></tr>
             <tr><td>끝까지 안 들키면(대상이 나를 지목하지 못함). {allMissions ? `내 미션 ${R.maxMissions}건이 모두 인증되고` : `내 미션이 ${R.hiddenMinMissions}건 이상 인증되고`}{R.hiddenNeedsClues ? ", 프로필을 다 채워 단서 6개가 대상에게 간 경우만" : " 경우만"}</td><td className="num">{R.hidden}장</td></tr>
             <tr><th rowSpan={2}>받는 사람으로서</th><td>받은 미션을 인증할 때마다(코드 + 후기 {REVIEW_MIN}자 이상). 수호천사가 보낸 것을 "받았어요"로 확인한 것도 쳐요</td><td className="num">{R.perReceiverEntry}장 (최대 {R.maxReceiverEntries})</td></tr>
             <tr><td>내 마니또를 맞히면</td><td className="num">{R.correctGuess}장</td></tr>
@@ -74,7 +74,8 @@ export default function Rules() {
           </li>
           <li>3주차 칭찬 카드는 사이트로 전달되니, 보내면 대상이 인증하지 않아도 내 미션으로 인정돼요. 대상은 인증해야 자기 인증 응모권을 받아요.</li>
           <li>내 대상이 불참(가입 안 함, 중도 이탈)이면 내가 완료를 알린 미션은 인증된 것으로 쳐요. 대상이 받고도 끝까지 인증하지 않은 경우는 운영진이 확인한 뒤 주차별로 인정할 수 있어요.</li>
-          <li>이렇게 대상 불참이나 운영진 확인으로 인정된 미션은 미션 응모권 {R.perRedeemedMission}장만 받아요. <b>보통·도전 카드 추가분은 대상이 직접 인증한 미션에만</b> 붙어요.</li>
+          <li>이렇게 대상 불참이나 운영진 확인으로 인정된 미션은 미션 응모권 {R.perRedeemedMission}장만 받아요. <b>보통·도전 카드 추가분은 대상이 직접 인증하면서 카드를 확인한 미션에만</b> 붙어요.</li>
+          <li>미션을 하면 바로 "미션 완료 알리기"를 눌러 주세요. 대상이 알림보다 먼저 코드로 인증하면 고른 카드를 못 보고 인증한 것이라, 알림이 간 뒤 대상이 추리 보드 "내가 인증한 것"에서 카드를 한 번 확인해야 카드 추가분이 붙어요.</li>
           <li>받았는데 인증하지 않은 미션은 내 응모권으로 채워지지 않아요. 받으면 꼭 인증해 주세요. 마니또도 그래야 응모권을 제대로 받아요.</li>
         </ul>
         <p className="small">응모권이 0장이면 추첨 대상이 아니에요. 가입하지 않은 사람, 중도 이탈, 수상 제외도 0장이에요.</p>
@@ -103,8 +104,9 @@ export default function Rules() {
         <ul className="rules-list">
           <li>추첨은 송년회 현장에서 해요. 참석자가 부른 숫자 하나를 넣으면, 그 숫자와 응모권 표만으로 큰 상부터({drawOrder.map(rank).join(" → ")}) 한 번에 정해져요. 발표는 {rank(PRIZES.tiers[PRIZES.tiers.length - 1])}부터 해요.</li>
           <li><b>한 사람은 {drawOrder.map(rank).join("·")} 중 하나만 받아요.</b> 큰 상부터 정하고, 받은 사람은 다음 순서에서 빠져요. 그래서 응모권이 많을수록 큰 상에 가깝고, 무엇이든 받을 가능성도 커요.</li>
-          <li>{PRIZES.bestManito.label}는 추첨이 아니에요. 1등 당첨자를 뺀 사람 중 응모권이 가장 많은 {PRIZES.bestManito.count}명이고, 경계에서 동점이면 같은 추첨 숫자로 가려요.</li>
-          <li>{PRIZES.bestReview.label}은 집계할 때 공감 수로 정해요. 자기 후기에 누른 공감은 세지 않고, 동점이면 먼저 쓴 후기예요. 추첨과 따로라서 다른 상과 겹칠 수 있어요.</li>
+          <li>{PRIZES.bestManito.label}는 추첨이 아니에요. 1등 당첨자를 뺀 사람 중 응모권이 가장 많은 {PRIZES.bestManito.count}명이에요. 동점이면 <b>내 미션에 달린 후기가 받은 공감(♥)</b>이 많은 사람이 앞서고, 그래도 같을 때만 추첨 숫자로 가려요. 모두가 열심히 해서 응모권이 같아지면, 대상이 "받아서 좋았다"고 쓰고 다른 사람들이 공감한 미션이 가려 줘요.</li>
+          <li>{PRIZES.bestReview.label}은 집계할 때 공감 수로 정해요(동점이면 먼저 쓴 후기). 추첨과 따로라서 다른 상과 겹칠 수 있어요.</li>
+          <li>공감 수를 셀 때는 그 미션의 당사자 두 사람(후기를 쓴 사람과 그 미션을 한 마니또)이 누른 공감을 빼요.</li>
           <li>결과 탭의 "추첨 검증"으로 누구나 같은 숫자로 다시 계산해 결과가 같은지 확인할 수 있어요(운영진이 결과를 고를 수 없어요).</li>
         </ul>
       </Panel>
@@ -126,6 +128,7 @@ export default function Rules() {
           <li>간식을 주기 전에 내 미션 화면의 "내 대상이 알려 준 것"에서 못 먹는 음식·알레르기를 꼭 확인해 주세요.</li>
           <li>카드가 마음에 안 들면 "다른 카드 보기"로 같은 난이도의 다른 카드를 고를 수 있어요.</li>
           <li>카드 고르기·완료 알리기·인증은 그 주차가 열린 뒤에만 할 수 있어요. 지난 주차는 미션 진행 기간 안이면 늦게라도 할 수 있어요.</li>
+          <li>미션(완료 알리기)은 12월 8일 미션 마감 때 닫혀요. 받은 미션 인증은 그 뒤에도 최종 지목이 마감되기 전까지 할 수 있어요(마감 직전에 받은 미션을 인증할 시간).</li>
           <li>완료를 알린 주차에는 "쪽지 더 보내기"로 쪽지를 더 보낼 수 있어요(주차마다 {EXTRA_NOTES_MAX}건까지). "3일 연속 응원 쪽지" 카드는 첫날 완료를 알린 뒤 이것으로 이어서 보내면 돼요.</li>
         </ul>
       </Panel>

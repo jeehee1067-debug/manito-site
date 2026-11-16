@@ -347,16 +347,24 @@ const step = (s) => console.log("▶", s);
     await tab(page, "피드");
     await panel(page, "익명 피드").locator(".dialogue").nth(N - 1).waitFor();
     assert.equal(await panel(page, "익명 피드").locator(".dialogue").count(), N);
-    // 공감: 카타가 가나의 후기에, 가나가 자기 후기에 공감한다 → 3등(베스트 후기상)은 자기 공감을 빼고 세므로 가나의 후기 1표
-    for (const who of ["카타", "가나"]) {
+    // 공감: 가나의 후기에 세 사람이 공감한다 — 다른 사람 1명, 글쓴이(가나), 그 미션을 한 마니또.
+    // 3등(베스트 후기상)과 2등 동점 기준은 당사자 두 사람의 공감을 빼고 세므로 1표다
+    const outsider = PEOPLE.map((x) => x.name).find((n) => n !== "가나" && n !== giverOf["가나"]);
+    for (const who of [outsider, "가나", giverOf["가나"]]) {
       const pg = users[who];
       await tab(pg, "피드");
       const post = panel(pg, "익명 피드").locator(".dialogue", { hasText: `${giverOf["가나"]}님 덕분에` });
       await post.waitFor();
       await post.getByRole("button", { name: /공감/ }).click();
       await post.locator(".like-btn.is-on").waitFor();
+      await tab(pg, "내 미션");
     }
-    await tab(users["가나"], "내 미션");
+    // 피드는 실시간으로 바뀌지 않는다: 열어 둔 화면(카타)은 "새 글 확인"을 눌러야 공감 수가 바뀐다
+    await tab(page, "피드");
+    const liked = panel(page, "익명 피드").locator(".dialogue", { hasText: `${giverOf["가나"]}님 덕분에` });
+    await liked.waitFor();
+    await panel(page, "익명 피드").getByRole("button", { name: "새 글 확인" }).click();
+    await liked.getByText(/♥ 공감 3/).waitFor();
     // 감사 답장: 사아가 보내면 → 피드 글에 붙고, 미션을 보낸 마니또 화면에 보인다
     const r = users["사아"];
     await tab(r, "추리 보드");
@@ -760,7 +768,7 @@ const step = (s) => console.log("▶", s);
   console.log("  ", scoreText);
   // 3등 베스트 후기상은 운영자가 고르지 않는다: 공감을 가장 많이 받은 후기(자기 공감 제외)
   assert.equal(await panel(admin, "베스트 후기상 고르기").count(), 0, "운영자가 후기를 고르는 칸이 없다");
-  assert.match(scoreText, /3등 베스트 후기상: 가나 \(♥ 1, 자기 공감 제외\)/);
+  assert.match(scoreText, /3등 베스트 후기상: 가나 \(♥ 1, 당사자 공감 제외\)/, "공감 3개 중 글쓴이와 그 미션의 마니또가 누른 2개는 뺀다");
   await advance(admin, "공개");
   step("송년회 발표 화면: 넘긴 장면까지만 참여자 결과 탭에 열린다, 짝은 원을 따라 공개, 추첨도 발표 화면에서");
   for (const p of PEOPLE) await tab(users[p.name], "결과");

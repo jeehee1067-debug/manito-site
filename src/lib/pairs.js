@@ -43,7 +43,7 @@ export function pairRows({ assignments = {}, giverCodes = {}, missions = {}, red
       const code = giverCodes[giverPid]?.codes?.[slot] || null;
       const choice = m.choices?.[slot] || null;
       const key = `${receiverPid}_${slot}`;
-      const done = Boolean(m.done?.[slot]) || delivered.has(key);
+      const done = m.done?.[slot] === true || delivered.has(key); // 완료 표시는 정확히 true일 때만(보안 규칙도 true만 받는다)
       const red = code ? redemptions[code] : null;
       const reported = Boolean(reports[key]) && reports[key].active !== false; // 취소한 신고는 active = false (예전 신고는 active 없음)
       const verdict = verdicts[key]?.verdict || null;

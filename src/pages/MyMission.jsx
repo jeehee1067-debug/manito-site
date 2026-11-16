@@ -7,6 +7,7 @@ import { seededRandom, shuffle } from "../lib/random.js";
 import { syncClues } from "../lib/sync.js";
 import { Avatar, Dialogue, Panel } from "../ui.jsx";
 import { TICKET_RULES } from "../config/prizes.js";
+import { cardLevel } from "../lib/scoring.js";
 import { bump } from "../lib/writes.js";
 
 // 대상 이름은 처음에 가려 둔다(사무실에서 화면을 열면 옆 사람이 볼 수 있어서). "이름 보기"를 누르면 이만큼 보인다.
@@ -112,6 +113,10 @@ export default function MyMission() {
     if (extra.mid && !extra.mid[week]) todo.push({ text: `${week}주차 추측 남기기 (용의자 보드)`, href: "#detective" });
   }
   if (config.phase === PHASE.GUESSING && !progress.unknown && !progress.guessed) todo.push({ text: "최종 지목하기 (마지막 단서: 마니또의 파트 공개)", href: "#detective" });
+  // 완료 알림보다 먼저 인증해서 카드를 못 본 미션: 알림이 온 뒤 카드를 확인해야 마니또의 카드 추가분이 붙는다(인증과 같은 기간)
+  const cardChecks = (mine || []).filter((r) => r.cardMatch === undefined && !r.voided
+    && inbox.some((d) => d.kind === "mission" && d.slot === r.slot && d.card && TICKET_RULES.cardBonus[d.card.level] > 0)).length;
+  if ((running || config.phase === PHASE.GUESSING) && cardChecks > 0) todo.push({ text: `인증한 미션 ${cardChecks}건의 카드 확인하기 (추리 보드 '내가 인증한 것')`, href: "#detective" });
   if (running && angelInbox.some((g) => !g.confirmed)) todo.push({ text: "수호천사가 보낸 것 확인하기", href: "#detective" });
   if (running && angelTodo > 0) todo.push({ text: "수호천사 미션 하기 (이 화면 아래 '수호천사 미션')", href: null });
 
@@ -326,7 +331,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
               )}
             </div>
           )}
-          {!isPraise && redeemed && <p className="small">{receiverName}이 이미 인증해서 카드를 바꿀 수 없어요. 완료 알리기만 눌러 주세요.</p>}
+          {!isPraise && redeemed && <p className="small">{receiverName}이 이미 인증해서 카드를 바꿀 수 없어요. 완료 알리기를 눌러 주세요. 그래야 대상이 고른 카드를 보고 확인해서 카드 추가분이 붙어요.</p>}
           <div className="code-tag" aria-label="인증 코드">
             <span>인증 코드</span>
             <strong>{code || "----"}</strong>
@@ -335,7 +340,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
             {isPraise
               ? "칭찬 카드는 사이트 쪽지로 전달되고, 인증 코드도 함께 보내져요."
               : "실물 미션이면 이 코드를 메모에 적어 함께 두면 좋아요. 아래에서 코드를 쪽지로도 함께 보내면 메모를 잃어버려도 인증할 수 있어요."}
-            {!isPraise && " 고른 카드 내용은 대상에게 같이 보여요(받은 것이 카드와 다르면 카드 추가분이 빠져요)."}
+            {!isPraise && " 고른 카드 내용은 대상에게 같이 보여요(받은 것이 카드와 다르면 카드 추가분이 빠져요). 미션을 하면 바로 완료 알리기를 눌러 주세요. 대상이 알림보다 먼저 인증하면 카드를 한 번 더 확인해야 추가분이 붙어요."}
           </p>
           <label>
             <span className="panel-label">{isPraise ? `${receiverName}에게 보내는 칭찬 (익명)` : "쪽지 (선택, 익명으로 전달)"}</span>
@@ -599,16 +604,17 @@ function TicketSummary({ codes, missions, entries }) {
   useEffect(() => {
     if (!codes) return;
     const offs = Object.entries(codes).map(([slot, code]) =>
-      // 인증 기록 없음: null, 인증됨: "match"(받은 것이 카드와 같음) 또는 "diff"(대상이 "카드와 달라요"로 인증 → 카드 추가분 없음), 운영진이 무효 처리: "void"
+      // 인증 기록 없음: null, 인증됨: "match"(대상이 카드를 보고 같다고 함 → 카드 추가분), "diff"("카드와 달라요" → 추가분 없음),
+      // "unchecked"(완료 알림보다 먼저 인증해서 대상이 카드를 아직 확인하지 않음 → 확인 전까지 추가분 없음), 운영진이 무효 처리: "void"
       onSnapshot(doc(db, "redemptions", code), (s) => setRedeemedSlots((prev) => ({
-        ...prev, [slot]: !s.exists() ? null : s.data().voided ? "void" : s.data().cardMatch === false ? "diff" : "match",
+        ...prev, [slot]: !s.exists() ? null : s.data().voided ? "void" : s.data().cardMatch === true ? "match" : s.data().cardMatch === false ? "diff" : "unchecked",
       })), () => {})
     );
     return () => offs.forEach((o) => o());
   }, [codes]);
 
   const R = TICKET_RULES;
-  const ok = (st) => st === "match" || st === "diff";
+  const ok = (st) => st === "match" || st === "diff" || st === "unchecked";
   // 3주차 칭찬 카드는 사이트로 전달되므로, 보내면 인증 기록이 없어도 미션으로 인정된다(scoring.js와 같은 기준.
   // 운영진이 쪽지를 가리거나 "못 받음"으로 확인하면 집계에서 빠질 수 있다)
   const praiseSent = Boolean(missions.done?.[PRAISE_SLOT]) && redeemedSlots[PRAISE_SLOT] == null;
@@ -617,7 +623,12 @@ function TicketSummary({ codes, missions, entries }) {
   // 카드 추가분: 보통 +1, 도전 +2 (scoring.js computeTickets와 같은 기준)
   const card = Math.min(R.maxCardBonus, Object.entries(redeemedSlots)
     .filter(([, st]) => st === "match")
-    .reduce((sum, [slot]) => sum + (R.cardBonus[missions.choices?.[slot]?.level] || 0), 0));
+    .reduce((sum, [slot]) => sum + (R.cardBonus[cardLevel(missions.choices?.[slot])] || 0), 0));
+  // 인증은 됐는데 대상이 카드를 아직 확인하지 않은 보통·도전 카드 주차(확인되면 추가분이 붙는다)
+  const uncheckedSlots = Object.entries(redeemedSlots)
+    .filter(([slot, st]) => st === "unchecked" && R.cardBonus[cardLevel(missions.choices?.[slot])] > 0)
+    .map(([slot]) => slot).sort();
+  const uncheckedNoNotice = uncheckedSlots.filter((sl) => missions.done?.[sl] !== true);
   // 끝까지 해야 받는 응모권(은신): 주차별로 인증됨 / 인증 대기(완료는 알렸는데 대상이 아직 인증 안 함) / 아직 안 함
   const slots = Object.keys(codes || {});
   const waiting = slots.filter((sl) => !credited(sl) && missions.done?.[sl]).length;
@@ -649,9 +660,19 @@ function TicketSummary({ codes, missions, entries }) {
             : waiting > 0 ? " 대상이 인증하면 채워져요(대상이 끝까지 인증하지 않으면 운영진이 확인해 인정할 수 있어요)." : ""}
         </p>
       ))}
+      {uncheckedSlots.length > 0 && (
+        <p className="warn-line" role="status">
+          <b>카드 확인 대기</b> {uncheckedSlots.map((sl) => `${sl}주차`).join("·")}: 대상이 완료 알림보다 먼저 인증해서 고른 카드를 아직 확인하지 않았어요.
+          {uncheckedNoNotice.length === 0
+            ? " 대상이 추리 보드에서 \"카드와 같았어요\"를 누르면 카드 추가분이 붙어요."
+            : config.phase === PHASE.RUNNING
+              ? ` ${uncheckedNoNotice.map((sl) => `${sl}주차`).join("·")} "미션 완료 알리기"를 눌러 주세요. 그래야 대상에게 카드가 보여요.`
+              : " 미션이 마감돼 완료를 알릴 수 없어요. 카드대로 했다면 운영진에게 알려 주세요(두 사람에게 확인한 뒤 고칠 수 있어요)."}
+        </p>
+      )}
       <p className="small">
         내 마니또가 미션을 안 보낸 주차(운영진이 "못 받음"으로 확인한 주차 포함)는 마지막에 인증 입력 대신 1장씩 채워져요(내 미션이 {R.compMinMissions}건 이상 인증된 경우).
-        카드 추가분은 대상이 직접 인증한 미션에만 붙어요. <a href="#rules">규칙 전체 보기</a>
+        카드 추가분은 대상이 직접 인증하면서 받은 것이 카드와 같다고 확인한 미션에만 붙어요. <a href="#rules">규칙 전체 보기</a>
       </p>
     </Panel>
   );
