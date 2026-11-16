@@ -427,6 +427,12 @@ test("미션 카드: 삼행시 쪽지는 보통 카드, 3일 연속 쪽지는 �
   const poem = find(/삼행시 쪽지/);
   assert.deepEqual(poem.map((c) => [c.level, c.remote, Boolean(c.cost)]), [["normal", true, false]]);
   assert.deepEqual(find(/3일 연속/).map((c) => c.level), ["hard"]);
+  // 쪽지만으로 끝나는 카드는 보통까지(3일 연속 한 장만 예외). 도전은 직접 전달·만든 것·여러 날.
+  const noteOnlyHard = MISSION_CARDS.hard.filter((c) => /쪽지/.test(c.text) && !/손편지|손카드/.test(c.text));
+  assert.deepEqual(noteOnlyHard.map((c) => c.id), find(/3일 연속/).map((c) => c.id));
+  assert.deepEqual(find(/몰래 알아내/).map((c) => c.level).filter((l) => l !== "normal"), [], "몰래 알아내기는 보통 카드");
+  assert.deepEqual(find(/서랍|가방|이상형/), [], "남의 서랍·가방, 이상형 묻기는 카드에 넣지 않는다");
+  assert.deepEqual(find(/^손편지 써서/).map((c) => c.level), ["hard"]);
   const ids = Object.values(MISSION_CARDS).flat().map((c) => c.id);
   assert.equal(new Set(ids).size, ids.length, "카드 번호 중복 없음");
 });
