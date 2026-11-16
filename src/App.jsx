@@ -16,6 +16,7 @@ import Reveal from "./pages/Reveal.jsx";
 import Admin from "./pages/Admin.jsx";
 import Rules from "./pages/Rules.jsx";
 import { Garland, XmasFooter } from "./xmas.jsx";
+import { Icon, TAB_ICON } from "./icons.jsx";
 
 const AppCtx = createContext(null);
 export const useApp = () => useContext(AppCtx);
@@ -347,7 +348,8 @@ function Session({ user, logout }) {
             <nav className="tabs" aria-label="메뉴">
               {tabs.map(([k, label]) => (
                 <button key={k} className={k === current ? "tab is-on" : "tab"} aria-current={k === current ? "page" : undefined} onClick={() => setTab(k)}>
-                  {label}
+                  <Icon name={TAB_ICON[k]} size={20} className="tab-icon" />
+                  <span className="tab-label">{label}</span>
                   {unread[k] > 0 && <span className="tab-badge" aria-label={`새 소식 ${unread[k]}건`}>{unread[k]}</span>}
                 </button>
               ))}

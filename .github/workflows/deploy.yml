@@ -49,6 +49,8 @@ jobs:
       # 넣지 않으면 이 단계는 건너뛰고 GitHub Pages에만 올린다. 설정 방법은 README "짧은 주소(Firebase Hosting)".
       - name: Deploy to Firebase Hosting
         if: env.FIREBASE_SERVICE_ACCOUNT != ''
+        # 이 단계가 실패해도(키 권한·Hosting 미설정 등) GitHub Pages 배포는 계속한다
+        continue-on-error: true
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}

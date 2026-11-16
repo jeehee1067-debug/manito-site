@@ -156,7 +156,8 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 | `src/pages/Claim.jsx` | "연결 전" 화면: 회사 메일 인증 확인(`claimWithMail`, 창으로 돌아오면 스스로 확인), 초대 코드 연결(예비), 공동 운영자로 지정받을 계정의 계정 번호 |
 | `src/pages/Feed.jsx` | 익명 피드(`feed` 문서만 읽음) |
 | `src/pages/Admin.jsx` | 운영 화면: 단계, 명단·배정, 주차·단서, 짝 현황(`Pairs`), 받은 게 없어요·집계 전 확인(`Unresolved`), 수호천사 연결(`Angels`), 인증 검토(`Moderation`), 쪽지 검토(`NotesReview`), 쓰기 횟수(`WriteCounts`), 집계·검산, 공동 운영자, 규칙 버전 경고(`RulesCheck`) |
-| `src/ui.jsx` | 패널·대사창·캐릭터 공통 컴포넌트 |
+| `src/ui.jsx` | 패널·대사창·캐릭터 공통 컴포넌트. 패널 제목 앞 아이콘은 제목의 낱말로 고른다(`icons.jsx` `iconForTitle`) |
+| `src/icons.jsx`, `src/assets/icons/`, `tools/icons/make_icons.py` | 픽셀 아이콘(16×16 SVG): 메뉴(탭)와 패널 제목. 그림은 Python 스크립트의 글자 격자에서 만든다(고치면 `python3 tools/icons/make_icons.py`). 시즌과 무관한 기본 디자인이다 |
 | `src/firebase.js` | Firebase 연결. `npm run dev:emu`(`.env.emulator`)일 때만 에뮬레이터 연결. `appCheckSiteKey`가 있으면 App Check. `?longpoll`로 연 기기는 Firestore 긴 폴링(사내 프록시 대비) |
 | `src/xmas.jsx`, `src/xmas.css`, `src/assets/xmas/` | 연말·크리스마스 장식(시즌 한정). 빼는 방법은 README "연말 장식" |
 | `tools/xmas/` | 크리스마스 꾸밈 캐릭터(`leader1~4.png`)와 사람별 PNG(투명·4배·카드)를 만드는 Python 스크립트 |

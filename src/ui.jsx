@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { Icon, iconForTitle } from "./icons.jsx";
 import { AVATARS } from "./lib/constants.js";
 import { useApp } from "./App.jsx";
 
@@ -24,10 +25,12 @@ export function Avatar({ pid, index, size = 56, dim = false }) {
   );
 }
 
-export function Panel({ title, children, className = "" }) {
+// icon: 제목 앞 픽셀 아이콘 이름(src/icons.jsx). 주지 않으면 제목의 낱말로 고르고, 맞는 것이 없으면 없다. false면 붙이지 않는다.
+export function Panel({ title, children, className = "", icon }) {
+  const name = icon === false ? null : icon || iconForTitle(title);
   return (
     <section className={`panel ${className}`}>
-      {title && <h2 className="panel-title">{title}</h2>}
+      {title && <h2 className="panel-title">{name && <Icon name={name} size={22} className="title-icon" />}{title}</h2>}
       {children}
     </section>
   );
