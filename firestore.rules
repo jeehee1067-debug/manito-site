@@ -41,7 +41,7 @@ service cloud.firestore {
     // 게시된 규칙의 버전 확인용. 운영 화면이 이 경로를 읽어 보고, 거부되면 "콘솔의 규칙이 예전 것"이라고 알려 준다.
     // 화면이 쓰는 경로·값의 모양을 바꿀 때 src/lib/constants.js의 RULES_VERSION과 같이 올린다.
     match /rulesVersion/{v} {
-      allow get: if isAdmin() && v == '20261119';
+      allow get: if isAdmin() && v == '20261120';
     }
 
     // ── 설정 ──────────────────────────────────────────────────────────────
@@ -105,16 +105,37 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow create: if isOwner() && phase() == 0 && request.resource.data.get('uid', null) == null;
       allow delete: if isOwner() && phase() == 0;
-      allow update: if (isAdmin()
-            && (request.resource.data.get('uid', null) == resource.data.get('uid', null)
-                || (isOwner() && request.resource.data.get('uid', null) == null)))
-        || (signedIn()
-            && resource.data.uid == null
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['uid', 'inviteUsed'])
-            && request.resource.data.uid == request.auth.uid
-            && (!exists(/databases/$(database)/documents/users/$(request.auth.uid))
-                || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.personId == pid)
-            && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteUsed)).data.personId == pid);
+      // 운영자: 연결 계정(uid)은 못 바꾸고(처음 운영자만 비울 수 있다), 메일(email)도 처음 운영자만 바꾼다
+      // (공동 운영자가 남의 이름에 자기 메일을 적어 넣고 메일 인증으로 그 사람인 척 연결하지 못하게).
+      allow update: if isAdmin()
+        && (request.resource.data.get('uid', null) == resource.data.get('uid', null)
+            || (isOwner() && request.resource.data.get('uid', null) == null))
+        && (request.resource.data.get('email', null) == resource.data.get('email', null) || isOwner());
+      // 참여자의 연결(아직 아무도 연결하지 않은 이름에, 자기 계정을, 한 계정은 한 이름만). 두 가지 길이 있다.
+      function claimShapeOk(pid) {
+        return signedIn()
+          && resource.data.uid == null
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['uid', 'inviteUsed'])
+          && request.resource.data.uid == request.auth.uid
+          && (!exists(/databases/$(database)/documents/users/$(request.auth.uid))
+              || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.personId == pid);
+      }
+      // (가) 회사 메일 인증: 인증을 마친 메일이 명단의 그 사람 메일과 같을 때. inviteUsed에는 '@mail'을 남긴다(src/lib/constants.js MAIL_LINK).
+      allow update: if claimShapeOk(pid)
+        && request.resource.data.inviteUsed == '@mail'
+        && request.auth.token.email_verified == true
+        && resource.data.get('email', null) != null
+        && resource.data.email == request.auth.token.email;
+      // (나) 초대 코드(메일이 오지 않을 때의 예비): 그 사람 앞으로 발급된 코드일 때
+      allow update: if claimShapeOk(pid)
+        && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteUsed)).data.personId == pid;
+    }
+
+    // 메일 → 명단 번호. 메일 인증을 마친 사람이 자기 이름을 찾는 데 쓴다(연결 전 계정은 명단을 읽을 수 없어서).
+    // 자기 메일 한 건만 읽을 수 있고, 만들기·지우기·목록은 처음 운영자만(명단과 같이 쓴다).
+    match /mailIndex/{email} {
+      allow get: if signedIn() && request.auth.token.email == email;
+      allow read, write: if isOwner();
     }
 
     // public/roster: 참여자 화면용 명단 요약(이름·근무지·파트). 운영 화면이 명단과 다르면 다시 쓴다. 읽기 수를 줄이려고 둔다.
@@ -757,27 +778,34 @@ service cloud.firestore {
     }
 
     // 결과. 집계 단계(4)에는 통째로 다시 쓸 수 있지만 추첨 결과(draws)는 비어 있어야 한다.
-    // 공개 단계(5)에는 추첨 결과를 한 번만 쓸 수 있다(다섯 칸을 한 번에. 이미 뽑은 결과를 바꾸거나 지우거나 더할 수 없다).
+    // 공개 단계(5)의 추첨 결과(src/lib/scoring.js resolvePrizes가 읽는 모양. 칸 이름은 tests/logic.test.js가 상품 설정과 같은지 확인):
+    //   seed            현장에서 정한 숫자. 한 번 넣으면 바꿀 수 없다(2등 동점과 6등 사이트 추첨에 쓰므로, 결과를 보고 고르지 못하게).
+    //   grand·t4·t5     현장에서 종이로 뽑힌 이름 { winners: [pid…] }. 운영자가 입력하고, 6등을 뽑기 전까지는 고칠 수 있다(잘못 입력했을 때).
+    //   t6              사이트가 뽑은 6등 { winners }. 숫자가 있어야 쓸 수 있고, 쓴 뒤에는 추첨 결과 전체를 바꿀 수 없다.
+    //   (2등·3등은 저장하지 않는다: 응모권 표·공감 수·숫자로 누구 화면에서나 같은 값이 계산된다)
     function drawsOf(d) { return d.get('draws', {}); }
-    // 추첨은 다섯 칸(1등·2등·4등·5등·6등)을 같은 숫자로 한 번에 쓴다(src/config/prizes.js의 key와 같아야 한다. tests/logic.test.js가 확인).
-    // 한 칸만 먼저 쓰거나, 칸마다 다른 숫자를 쓰거나, 모르는 칸을 더할 수 없다.
+    function winnersOk(m, max) { return m is map && m.keys().hasOnly(['winners']) && m.winners is list && m.winners.size() <= max; }
     function drawsShapeOk(d) {
-      return d.keys().hasOnly(['grand', 'best', 't4', 't5', 't6']) && d.keys().hasAll(['grand', 'best', 't4', 't5', 't6'])
-        && d.grand.seed is string && d.grand.seed.size() > 0 && d.grand.seed.size() <= 20
-        && d.best.seed == d.grand.seed && d.t4.seed == d.grand.seed && d.t5.seed == d.grand.seed && d.t6.seed == d.grand.seed
-        && d.grand.winners is list && d.best.winners is list && d.t4.winners is list && d.t5.winners is list && d.t6.winners is list
-        && d.grand.winners.size() <= 1 && d.best.winners.size() <= 10 && d.t4.winners.size() <= 60 && d.t5.winners.size() <= 60 && d.t6.winners.size() <= 60;
+      return d.keys().hasOnly(['seed', 'grand', 't4', 't5', 't6'])
+        && d.get('seed', '0') is string && d.get('seed', '0').size() > 0 && d.get('seed', '0').size() <= 20
+        && winnersOk(d.get('grand', { 'winners': [] }), 1)
+        && winnersOk(d.get('t4', { 'winners': [] }), 60)
+        && winnersOk(d.get('t5', { 'winners': [] }), 60)
+        && winnersOk(d.get('t6', { 'winners': [] }), 60)
+        && (!('t6' in d) || 'seed' in d);
     }
     match /results/{docId} {
       allow read: if (linked() && phase() >= 5) || isAdmin();
       allow create, update: if isAdmin() && phase() == 4
         && drawsOf(request.resource.data).size() == 0;
-      // 공개 단계: 추첨 칸 더하기와 발표 화면 진행(step: 몇 번째 장면까지 공개했는지)만
+      // 공개 단계: 추첨 결과와 발표 화면 진행(step: 몇 번째 장면까지 공개했는지)만
       allow update: if isAdmin() && phase() == 5
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['draws', 'step'])
         && request.resource.data.get('step', 0) is int
         && (drawsOf(request.resource.data) == drawsOf(resource.data)
-            || (drawsOf(resource.data).size() == 0 && drawsShapeOk(drawsOf(request.resource.data))));
+            || (!('t6' in drawsOf(resource.data))
+                && drawsShapeOk(drawsOf(request.resource.data))
+                && (!('seed' in drawsOf(resource.data)) || drawsOf(request.resource.data).get('seed', '') == drawsOf(resource.data).seed)));
     }
   }
 }

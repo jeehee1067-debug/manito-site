@@ -1,19 +1,26 @@
 // 상품 구성은 여기서만 바꾸면 된다(인원·금액을 고치면 규칙 안내·발표 화면·추첨이 같이 바뀐다).
 // 선물대 한도 112만원(세금 포함)은 1~5등: 50 + 10×3 + 5 + 5×4 + 1×7 = 112만원. 6등(커피 쿠폰 20명)은 회의비로 따로.
-// 추첨: 현장에서 정한 숫자 하나로 큰 상부터(1등 → 2등 → 4등 → 5등 → 6등) 한 번에 정하고, 한 사람은 그중 하나만 받는다(scoring.js drawAll).
-//   2등 베스트 마니또는 추첨이 아니라 응모권이 가장 많은 순(1등 당첨자는 빼고, 경계에서 동점이면 같은 숫자로 가른다).
-//   3등 베스트 후기상은 운영진이 뽑는 상이라 추첨과 따로다(겹칠 수 있다).
-// 발표는 거꾸로 6등 → 5등 → 4등 → 3등 → 2등 → 1등(reveal.js).
+// 정하는 방법(how):
+//   "paper"  송년회 현장 종이 추첨. 응모권 수만큼 이름 종이를 통에 넣고 뽑아, 운영자가 뽑힌 이름을 발표 화면에 입력한다(1·4·5등)
+//   "rank"   응모권이 가장 많은 순(2등 베스트 마니또). 동점이면 내 미션 후기가 받은 공감, 그래도 같으면 현장 숫자로 가른다
+//   "review" 익명 피드에서 공감을 가장 많이 받은 후기(3등 베스트 후기상)
+//   "online" 사이트 추첨(6등). 현장에서 정한 숫자와 응모권 표로 정하고, 각자 휴대폰으로 확인한다
+// 한 사람은 하나만 받는다. 겹치면 큰 상이 우선이다(1등 > 2등 > 3등 > 4등 > 5등 > 6등, scoring.js resolvePrizes).
+// 현장 순서: 숫자 받기 → 2등 → 3등 → 4등 → 5등 → 1등(겹쳐도 뽑고, 겹친 자리는 다시 채운다) → 6등(사이트)
 export const PRIZES = {
-  grand: { key: "grand", label: "1등 대추첨", count: 1, prize: "50만원 상품권" },
-  bestManito: { key: "best", label: "2등 베스트 마니또", count: 3, prize: "각 10만원" },
-  bestReview: { label: "3등 베스트 후기상", count: 1, prize: "5만원" },
+  grand: { key: "grand", label: "1등 대추첨", count: 1, prize: "50만원 상품권", how: "paper" },
+  bestManito: { key: "best", label: "2등 베스트 마니또", count: 3, prize: "각 10만원", how: "rank" },
+  bestReview: { key: "review", label: "3등 베스트 후기상", count: 1, prize: "5만원", how: "review" },
   tiers: [ // 큰 상부터
-    { key: "t4", label: "4등 응모권 추첨", count: 4, prize: "5만원" },
-    { key: "t5", label: "5등 응모권 추첨", count: 7, prize: "1만원" },
-    { key: "t6", label: "6등 응모권 추첨", count: 20, prize: "커피 쿠폰(5천원)" },
+    { key: "t4", label: "4등 응모권 추첨", count: 4, prize: "5만원", how: "paper" },
+    { key: "t5", label: "5등 응모권 추첨", count: 7, prize: "1만원", how: "paper" },
+    { key: "t6", label: "6등 응모권 추첨", count: 20, prize: "커피 쿠폰(5천원)", how: "online" },
   ],
 };
+
+// 참여자에게 금액·인원을 알린 상(규칙 탭). 여기 없는 상은 이름과 정하는 방법만 보이고 금액·인원은 "추후 공지"로 나온다.
+// 확정해서 알릴 때 key("best", "review", "t4", "t5", "t6")를 더한다. 송년회 발표 화면·결과 탭은 이 값과 상관없이 모두 보인다.
+export const PRIZES_ANNOUNCED = ["grand"];
 
 export const TICKET_RULES = {
   perRedeemedMission: 1, // 마니또: 미션이 인증될 때마다
@@ -29,6 +36,7 @@ export const TICKET_RULES = {
   partBonusMinMissions: 1, // 위 응모권은 내 미션이 이만큼 이상 인증된 사람만 (아무것도 안 하고 받는 것 방지)
   maxMissions: 3,
   maxCardBonus: 4, // 카드 추가분 합계 상한 (1·2주차 모두 도전이면 2 + 2)
+  costBonus: 1, // 마니또: 돈이 드는 카드(소액 비용) 미션을 대상이 직접 인증하고 카드와 같다고 확인하면 추가. 한 사람에 한 번만(여러 번 해도 1장)
   angelPerMission: 1, // 수호천사(지원자): 연결된 사람이 확인한 수호천사 미션마다
   maxAngel: 2, // 수호천사 응모권 상한(수호천사 미션은 받는 사람마다 2번까지)
   maxReceiverEntries: 3,

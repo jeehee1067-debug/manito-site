@@ -46,7 +46,8 @@ export const EXTRA_NOTES_MAX = 5;
 // 행사 일정(참여자 화면 "이번 주 할 일"과 규칙 탭에 보인다). 바꾸면 화면에 바로 반영된다.
 // 주차를 올리고 단서를 공개하는 것은 운영자가 그날 운영 탭에서 직접 누른다(자동으로 바뀌지 않음).
 export const SCHEDULE = [
-  { date: "2026-11-17", text: "1주차 미션 시작" },
+  { date: "2026-11-17", text: "가입 시작 (회사 메일 인증, 프로필 작성)" },
+  { date: "2026-11-18", text: "마니또 배정 · 1주차 미션 시작" },
   { date: "2026-11-20", text: "단서 2개 공개" },
   { date: "2026-11-24", text: "2주차 미션 시작" },
   { date: "2026-11-27", text: "단서 2개 공개" },
@@ -73,9 +74,15 @@ export const clueScheduleText = () => (CLUE_DATES.length >= 3
   ? `${CLUE_DATES[0]} 1·2번 → ${CLUE_DATES[1]} 3·4번 → ${CLUE_DATES[2]} 5·6번`
   : "1·2번 → 3·4번 → 5·6번");
 
+// 회사 메일 도메인. 명단에는 아이디(@ 앞부분)만 넣고, 가입·로그인 화면에서도 아이디만 적으면 이 도메인을 붙인다.
+// 가입한 사람은 이 메일로 온 인증 링크를 눌러 명단의 자기 이름과 연결한다(초대 코드는 메일이 안 올 때의 예비).
+export const MAIL_DOMAIN = "samsung.com";
+// 메일 인증으로 연결했을 때 명단의 inviteUsed 칸에 남기는 표시(초대 코드로 연결하면 그 코드가 남는다). firestore.rules와 같아야 한다.
+export const MAIL_LINK = "@mail";
+
 // 게시돼 있어야 하는 보안 규칙 버전. firestore.rules의 rulesVersion과 같아야 한다.
 // 규칙에서 화면이 쓰는 경로·값의 모양을 바꿀 때 양쪽을 같이 올린다. 운영 화면이 이 값으로 "콘솔의 규칙이 예전 것"인지 확인해 알려 준다.
-export const RULES_VERSION = "20261119";
+export const RULES_VERSION = "20261120";
 
 // remote: 다른 근무지에 있는 대상에게도 할 수 있는 미션인지.
 // 대상이 다른 근무지면 remote 카드만 제시한다. 쉬움 카드는 모두 사이트 쪽지로 하는 무비용 미션.

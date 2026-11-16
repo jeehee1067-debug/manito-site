@@ -7,7 +7,7 @@ import { seededRandom, shuffle } from "../lib/random.js";
 import { syncClues } from "../lib/sync.js";
 import { Avatar, Dialogue, Panel } from "../ui.jsx";
 import { TICKET_RULES } from "../config/prizes.js";
-import { cardLevel } from "../lib/scoring.js";
+import { cardCost, cardLevel } from "../lib/scoring.js";
 import { bump } from "../lib/writes.js";
 
 // 대상 이름은 처음에 가려 둔다(사무실에서 화면을 열면 옆 사람이 볼 수 있어서). "이름 보기"를 누르면 이만큼 보인다.
@@ -286,8 +286,8 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
             마음에 안 들면 "다른 카드 보기"로 같은 난이도의 다른 카드를 볼 수 있어요.
           </p>
           <p className="small">
-            <span className="cost-tag">소액 비용</span> 표시는 간식·음료처럼 내 돈이 드는 카드예요. 건당 {SPEND_GUIDE_WON.toLocaleString()}원 이하를 권장하고,
-            같은 난이도라면 돈이 안 드는 카드를 골라도 응모권은 똑같아요.
+            <span className="cost-tag">소액 비용</span> 표시는 간식·음료처럼 내 돈이 드는 카드예요. 건당 {SPEND_GUIDE_WON.toLocaleString()}원 이하를 권장해요.
+            비용 카드 미션이 인증되면 응모권 {TICKET_RULES.costBonus}장을 더 받아요(3주 동안 한 번만. 여러 번 해도 {TICKET_RULES.costBonus}장이에요).
           </p>
           <div className="cards">
             {LEVELS.map((level) => {
@@ -624,6 +624,8 @@ function TicketSummary({ codes, missions, entries }) {
   const card = Math.min(R.maxCardBonus, Object.entries(redeemedSlots)
     .filter(([, st]) => st === "match")
     .reduce((sum, [slot]) => sum + (R.cardBonus[cardLevel(missions.choices?.[slot])] || 0), 0));
+  // 비용 카드 추가분: 돈이 드는 카드 미션을 대상이 카드와 같다고 확인하면 +1, 한 번만(scoring.js와 같은 기준)
+  const cost = Object.entries(redeemedSlots).some(([slot, st]) => st === "match" && cardCost(missions.choices?.[slot])) ? R.costBonus : 0;
   // 인증은 됐는데 대상이 카드를 아직 확인하지 않은 보통·도전 카드 주차(확인되면 추가분이 붙는다)
   const uncheckedSlots = Object.entries(redeemedSlots)
     .filter(([slot, st]) => st === "unchecked" && R.cardBonus[cardLevel(missions.choices?.[slot])] > 0)
@@ -638,9 +640,9 @@ function TicketSummary({ codes, missions, entries }) {
 
   return (
     <Panel title="내 응모권 (지금까지)">
-      <p className="ticket-count"><strong>{mission + card + entries}</strong>장</p>
+      <p className="ticket-count"><strong>{mission + card + cost + entries}</strong>장</p>
       <ul className="plain tickets">
-        <li>마니또로서: 인증된 미션 {mission} / {R.maxMissions}{praiseSent ? "(전달된 칭찬 카드 포함)" : ""} + 카드 추가분 {card} / {R.maxCardBonus}(보통 +{R.cardBonus.normal}, 도전 +{R.cardBonus.hard})</li>
+        <li>마니또로서: 인증된 미션 {mission} / {R.maxMissions}{praiseSent ? "(전달된 칭찬 카드 포함)" : ""} + 카드 추가분 {card} / {R.maxCardBonus}(보통 +{R.cardBonus.normal}, 도전 +{R.cardBonus.hard}) + 비용 카드 {cost} / {R.costBonus}</li>
         <li>받는 사람으로서: 인증 입력 {entries} / {R.maxReceiverEntries}</li>
         <li className="muted">
           마지막에 더해지는 것: 끝까지 안 들키면 +{R.hidden}

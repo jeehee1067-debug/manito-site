@@ -94,7 +94,7 @@ const step = (s) => console.log("▶", s);
   assert.equal(await admin.getByRole("button", { name: "운영자·공동 운영자 계정 만들기" }).count(), 0, "기본 주소에서는 숨김");
   await admin.goto(BASE + "?setup");
   await admin.getByRole("button", { name: "운영자·공동 운영자 계정 만들기" }).click();
-  await admin.getByPlaceholder("자주 확인하는 메일 주소").fill("admin1@example.com");
+  await admin.getByPlaceholder("회사 메일 아이디").fill("admin1@example.com");
   await admin.locator('input[type="password"]').fill(PW);
   await admin.getByRole("button", { name: "운영자 계정 만들기" }).click();
   await panel(admin, "운영 단계").waitFor();
@@ -104,7 +104,7 @@ const step = (s) => console.log("▶", s);
   await panel(admin, "짝 현황").getByText("아직 배정 전이에요.").waitFor();
 
   step("명단(파트 포함) 입력, 배정 (팀 편성 단계 없음)");
-  await panel(admin, "1. 명단").locator("textarea").fill(PEOPLE.map((p) => `${p.name},${p.loc},${p.part}`).join("\n"));
+  await panel(admin, "1. 명단").locator("textarea").fill(PEOPLE.map((p) => `${p.name},${p.part},${p.id.split("@")[0]}`).join("\n"));
   await admin.getByRole("button", { name: "명단에 추가" }).click();
   await admin.getByText(`${N}명을 추가했어요.`).waitFor();
   assert.equal(await admin.getByRole("button", { name: "무작위로 팀 편성" }).count(), 0, "팀 편성 버튼 없음");
@@ -159,9 +159,9 @@ const step = (s) => console.log("▶", s);
     await page.goto(BASE);
     await page.getByRole("tab", { name: "처음 가입" }).click();
     await page.getByPlaceholder("운영진에게 받은 6자리").fill(invite[p.name]);
-    await page.getByPlaceholder("자주 확인하는 메일 주소").fill(p.id);
+    await page.getByPlaceholder("회사 메일 아이디").fill(p.id);
     await page.locator('input[type="password"]').fill(PW);
-    await page.getByRole("button", { name: "가입하고 내 이름 연결" }).click();
+    await page.getByRole("button", { name: "가입하기" }).click();
     await page.locator("nav.tabs button", { hasText: "내 미션" }).waitFor();
     await tab(page, "내 프로필");
     await page.locator(".avatar-cell").nth(i % 4).click();
@@ -230,13 +230,21 @@ const step = (s) => console.log("▶", s);
   {
     const page = users["다라"];
     await tab(page, "규칙");
-    await panel(page, "응모권 받는 법 (최대 16장)").waitFor();
+    await panel(page, "응모권 받는 법 (최대 17장)").waitFor();
     await panel(page, "파트 대항전").getByText("같은 파트끼리는 마니또가 되지 않아요.").waitFor();
     await panel(page, "응모권 받는 법").getByText("마지막 집계에서 미션 완수율 1위").waitFor();
     await panel(page, "응모권 받는 법").getByText("끝까지 해야 받는 것이 있어요.").waitFor();
     await panel(page, "응모권 받는 법").getByText("내 미션 3건이 모두 인증되고").waitFor();
-    await panel(page, "상품과 추첨").getByText("한 사람은 1등·2등·4등·5등·6등 중 하나만 받아요.").waitFor();
-    await panel(page, "상품과 추첨").getByText("큰 상부터(1등 → 2등 → 4등 → 5등 → 6등) 한 번에 정해져요").waitFor();
+    await panel(page, "상품과 추첨").getByText("한 사람은 하나만 받아요.").waitFor();
+    await panel(page, "상품과 추첨").getByText("각자 응모권 수만큼 자기 이름 종이를 통에 넣고 직접 뽑아요").waitFor();
+    {
+      // 금액·인원은 1등만 알린다: 나머지 상은 "추후 공지"
+      const prizeRows = (await panel(page, "상품과 추첨").locator(".rules-table tr").allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim());
+      assert.match(prizeRows[0], /^1등 대추첨 1명, 50만원 상품권 /);
+      assert.equal(prizeRows.filter((t) => t.includes("추후 공지")).length, 5, prizeRows.join(" | "));
+      assert.equal(await panel(page, "상품과 추첨").getByText(/10만원|5만원|1만원|커피 쿠폰/).count(), 0, "2~6등의 금액은 아직 보이지 않는다");
+      assert.equal(await page.getByText("사이트 관리 계정").count(), 0, "사이트 관리 계정 설명은 지웠다");
+    }
     assert.equal(await page.getByText("투표").count(), 0, "규칙 탭에 '투표' 글자 없음(투표는 없앰)");
     assert.equal(await page.getByText("팀").count(), 0, "규칙 탭에 '팀' 글자 없음");
     await panel(page, "단서와 최종 지목").getByText("마니또의 파트").waitFor();
@@ -266,11 +274,13 @@ const step = (s) => console.log("▶", s);
     console.log("  비용 드는 보통 카드:", await slot.locator(".card.level-normal .card-text").innerText(), "/ 표시:", await slot.locator(".card.level-normal .cost-tag").count() ? "소액 비용" : "(없음)", withCost >= 0 ? "" : "");
     await shot(page, "cards");
   }
+  let ganaCost = 0; // 가나가 고른 도전 카드가 "소액 비용" 카드면 비용 카드 추가분 +1
   for (const p of PEOPLE) {
     const page = users[p.name];
     const slot = panel(page, "1주차 미션");
     await slot.locator(`.card.level-${p.name === "가나" ? "hard" : "easy"}`).click();
     await slot.locator(".chosen").waitFor();
+    if (p.name === "가나") ganaCost = (await slot.locator(".chosen .cost-tag").count()) > 0 ? 1 : 0;
     const box = slot.locator('input[type="checkbox"]');
     if (!(await box.isChecked())) await box.check();
     await slot.locator("textarea").fill(`${p.name}가 보낸 1주차 쪽지`);
@@ -312,8 +322,9 @@ const step = (s) => console.log("▶", s);
     await t.getByText("마니또로서: 인증된 미션 1 / 3 + 카드 추가분 2 / 4(보통 +1, 도전 +2)").waitFor();
     await t.getByText("받는 사람으로서: 인증 입력 1 / 3").waitFor();
     await t.getByText("우리 파트가 완수율 1위면 +1").waitFor();
-    assert.equal((await t.locator(".ticket-count").innerText()).replace(/\s/g, ""), "4장");
-    console.log("  가나 내 응모권(지금까지): 4장 = 미션 1 + 카드 추가분 2(도전) + 인증 입력 1");
+    await t.getByText(`비용 카드 ${ganaCost} / 1`).waitFor();
+    assert.equal((await t.locator(".ticket-count").innerText()).replace(/\s/g, ""), `${4 + ganaCost}장`);
+    console.log(`  가나 내 응모권(지금까지): ${4 + ganaCost}장 = 미션 1 + 카드 추가분 2(도전) + 비용 카드 ${ganaCost} + 인증 입력 1`);
     await shot(g, "my-mission");
   }
 
@@ -433,7 +444,7 @@ const step = (s) => console.log("▶", s);
   {
     await co.goto(BASE + "?setup");
     await co.getByRole("button", { name: "운영자·공동 운영자 계정 만들기" }).click();
-    await co.getByPlaceholder("자주 확인하는 메일 주소").fill("coadmin@example.com");
+    await co.getByPlaceholder("회사 메일 아이디").fill("coadmin@example.com");
     await co.locator('input[type="password"]').fill(PW);
     await co.getByRole("button", { name: "운영자 계정 만들기" }).click();
     // 이미 운영자가 있으므로 운영자가 되지 않고 "연결 전" 화면이 나온다
@@ -764,7 +775,19 @@ const step = (s) => console.log("▶", s);
   }
   await admin.getByRole("button", { name: "집계하기" }).click();
   await admin.getByText(/^응모권 상위/).waitFor();
-  const scoreText = (await panel(admin, "집계").locator("ul").innerText()).replace(/\n/g, " / ");
+  const scoreText = (await panel(admin, "집계").locator("ul.plain").first().innerText()).replace(/\n/g, " / ");
+  {
+    // 현장 종이 추첨용 이름 종이: 사람마다 응모권 수만큼(인쇄해서 잘라 통에 넣는다)
+    const sp = panel(admin, "집계");
+    const m = (await sp.getByText(/이름 종이 \d+장\(응모권 1장 = 종이 1장\)/).innerText()).match(/응모권이 있는 사람 (\d+)명, 이름 종이 (\d+)장/);
+    await sp.getByRole("button", { name: `이름 종이 ${m[2]}장 보기` }).click();
+    assert.equal(await sp.locator(".slips .slip").count(), +m[2], "이름 종이 수 = 응모권 합계");
+    const saved = fields(await readDoc("results/public")).tickets;
+    assert.equal(+m[2], Object.values(saved).reduce((a, b) => a + b, 0));
+    assert.equal(+m[1], Object.values(saved).filter((n) => n > 0).length);
+    await sp.getByRole("button", { name: "이름 종이 접기" }).click();
+    console.log(`  종이 추첨 준비: 응모권이 있는 ${m[1]}명, 이름 종이 ${m[2]}장(응모권 합계와 같음)`);
+  }
   console.log("  ", scoreText);
   // 3등 베스트 후기상은 운영자가 고르지 않는다: 공감을 가장 많이 받은 후기(자기 공감 제외)
   assert.equal(await panel(admin, "베스트 후기상 고르기").count(), 0, "운영자가 후기를 고르는 칸이 없다");
@@ -779,7 +802,7 @@ const step = (s) => console.log("▶", s);
     assert.equal(await panel(g, "누가 누구의 마니또였을까").count(), 0);
     assert.equal(await panel(g, "그 밖의 기록").count(), 0);
     assert.equal(await panel(g, "추첨·시상").locator(".winner").count(), 0);
-    assert.equal(await panel(g, "추첨·시상").getByText("추첨 전", { exact: true }).count(), 5, "1·2·4·5·6등 모두 추첨 전");
+    assert.equal(await panel(g, "추첨·시상").getByText("시상 전", { exact: true }).count(), 6, "1~6등 모두 시상 전");
     assert.equal(await panel(g, "파트 대항전 최종 순위").count(), 0);
     console.log("  발표 전 참여자 결과 탭: '무대에서 공개돼요', 짝·시상·파트 순위 없음");
   }
@@ -814,106 +837,157 @@ const step = (s) => console.log("▶", s);
   await next(); await pres.getByText("명탐정").waitFor();
   console.log("  명탐정:", (await pres.locator(".pres-center").innerText()).replace(/\s+/g, " "));
   await next(); await pres.getByText("칭찬 벽").waitFor();
-  // 추첨: 숫자 하나로 1·2·4·5·6등을 한 번에 정하고, 발표는 6등 → 5등 → 4등 → 3등(후기상) → 2등 3명 → 1등
+  // 시상: 숫자 정하기 → 2등(한 명씩) → 3등 → 4등·5등(종이로 뽑힌 이름 입력) → 1등(종이, 겹쳐도 됨) → 겹친 자리 다시 채우기 → 6등(사이트 추첨)
+  // 6명뿐이라 상이 사람보다 많다(자리가 남는다). 사람이 넉넉한 경우의 다시 뽑기는 awards.cjs가 확인한다.
+  const S = await import("../src/lib/scoring.js"); // 저장된 값(숫자·종이로 뽑힌 이름)에서 정해지는 수상자를 같은 규칙으로 계산해 화면과 비교한다
   const SEED = "4821";
   const gPrize = panel(users["가나"], "추첨·시상");
-  await next(); await pres.locator(".pres-title", { hasText: "숫자 하나로 한 번에!" }).waitFor();
-  assert.ok(await pres.getByRole("button", { name: "다음 ▶" }).isDisabled(), "추첨하기 전에는 다음 장면으로 넘어갈 수 없다");
-  await pres.getByRole("button", { name: "추첨하기" }).click(); // 숫자 없이 누르면 안내만 나온다
+  const nameByPid = Object.fromEntries(PEOPLE.map((x) => [pidOf[x.name], x.name]));
+  const prizeIn = async () => { const r = fields(await readDoc("results/public")); return { tickets: r.tickets, tieBreak: r.tieBreak || {}, reviews: r.reviewRank || [], draws: r.draws || {} }; };
+  const names = (list) => list.map((pid) => nameByPid[pid]);
+  const presNames = async () => (await pres.locator(".pres-person b").allInnerTexts()).map((t) => t.trim());
+  const phoneWinners = () => gPrize.locator(".winner").count();
+  const phoneBecomes = async (want, label) => {
+    for (let k = 0; k < 60 && (await phoneWinners()) !== want; k++) await users["가나"].waitForTimeout(150);
+    assert.equal(await phoneWinners(), want, label);
+  };
+  const nextBtn = pres.getByRole("button", { name: "다음 ▶" });
+  // 종이로 뽑힌 이름 입력: 이름을 치면 후보가 나오고 누르면 들어간다
+  const enter = async (name) => { await pres.locator(".name-input").fill(name); await pres.locator(".name-hits button", { hasText: name }).first().click(); };
+
+  await next(); await pres.locator(".pres-title", { hasText: "먼저 숫자 하나!" }).waitFor();
+  assert.ok(await nextBtn.isDisabled(), "숫자를 정하기 전에는 다음 장면으로 넘어갈 수 없다");
+  await pres.getByRole("button", { name: "숫자 정하기" }).click(); // 숫자 없이 누르면 안내만 나온다
   await pres.getByText("현장에서 정한 숫자를 먼저 넣어 주세요").waitFor();
   await pres.locator(".seed-input").fill(SEED);
-  await pres.getByRole("button", { name: "추첨하기" }).click();
-  // 한 번 더 눌러야 추첨된다(브라우저 확인창은 전체 화면을 풀어서 쓰지 않는다)
-  await pres.getByText("한 번에 정해지고 다시 뽑을 수 없어요").waitFor();
-  assert.equal(Object.keys(fields(await readDoc("results/public")).draws || {}).length, 0, "확정하기 전에는 추첨되지 않는다");
-  await pres.getByRole("button", { name: `숫자 ${SEED}로 추첨 확정` }).click();
-  await pres.getByText(`추첨 완료! 현장에서 정한 숫자 ${SEED}`).waitFor({ timeout: 8000 });
-  assert.equal(await pres.getByRole("button", { name: "추첨하기" }).count(), 0, "추첨한 뒤에는 추첨 버튼이 없다");
+  await pres.getByRole("button", { name: "숫자 정하기" }).click();
+  await pres.getByText("한 번 정하면 바꿀 수 없어요").waitFor(); // 한 번 더 눌러야 정해진다(브라우저 확인창은 전체 화면을 풀어서 쓰지 않는다)
+  assert.equal((await prizeIn()).draws.seed, undefined, "확정하기 전에는 저장되지 않는다");
+  await pres.getByRole("button", { name: `숫자 ${SEED}로 확정` }).click();
+  await pres.getByText(`현장에서 정한 숫자 ${SEED} · 다음 장면부터 시상합니다`).waitFor({ timeout: 8000 });
+  assert.equal(await pres.getByRole("button", { name: "숫자 정하기" }).count(), 0, "정한 뒤에는 숫자를 바꿀 수 없다");
   await shot(admin, "pres-draw-go");
-  const draws = fields(await readDoc("results/public")).draws;
-  assert.deepEqual(Object.keys(draws).sort(), ["best", "grand", "t4", "t5", "t6"]);
-  assert.ok(Object.values(draws).every((d) => d.seed === SEED), "모든 순서가 같은 숫자로");
-  const nameByPid = Object.fromEntries(PEOPLE.map((x) => [pidOf[x.name], x.name]));
-  const wonNames = (key) => draws[key].winners.map((pid) => nameByPid[pid]);
-  console.log("  추첨 결과(저장된 값):", ["grand", "best", "t4", "t5", "t6"].map((k) => `${k}=[${wonNames(k).join(",")}]`).join(" "));
-  // 추첨은 끝났지만 참여자 화면에는 아직 아무도 안 보인다(발표한 장면까지만)
+  const before = S.resolvePrizes({ ...(await prizeIn()), withGrand: false }); // 1등을 뽑기 전: 2등 = 응모권 최다 3명, 3등 = 그 3명을 뺀 공감 1위
+  assert.equal(before.seed, SEED);
+  console.log(`  숫자 ${SEED} → 2등 [${names(before.best).join(", ")}], 3등 ${before.review ? nameByPid[before.review.receiverPid] : "없음(공감 1위가 2등 수상자)"}`);
   await gPrize.getByText(`현장에서 정한 숫자: ${SEED}`).waitFor();
-  assert.equal(await gPrize.locator(".winner").count(), 0, "발표 전에는 참여자 화면에 당첨자가 없다");
-  assert.equal(await gPrize.getByText("발표 전", { exact: true }).count(), 6, "1~6등 모두 발표 전(3등 후기상 포함)");
-  assert.equal(await gPrize.getByRole("button", { name: "추첨 검증" }).count(), 0, "발표가 끝나기 전에는 검증 버튼이 없다");
-  let shownCount = 0, waiting = 6;
-  const presNames = async () => (await pres.locator(".pres-person b").allInnerTexts()).map((t) => t.trim());
-  // 참여자 화면: 당첨자 칸 수와 "발표 전"인 등수 수
-  const phone = async () => [await gPrize.locator(".winner").count(), await gPrize.getByText("발표 전", { exact: true }).count()];
-  const phoneBecomes = async (want, label) => {
-    for (let k = 0; k < 60 && JSON.stringify(await phone()) !== JSON.stringify(want); k++) await users["가나"].waitForTimeout(150);
-    assert.deepEqual(await phone(), want, label);
-  };
-  for (const [key, label] of [["t6", "6등 응모권 추첨"], ["t5", "5등 응모권 추첨"], ["t4", "4등 응모권 추첨"]]) {
-    await next(); await pres.locator(".pres-title", { hasText: label }).waitFor();
-    await pres.locator(".pres-spin").waitFor(); // 이름이 돌아가는 연출
-    assert.deepEqual(await phone(), [shownCount, waiting], `${label}: 무대에서 이름이 돌아가는 동안 휴대폰에는 아직 안 보인다`);
-    if (draws[key].winners.length === 0) await pres.getByText("당첨자 없음").waitFor({ timeout: 8000 });
-    else {
-      await pres.locator(".pres-person").first().waitFor({ timeout: 8000 });
-      assert.deepEqual((await presNames()).sort(), wonNames(key).sort(), `${label} 발표 화면의 이름`);
-      await shot(admin, `pres-${key}`);
-    }
-    shownCount += draws[key].winners.length; waiting -= 1;
-    await phoneBecomes([shownCount, waiting], `${label}까지 발표: 참여자 화면에 ${shownCount}명`);
-  }
-  await next(); await pres.getByText(/3등 베스트 후기상/).waitFor();
-  await pres.getByText("가장 많은 공감을 받은 후기 ♥ 1").waitFor();
-  await pres.locator(".pres-title", { hasText: "가나" }).waitFor();
-  shownCount += 1; waiting -= 1;
-  await phoneBecomes([shownCount, waiting], "3등 발표");
+  assert.equal(await phoneWinners(), 0, "발표 전에는 참여자 화면에 수상자가 없다");
+  assert.equal(await gPrize.getByText("발표 전", { exact: true }).count(), 6, "1~6등 모두 발표 전");
+
+  // 2등: 한 명씩(3번째 → 1번째)
+  let shownCount = 0;
   for (const rank of [2, 1, 0]) {
     await next(); await pres.getByText("2등 베스트 마니또 · 각 10만원").waitFor();
-    assert.equal((await phone())[0], shownCount, "2등: 무대에서 뜸 들이는 동안 휴대폰에는 아직 안 보인다");
-    const pid = draws.best.winners[rank];
+    assert.equal(await phoneWinners(), shownCount, "2등: 무대에서 뜸 들이는 동안 휴대폰에는 아직 안 보인다");
+    const pid = before.best[rank];
     if (pid) { await pres.locator(".pres-title", { hasText: nameByPid[pid] }).waitFor(); shownCount += 1; if (rank === 0) { await admin.waitForTimeout(1200); await shot(admin, "pres-best"); } }
     else await pres.getByText("수상자 없음").waitFor();
-    if (rank === 2) waiting -= 1; // 2등 칸은 한 명이라도 발표되면 "나머지는 발표 전"으로 바뀐다
-    await phoneBecomes([shownCount, waiting], `2등 ${3 - rank}번째까지 발표: 참여자 화면에 ${shownCount}명`);
+    await phoneBecomes(shownCount, `2등 ${3 - rank}번째까지 발표: 참여자 화면에 ${shownCount}명`);
   }
+  // 3등: 2등 수상자를 뺀 공감 1위 후기(가나의 후기가 유일하게 공감을 받았다)
+  await next(); await pres.getByText(/3등 베스트 후기상/).waitFor();
+  if (before.review) {
+    assert.equal(nameByPid[before.review.receiverPid], "가나");
+    await pres.getByText("가장 많은 공감을 받은 후기 ♥ 1").waitFor();
+    await pres.locator(".pres-title", { hasText: "가나" }).waitFor();
+    shownCount += 1;
+  } else {
+    assert.ok(names(before.best).includes("가나"), "공감 1위(가나)가 2등 수상자일 때만 3등이 없다");
+    await pres.getByText("수상자 없음 (공감을 받은 후기를 쓴 사람이 모두 더 큰 상을 받았어요)").waitFor();
+  }
+  await phoneBecomes(shownCount, "3등 발표");
+
+  // 4등(종이): 이미 상을 받은 사람이 뽑히면 거부(다시 뽑기), 남은 사람을 차례로 입력, 잘못 넣은 이름은 ✕로 지운다
+  await next(); await pres.locator(".pres-title", { hasText: "4등 응모권 추첨" }).waitFor();
+  await pres.getByText("통에서 이름 종이를 뽑아요").waitFor();
+  await enter(nameByPid[before.best[0]]);
+  await pres.getByText("이미 2등 수상자예요. 한 사람은 하나만 받으니 종이를 다시 뽑아 주세요.").waitFor();
+  const freeNames = names(Object.keys(before.tickets ? {} : {}).length ? [] : Object.entries((await prizeIn()).tickets).filter(([pid, n]) => n > 0 && !before.taken.has(pid)).map(([pid]) => pid));
+  assert.ok(freeNames.length >= 1 && freeNames.length <= 4, `아직 상이 없는 사람 ${freeNames.length}명(6명 중 2등 3명${before.review ? ", 3등 1명" : ""} 제외)`);
+  assert.ok(await nextBtn.isDisabled(), "뽑을 사람이 남아 있으면 다음으로 넘어가지 않는다");
+  await enter(freeNames[0]);
+  await pres.locator(".pres-person b", { hasText: freeNames[0] }).waitFor();
+  await enter(freeNames[0]);
+  await pres.getByText(/이미 입력한 이름이에요|이미 4등 수상자예요/).waitFor(); // 같은 사람의 종이가 또 나오면 다시 뽑는다
+  await pres.locator(".name-x").first().click(); // 잘못 입력했을 때: 지우고 다시
+  await pres.locator(".pres-person").first().waitFor({ state: "detached" });
+  for (const n of freeNames) { await enter(n); await pres.locator(".pres-person b", { hasText: n }).waitFor(); }
+  assert.deepEqual((await presNames()).sort(), [...freeNames].sort());
+  shownCount += freeNames.length;
+  await phoneBecomes(shownCount, "4등: 입력한 이름이 참여자 화면에도 바로 보인다");
+  assert.equal(await pres.locator(".name-input").count(), 0, "더 뽑을 사람이 없으면 입력 칸이 사라진다");
+  assert.ok(await nextBtn.isEnabled());
+  await shot(admin, "pres-t4");
+  // 5등(종이): 응모권이 있는 6명이 모두 상을 받아 더 뽑을 사람이 없다
+  await next(); await pres.locator(".pres-title", { hasText: "5등 응모권 추첨" }).waitFor();
+  assert.equal(await pres.locator(".name-input").count(), 0);
+  assert.equal(await pres.locator(".pres-person").count(), 0);
+  // 1등(종이): 이미 2등인 사람이 뽑혀도 1등이다 → 그 사람은 1등만 받고 2등 자리는 다음 순위가 받는다
   await next(); await pres.locator(".pres-title", { hasText: "1등 대추첨" }).waitFor();
-  await pres.locator(".pres-spin").waitFor();
-  assert.deepEqual(await phone(), [shownCount, 1], "1등: 무대에서 이름이 돌아가는 동안 휴대폰에는 아직 안 보인다");
-  await pres.locator(".pres-person").first().waitFor({ timeout: 8000 });
-  assert.deepEqual(await presNames(), wonNames("grand"));
+  assert.ok(await nextBtn.isDisabled(), "1등을 입력하기 전에는 넘어가지 않는다");
+  const grandName = nameByPid[before.best[0]];
+  await enter(grandName);
+  await pres.locator(".pres-person b", { hasText: grandName }).waitFor();
+  await pres.getByText(`${grandName}님은 2등 수상자였어요 → 1등만 받고, 2등 한 자리는 다음 장면에서 다시 채워요`).waitFor();
   await admin.waitForTimeout(600); await shot(admin, "pres-grand");
-  await phoneBecomes([shownCount + 1, 0], "1등 발표 뒤 휴대폰에도 열린다");
+  await phoneBecomes(shownCount + 1, "1등: 입력하면 참여자 화면에도 보인다(겹친 자리 정리 전이라 2등에도 아직 남아 있다)");
+  // 겹친 자리 다시 채우기: 2등은 다음 순위(이미 3·4등이던 사람이면 더 큰 상으로 올라간다)
+  await next(); await pres.getByText("겹친 자리 다시 채우기").waitFor();
+  const after = S.resolvePrizes(await prizeIn());
+  const promoted = after.best.find((pid) => !before.best.includes(pid));
+  assert.deepEqual(after.grand, [before.best[0]]);
+  assert.ok(promoted && !before.best.includes(promoted), "2등 빈 자리에 다음 순위가 올라온다");
+  await pres.getByText(new RegExp(`2등 베스트 마니또: ${grandName}님은 1등으로 → 다음 순위 ${nameByPid[promoted]}님이 받아요`)).waitFor();
+  assert.equal(after.open.t4 + after.open.t5, 0, "6명이 모두 상을 받아 더 뽑을 사람이 없다");
+  assert.ok(await nextBtn.isEnabled());
+  await shot(admin, "pres-refill");
+  const finalWinners = [...after.grand, ...after.best, ...(after.review ? [after.review.receiverPid] : []), ...after.t4, ...after.t5];
+  assert.equal(new Set(finalWinners).size, finalWinners.length, "한 사람은 하나만");
+  await phoneBecomes(finalWinners.length, "겹친 자리 정리 뒤 참여자 화면: 한 사람이 한 번씩만 나온다");
+  console.log(`  1등 ${grandName}(2등이었음) → 2등 [${names(after.best).join(", ")}](${nameByPid[promoted]} 올라옴), 3등 ${after.review ? nameByPid[after.review.receiverPid] : "없음"}, 4등 [${names(after.t4).join(", ")}], 5등 [${names(after.t5).join(", ")}]`);
+  // 6등(사이트 추첨): 1~5등을 받은 사람을 빼고 뽑는다. 6명이 모두 받았으므로 당첨자가 없다
+  await next(); await pres.locator(".pres-title", { hasText: "6등 응모권 추첨" }).waitFor();
+  await pres.getByRole("button", { name: "6등 추첨하기" }).click();
+  await pres.getByText("뽑은 뒤에는 1~6등을 모두 바꿀 수 없어요").waitFor();
+  assert.equal((await prizeIn()).draws.t6, undefined, "확정하기 전에는 뽑지 않는다");
+  await pres.getByRole("button", { name: "6등 추첨 확정" }).click();
+  const want6 = S.drawOnline((await prizeIn()).tickets, SEED, after.taken);
+  if (want6.length === 0) await pres.getByText("당첨자 없음").waitFor({ timeout: 8000 });
+  else { await pres.locator(".pres-person").first().waitFor({ timeout: 8000 }); assert.deepEqual((await presNames()).sort(), names(want6).sort()); }
+  const draws = (await prizeIn()).draws;
+  assert.deepEqual(draws.t6.winners, want6);
+  assert.deepEqual(Object.keys(draws).sort(), ["grand", "seed", "t4", "t6"], "저장하는 것: 숫자, 종이로 뽑힌 이름(1·4등), 6등. 2·3등은 저장하지 않는다(계산한다)");
   await next(); await pres.getByText("모두 수고하셨어요!").waitFor();
   await pres.getByRole("button", { name: "닫기" }).click();
   const stepNow = fields(await readDoc("results/public")).step;
-  console.log(`  발표 화면 마지막 장면까지 진행(step ${stepNow}). 추첨은 숫자 한 번, 발표는 6등 → 1등 순서로 참여자 화면에 한 장면씩 열림`);
+  console.log(`  발표 화면 마지막 장면까지 진행(step ${stepNow}). 시상은 2등 → 3등 → 4·5등(종이) → 1등(종이) → 겹친 자리 → 6등(사이트) 순서로 참여자 화면에 열림`);
   await panel(admin, "추첨·시상").locator(".winner").first().waitFor();
-  // 누구나 추첨 검증: 숫자와 응모권으로 다시 계산한 결과와 같아야 한다
   {
+    // 참여자 화면: 내가 받은 상 안내, 6등 추첨 검증
     const g = users["가나"];
     await tab(g, "결과");
-    await gPrize.getByRole("button", { name: "추첨 검증" }).click();
-    const lines = await gPrize.locator("ul.plain li").allInnerTexts();
-    assert.equal(lines.length, 5);
-    assert.ok(lines.every((t) => t.includes("다시 계산한 결과와 같아요")), lines.join(" | "));
-    console.log("  참여자 화면 '추첨 검증': 1·2·4·5·6등 모두 '숫자와 응모권으로 다시 계산한 결과와 같아요'");
+    const mine = S.PRIZE_ORDER.find((pz) => (pz.key === "review" ? after.review?.receiverPid === pidOf["가나"] : (after[pz.key] || []).includes(pidOf["가나"])));
+    await gPrize.getByText(`축하해요! 가나님은 ${mine.label}에 뽑혔어요.`).waitFor();
+    await gPrize.getByRole("button", { name: "6등 추첨 검증" }).click();
+    await gPrize.getByText("6등 응모권 추첨: 현장 숫자와 응모권 표로 다시 계산한 결과와 같아요").waitFor();
+    console.log(`  참여자 화면: "축하해요! 가나님은 ${mine.label}에 뽑혔어요", '6등 추첨 검증' 통과`);
   }
   {
-    // 추첨 결과는 덮어쓸 수 없다: 화면에는 버튼이 없고, 운영자 권한으로 직접 고치는 요청도 거부된다
-    assert.equal(await panel(admin, "추첨·시상").getByRole("button", { name: "추첨하기" }).count(), 0);
+    // 6등을 뽑은 뒤에는 수상자를 바꿀 수 없다: 화면에는 입력 칸이 없고, 운영자 권한으로 직접 고치는 요청도 거부된다
     const tok = await tokenOf("admin1@example.com");
     const patch = (mask, body) => fetch(`${FS}/v1/projects/${PROJECT}/databases/(default)/documents/results/public?${mask.map((m) => "updateMask.fieldPaths=" + m).join("&")}`, {
       method: "PATCH", headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json" }, body: JSON.stringify({ fields: body }),
     }).then((r) => r.status);
-    // 지금 당첨자와 반드시 다른 값으로 바꿔 본다(같은 값을 다시 쓰는 것은 바뀌는 것이 없어 거부 대상이 아니다)
+    // 지금 1등과 반드시 다른 사람으로 바꿔 본다(같은 값을 다시 쓰는 것은 바뀌는 것이 없어 거부 대상이 아니다)
     const other = PEOPLE.map((x) => pidOf[x.name]).find((pid) => pid !== draws.grand.winners[0]);
-    const forged = { mapValue: { fields: { seed: { stringValue: SEED }, winners: { arrayValue: { values: [{ stringValue: other }] } } } } };
-    const redraw = await patch(["draws.grand"], { draws: { mapValue: { fields: { grand: forged } } } });
+    const forged = { mapValue: { fields: { winners: { arrayValue: { values: [{ stringValue: other }] } } } } };
+    const regrand = await patch(["draws.grand"], { draws: { mapValue: { fields: { grand: forged } } } });
+    const reseed = await patch(["draws.seed"], { draws: { mapValue: { fields: { seed: { stringValue: "1" } } } } });
     const wipe = await patch(["draws"], { draws: { mapValue: { fields: {} } } });
     const tickets = await patch(["tickets"], { tickets: { mapValue: { fields: { [pidOf["가나"]]: { integerValue: "99" } } } } });
-    assert.deepEqual([redraw, wipe, tickets], [403, 403, 403]);
-    assert.deepEqual(fields(await readDoc("results/public")).draws, draws, "추첨 결과가 그대로");
-    console.log("  다시 뽑기·추첨 결과 지우기·응모권 수 바꾸기 직접 요청은 모두 거부(403), 결과 그대로");
+    assert.deepEqual([regrand, reseed, wipe, tickets], [403, 403, 403, 403]);
+    assert.deepEqual((await prizeIn()).draws, draws, "추첨 결과가 그대로");
+    console.log("  1등 바꾸기·숫자 바꾸기·추첨 결과 지우기·응모권 수 바꾸기 직접 요청은 모두 거부(403), 결과 그대로");
   }
 
   // 응모권: 화면 표시를 이 스크립트가 따로 계산한 값과 대조 (앱의 계산 코드를 쓰지 않음)
@@ -944,38 +1018,36 @@ const step = (s) => console.log("▶", s);
     await page.locator(".target .target-name").waitFor();
     assert.equal(await page.locator(".target .target-name").innerText(), giverOf[p.name], `${p.name}의 마니또 공개`);
     const text = (await page.locator(".target .small").innerText()).replace(/\s+/g, " ");
-    const m = text.match(/내 응모권 (\d+)장: 미션 (\d+) \+ 카드 (\d+) \+ 인증 입력 (\d+)(?: \+ 못 받은 주차 보상 (\d+))? \+ 은신 (\d+) \+ 정답 지목 (\d+)(?: \+ 우승 파트 (\d+))?/);
+    const m = text.match(/내 응모권 (\d+)장: 미션 (\d+) \+ 카드 (\d+)(?: \+ 비용 카드 (\d+))? \+ 인증 입력 (\d+)(?: \+ 못 받은 주차 보상 (\d+))? \+ 은신 (\d+) \+ 정답 지목 (\d+)(?: \+ 우승 파트 (\d+))?/);
     assert.ok(m, text);
-    const shown = { total: +m[1], mission: +m[2], card: +m[3], entries: +m[4], comp: +(m[5] || 0), hidden: +m[6], guess: +m[7], partBonus: +(m[8] || 0) };
+    const shown = { total: +m[1], mission: +m[2], card: +m[3], cost: +(m[4] || 0), entries: +m[5], comp: +(m[6] || 0), hidden: +m[7], guess: +m[8], partBonus: +(m[9] || 0) };
     const gv = giverOf[p.name];
     const entries = realSlots[gv].length; // 내가 입력한 인증
     // 보상: 인증이 없는 주차 중, 마니또가 완료를 알리지 않았거나 운영자가 '못 받음'으로 확인한 주차 (인증 입력과 합쳐 3장까지)
     const missed = [1, 2, 3].filter((sl) => !realSlots[gv].includes(sl) && (!sentSlots[gv].includes(sl) || (missingV[gv] || []).includes(sl))).length;
     const want = {
-      mission: redeemed[p.name], card: cardBonus[p.name] || 0, entries,
+      mission: redeemed[p.name], card: cardBonus[p.name] || 0, cost: p.name === "가나" ? ganaCost : 0, entries, // 비용 카드: 가나의 도전 카드가 소액 비용 카드였으면 +1(한 번만)
       comp: redeemed[p.name] >= 1 ? Math.min(3 - entries, missed) : 0,
       hidden: redeemed[p.name] >= 3 && !correct.has(target[p.name]) ? 2 : 0, // 미션 3건이 모두 인정되고 내 대상이 나를 못 맞혔을 때만
       guess: correct.has(p.name) ? 1 : 0,
       partBonus: winParts.has(p.part) && redeemed[p.name] >= 1 ? 1 : 0,
     };
-    want.total = want.mission + want.card + want.entries + want.comp + want.hidden + want.guess + want.partBonus;
+    want.total = want.mission + want.card + want.cost + want.entries + want.comp + want.hidden + want.guess + want.partBonus;
     wantTotals[p.name] = want.total;
-    const ok = JSON.stringify(shown) === JSON.stringify({ total: want.total, mission: want.mission, card: want.card, entries: want.entries, comp: want.comp, hidden: want.hidden, guess: want.guess, partBonus: want.partBonus });
+    const ok = JSON.stringify(shown) === JSON.stringify({ total: want.total, mission: want.mission, card: want.card, cost: want.cost, entries: want.entries, comp: want.comp, hidden: want.hidden, guess: want.guess, partBonus: want.partBonus });
     allOk = allOk && ok;
     console.log(`  ${p.name}: ${text} → 손계산 ${want.total}장 ${ok ? "일치" : "불일치 " + JSON.stringify(want)}`);
   }
   assert.ok(allOk, "응모권이 손계산과 다름");
   {
-    // 추첨 결과를 손계산한 응모권으로 확인: 한 사람은 하나만, 2등은 1등을 뺀 응모권 최다 3명, 응모권 0장은 없음
+    // 시상 결과를 손계산한 응모권으로 확인: 2등은 (1등을 뺀) 응모권 최다 3명, 응모권 0장은 없음
     const totals = Object.fromEntries(PEOPLE.map((p) => [p.name, wantTotals[p.name]]));
-    const all = ["grand", "best", "t4", "t5", "t6"].flatMap(wonNames);
-    assert.equal(new Set(all).size, all.length, "1·2·4·5·6등끼리 중복 당첨 없음");
-    assert.ok(all.every((n) => totals[n] > 0), "응모권 0장은 당첨되지 않는다");
-    assert.equal(all.length, Math.min(PEOPLE.filter((p) => totals[p.name] > 0).length, 1 + 3 + 4 + 7 + 20), "응모권 있는 사람은 큰 상부터 차례로 모두 채워진다");
-    const first = wonNames("grand")[0];
-    const rest = PEOPLE.map((p) => p.name).filter((n) => n !== first && totals[n] > 0).map((n) => totals[n]).sort((a, b) => b - a);
-    assert.deepEqual(wonNames("best").map((n) => totals[n]), rest.slice(0, 3), "2등은 1등 당첨자를 뺀 응모권 최다 3명(많은 순)");
-    console.log(`  추첨 손계산 확인: 1등 ${first}(${totals[first]}장), 2등 ${wonNames("best").map((n) => `${n}(${totals[n]}장)`).join("·")} = 1등을 뺀 응모권 최다 3명, 중복 당첨 없음`);
+    assert.ok(names(finalWinners).every((n) => totals[n] > 0), "응모권 0장은 상을 받지 않는다");
+    const sortedAll = PEOPLE.map((p) => totals[p.name]).filter((n) => n > 0).sort((a, b) => b - a);
+    assert.deepEqual(names(before.best).map((n) => totals[n]), sortedAll.slice(0, 3), "2등(1등을 뽑기 전)은 응모권 최다 3명(많은 순)");
+    const rest = PEOPLE.map((p) => p.name).filter((n) => n !== grandName && totals[n] > 0).map((n) => totals[n]).sort((a, b) => b - a);
+    assert.deepEqual(names(after.best).map((n) => totals[n]), rest.slice(0, 3), "1등이 2등 수상자였으면 그 사람을 뺀 응모권 최다 3명");
+    console.log(`  시상 손계산 확인: 2등 ${names(after.best).map((n) => `${n}(${totals[n]}장)`).join("·")} = 1등(${grandName} ${totals[grandName]}장)을 뺀 응모권 최다 3명, 상이 겹치는 사람 없음`);
   }
   {
     const page = users["가나"];

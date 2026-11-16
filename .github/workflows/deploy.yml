@@ -19,6 +19,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # 비밀값이 있는지 단계의 if에서 볼 수 있게 환경 변수로 넘긴다(없으면 빈 문자열)
+      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -41,6 +44,17 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
+      # (선택) Firebase Hosting에도 같은 빌드를 올린다 → https://s1fa-manito.web.app (github.io보다 짧은 주소)
+      # 저장소 Settings > Secrets and variables > Actions에 FIREBASE_SERVICE_ACCOUNT(서비스 계정 키 JSON)를 넣었을 때만 동작한다.
+      # 넣지 않으면 이 단계는 건너뛰고 GitHub Pages에만 올린다. 설정 방법은 README "짧은 주소(Firebase Hosting)".
+      - name: Deploy to Firebase Hosting
+        if: env.FIREBASE_SERVICE_ACCOUNT != ''
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          channelId: live
+          projectId: s1fa-manito
   deploy:
     needs: build
     runs-on: ubuntu-latest

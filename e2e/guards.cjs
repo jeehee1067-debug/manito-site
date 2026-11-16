@@ -23,7 +23,7 @@ async function tokenOf(email) {
   await H.reset();
   const b = await chromium.launch(); const errs = []; const dialogs = []; const mk = H.maker(b, errs, dialogs);
   const admin = await mk("운영자", { width: 1000, height: 900 });
-  const inv = await H.setupAdmin(admin, ["가나,SR3,가파트", "다라,SR3,나파트", "마바,S1L,다파트"], "gadmin@example.com");
+  const inv = await H.setupAdmin(admin, ["가나,가파트", "다라,나파트", "마바,다파트"], "gadmin@example.com");
 
   step("예전 방식 배정 흉내: 받는 사람 기준 코드(receiverCodes)를 지운다");
   for (const d of (await (await fetch(`${FS}/receiverCodes?pageSize=50`, { headers: owner })).json()).documents) {

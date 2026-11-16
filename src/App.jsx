@@ -293,8 +293,8 @@ function Session({ user, logout }) {
           <header className="hud">
             <Garland />
             <div className="hud-row">
-              <span className="hud-logo">S1FA 마니또</span>
-              <button className="pk-btn ghost sm hud-out" onClick={logout}>로그아웃</button>
+              <span className="hud-logo"><span className="hud-logo-pre">S1FA </span><b>마니또</b></span>
+              <button className="hud-out" onClick={logout}><span className="hud-out-label">로그아웃</span></button>
             </div>
           </header>
           <main><Claim /></main>
@@ -337,16 +337,16 @@ function Session({ user, logout }) {
         <header className="hud">
           <Garland />
           <div className="hud-row">
-            <span className="hud-logo">S1FA 마니또</span>
+            <span className="hud-logo"><span className="hud-logo-pre">S1FA </span><b>마니또</b></span>
             <span className="hud-chip">{PHASES[phase]}{phase === PHASE.RUNNING ? ` ${config.week}주차` : ""}</span>
-            <button className="pk-btn ghost sm hud-out" onClick={logout} title="다른 사람이 이 기기에서 로그인하려면 로그아웃하세요">
-              {who && <span className="hud-who">{who}</span>}로그아웃
+            <button className="hud-out" onClick={logout} title="다른 사람이 이 기기에서 로그인하려면 로그아웃하세요">
+              {who && <span className="hud-who">{who}</span>}<span className="hud-out-label">로그아웃</span>
             </button>
           </div>
           {tabs.length > 0 && (
             <nav className="tabs" aria-label="메뉴">
               {tabs.map(([k, label]) => (
-                <button key={k} className={k === current ? "chip is-on" : "chip"} aria-current={k === current ? "page" : undefined} onClick={() => setTab(k)}>
+                <button key={k} className={k === current ? "tab is-on" : "tab"} aria-current={k === current ? "page" : undefined} onClick={() => setTab(k)}>
                   {label}
                   {unread[k] > 0 && <span className="tab-badge" aria-label={`새 소식 ${unread[k]}건`}>{unread[k]}</span>}
                 </button>

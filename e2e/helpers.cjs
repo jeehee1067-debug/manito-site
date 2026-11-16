@@ -23,7 +23,7 @@ function maker(browser, errors, dialogs = []) {
 async function setupAdmin(admin, lines, email = "admin@example.com") {
   await admin.goto(BASE + "?setup");
   await admin.getByRole("button", { name: "운영자·공동 운영자 계정 만들기" }).click();
-  await admin.getByPlaceholder("자주 확인하는 메일 주소").fill(email);
+  await admin.getByPlaceholder("회사 메일 아이디").fill(email);
   await admin.locator('input[type="password"]').fill("secret123");
   await admin.getByRole("button", { name: "운영자 계정 만들기" }).click();
   await panel(admin, "1. 명단").locator("textarea").fill(lines.join("\n"));
@@ -43,9 +43,9 @@ async function signup(page, code, email) {
   await page.goto(BASE);
   await page.getByRole("tab", { name: "처음 가입" }).click();
   await page.getByPlaceholder("운영진에게 받은 6자리").fill(code);
-  await page.getByPlaceholder("자주 확인하는 메일 주소").fill(email);
+  await page.getByPlaceholder("회사 메일 아이디").fill(email);
   await page.locator('input[type="password"]').fill("secret123");
-  await page.getByRole("button", { name: "가입하고 내 이름 연결" }).click();
+  await page.getByRole("button", { name: "가입하기" }).click();
 }
 // answers: 6개 답(고르기는 보기 글자 그대로). null인 칸은 건드리지 않는다.
 async function fillProfile(page, answers, PQ) {
@@ -61,4 +61,82 @@ async function fillProfile(page, answers, PQ) {
   await page.getByText(/저장했어요/).waitFor();
 }
 const answersFor = (PQ, i, name) => PQ.map((x, q) => (x.options ? x.options[(i + q) % x.options.length] : `${name}의답${q + 1}`));
-module.exports = { readTarget, showSecrets, BASE, P, panel, tab, reset, maker, setupAdmin, inviteCodes, signup, fillProfile, answersFor };
+
+// ── 에뮬레이터 직접 읽기(관리자 권한) ──
+const FS = `http://127.0.0.1:8080/v1/projects/${P}/databases/(default)/documents`;
+const fsVal = (v) => ("stringValue" in v ? v.stringValue : "integerValue" in v ? Number(v.integerValue) : "doubleValue" in v ? v.doubleValue : "booleanValue" in v ? v.booleanValue
+  : "nullValue" in v ? null : "arrayValue" in v ? (v.arrayValue.values || []).map(fsVal) : "mapValue" in v ? Object.fromEntries(Object.entries(v.mapValue.fields || {}).map(([k, x]) => [k, fsVal(x)])) : v.timestampValue ?? null);
+const readDoc = async (path) => { const d = await (await fetch(`${FS}/${path}`, { headers: { Authorization: "Bearer owner" } })).json(); return Object.fromEntries(Object.entries(d.fields || {}).map(([k, v]) => [k, fsVal(v)])); };
+// 수상자 계산에 들어가는 값(results/public에서)
+const prizeInput = async () => { const r = await readDoc("results/public"); return { tickets: r.tickets || {}, tieBreak: r.tieBreak || {}, reviews: r.reviewRank || [], draws: r.draws || {} }; };
+
+// 인증 메일의 링크 누르기(에뮬레이터): 그 주소로 온 가장 최근 인증 링크를 연다
+async function verifyMail(email) {
+  const list = (await (await fetch(`http://127.0.0.1:9099/emulator/v1/projects/${P}/oobCodes`)).json()).oobCodes || [];
+  const mine = list.filter((c) => c.email === email && c.requestType === "VERIFY_EMAIL");
+  if (!mine.length) throw new Error(`인증 메일이 없음: ${email}`);
+  await fetch(mine[mine.length - 1].oobLink);
+}
+
+/**
+ * 발표 화면의 시상 장면을 끝까지 진행한다. 지금 장면이 "먼저 숫자 하나!"(숫자 정하기)여야 한다.
+ * 숫자 정하기 → 2등·3등 장면 넘기기 → 4·5등: 아직 상이 없는 사람을 차례로 입력 → 1등 입력(pickGrand로 고르거나, 없으면 아직 상이 없는 사람·없으면 2등 1위)
+ * → 겹친 자리 다시 채우기 → 6등 사이트 추첨. nameOf(pid) → 이름.
+ * 반환: { S, before(1등을 뽑기 전), after(최종), t6 }
+ */
+async function runAwards(admin, { seed, nameOf, pickGrand, onSlide }) {
+  const S = await import("../src/lib/scoring.js");
+  const pres = admin.locator(".presenter");
+  const next = async () => { await pres.getByRole("button", { name: "다음 ▶" }).click(); await admin.waitForTimeout(150); };
+  const enter = async (name) => { await pres.locator(".name-input").fill(name); await pres.locator(".name-hits button", { hasText: name }).first().click(); await pres.locator(".pres-person b", { hasText: name }).first().waitFor(); };
+  const free = (res, tickets) => Object.keys(tickets).filter((pid) => tickets[pid] > 0 && !res.taken.has(pid)).sort();
+  await pres.locator(".pres-title", { hasText: "먼저 숫자 하나!" }).waitFor();
+  await pres.locator(".seed-input").fill(seed);
+  await pres.getByRole("button", { name: "숫자 정하기" }).click();
+  await pres.getByRole("button", { name: `숫자 ${seed}로 확정` }).click();
+  await pres.getByText(`현장에서 정한 숫자 ${seed} · 다음 장면부터 시상합니다`).waitFor({ timeout: 8000 });
+  const before = S.resolvePrizes({ ...(await prizeInput()), withGrand: false });
+  // 2등(한 명씩)·3등 장면
+  for (let k = 0; k < 8; k++) {
+    await next();
+    if (onSlide) await onSlide(pres, before);
+    if (await pres.locator(".pres-title", { hasText: S.PAPER_TIERS[0].label }).count()) break;
+  }
+  // 종이 추첨(4·5등): 아직 상이 없는 사람을 차례로
+  for (const [i, tier] of S.PAPER_TIERS.entries()) {
+    if (i > 0) await next();
+    await pres.locator(".pres-title", { hasText: tier.label }).waitFor();
+    for (;;) {
+      const inp = await prizeInput(); const res = S.resolvePrizes(inp);
+      const cand = free(res, inp.tickets);
+      if (res.open[tier.key] <= 0 || !cand.length) break;
+      await enter(nameOf(cand[0]));
+    }
+  }
+  // 1등
+  await next(); await pres.locator(".pres-title", { hasText: "1등 대추첨" }).waitFor();
+  {
+    const inp = await prizeInput(); const res = S.resolvePrizes(inp);
+    const g = (pickGrand && pickGrand(res, inp)) || free(res, inp.tickets)[0] || res.best[0];
+    await enter(nameOf(g));
+  }
+  // 겹친 자리 다시 채우기
+  await next(); await pres.getByText("겹친 자리 다시 채우기").waitFor();
+  for (;;) {
+    const inp = await prizeInput(); const res = S.resolvePrizes(inp);
+    const tier = S.PAPER_TIERS.find((t) => res.open[t.key] > 0);
+    const cand = free(res, inp.tickets);
+    if (!tier || !cand.length) break;
+    await pres.locator(".name-input").first().fill(nameOf(cand[0]));
+    await pres.locator(".name-hits button", { hasText: nameOf(cand[0]) }).first().click();
+    await admin.waitForTimeout(400);
+  }
+  // 6등
+  await next(); await pres.locator(".pres-title", { hasText: S.ONLINE_PRIZE.label }).waitFor();
+  await pres.getByRole("button", { name: "6등 추첨하기" }).click();
+  await pres.getByRole("button", { name: "6등 추첨 확정" }).click();
+  await pres.getByText(/당첨자 없음|휴대폰 결과 탭에서 내 이름을 확인하세요/).first().waitFor({ timeout: 10000 });
+  const after = S.resolvePrizes(await prizeInput());
+  return { S, before, after, t6: after.t6 || [] };
+}
+module.exports = { readTarget, showSecrets, BASE, P, panel, tab, reset, maker, setupAdmin, inviteCodes, signup, fillProfile, answersFor, readDoc, prizeInput, verifyMail, runAwards };
