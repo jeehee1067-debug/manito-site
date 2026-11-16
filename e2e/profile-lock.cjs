@@ -12,7 +12,7 @@ const H = require("./helpers.cjs");
   const b = await chromium.launch(); const errs = []; const mk = H.maker(b, errs);
   const NAMES = ["가나", "다라", "마바"];
   const admin = await mk("운영자");
-  const inv = await H.setupAdmin(admin, NAMES.map((n) => `${n},SR3,가파트`));
+  const inv = await H.setupAdmin(admin, NAMES.map((n) => `${n},가파트`));
   const u = {}, target = {}, ans = {};
   for (const [i, name] of NAMES.entries()) {
     const p = await mk(name); u[name] = p;

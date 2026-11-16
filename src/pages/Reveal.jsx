@@ -4,35 +4,76 @@ import { db } from "../firebase.js";
 import { useApp, Loading } from "../App.jsx";
 import { LEVEL_LABEL, PHASE } from "../lib/constants.js";
 import { PRIZES, TICKET_RULES } from "../config/prizes.js";
-import { drawAll, verifyDraws } from "../lib/scoring.js";
-import { DRAW_ORDER, buildSlides, revealedUpTo } from "../lib/reveal.js";
+import { ONLINE_PRIZE, PAPER_TIERS, PRIZE_ORDER, drawOnline, resolvePrizes, verifyOnline } from "../lib/scoring.js";
+import { buildSlides, revealedUpTo } from "../lib/reveal.js";
 import { Avatar, Dialogue, Panel } from "../ui.jsx";
 
-// 추첨 결과 한 칸: { seed, winners }
-const winnersOf = (d) => d?.winners || [];
 const resultRef = () => doc(db, "results", "public");
 const rankWord = (p) => p.label.split(" ")[0]; // "6등 응모권 추첨" → "6등"
 // 한 장면에 여러 사람이 나올 때 캐릭터 크기: 사람이 많아도 큰 화면 한 장에 다 들어가게 줄인다. 0이면 이름만 보인다.
 const crowdSize = (n) => (n <= 6 ? 110 : n <= 12 ? 84 : n <= 20 ? 64 : n <= 32 ? 48 : 0);
 const WALL_SPEED = 45; // 칭찬 벽이 흘러가는 빠르기(1초에 몇 px)
 
-// 검증할 수 있는 추첨: 당첨자는 "현장에서 정한 숫자 + 응모권 표"만으로 정해진다(scoring.js drawAll).
-// 숫자 하나로 큰 상부터(1등 → 2등 → 4등 → 5등 → 6등) 한 번에 정해 저장하고, 발표만 6등부터 한 장면씩 한다.
-// 운영자가 미리 여러 번 돌려 보고 마음에 드는 결과를 고를 수 없게, 숫자는 추첨 직전에 참석자에게 받아 화면에 보이면서 넣는다.
-// 추첨 결과는 한 번 쓰면 바꿀 수 없다. 두 번 누르거나 운영자 둘이 동시에 눌러도 덮어쓰지 않게,
-// 서버의 지금 값을 읽어 "아직 안 뽑았을 때"만 쓴다(트랜잭션). 보안 규칙도 이미 있는 추첨 결과의 변경·삭제를 거부한다.
-async function runDrawAll(seed) {
+// ── 시상·추첨(공개 단계, 발표 화면에서 진행) ─────────────────────────────────────
+// 저장하는 것은 세 가지뿐이다(results/public.draws). 2등·3등과 "겹친 자리 다시 채우기"는 이 값들로 계산한다(scoring.js resolvePrizes).
+//   seed          현장에서 정한 숫자. 한 번 넣으면 바꿀 수 없다(2등 동점을 가르고 6등 사이트 추첨에 쓴다)
+//   grand·t4·t5   현장에서 종이로 뽑힌 이름(운영자가 입력). 6등을 뽑기 전까지는 고칠 수 있다
+//   t6            사이트가 뽑은 6등. 뽑은 뒤에는 아무것도 바꿀 수 없다
+// 두 번 누르거나 운영자 둘이 동시에 눌러도 덮어쓰지 않게 서버의 지금 값을 읽어 확인한 뒤 쓴다(트랜잭션). 보안 규칙도 같은 것을 막는다.
+const prizeInput = (r) => ({
+  tickets: r.tickets || {}, tieBreak: r.tieBreak || {}, draws: r.draws || {},
+  reviews: r.reviewRank || (r.bestReview ? [r.bestReview] : []), // reviewRank가 없는 예전 집계는 1위 후기만
+});
+// 그 사람이 지금 받은 상(1~5등). 없으면 null
+function prizeOf(res, pid) {
+  if (res.grand.includes(pid)) return PRIZES.grand;
+  if (res.best.includes(pid)) return PRIZES.bestManito;
+  if (res.review?.receiverPid === pid) return PRIZES.bestReview;
+  return PAPER_TIERS.find((t) => res[t.key].includes(pid)) || null;
+}
+// 종이로 뽑힌 이름을 넣을 수 없는 이유(없으면 null)
+function paperBlock(res, prize, pid, tickets) {
+  if (!((tickets?.[pid] || 0) > 0)) return "응모권이 없는 사람이에요(추첨 대상이 아니에요). 종이를 다시 뽑아 주세요.";
+  if (prize.key === PRIZES.grand.key) return res.grand.length >= prize.count ? "1등은 이미 입력했어요. 잘못 입력했으면 이름 옆 ✕로 지운 뒤 다시 넣어 주세요." : null;
+  const has = prizeOf(res, pid);
+  if (has) return `이미 ${rankWord(has)} 수상자예요. 한 사람은 하나만 받으니 종이를 다시 뽑아 주세요.`;
+  if (res.open[prize.key] <= 0) return `${rankWord(prize)}은 이미 다 뽑았어요.`;
+  return null;
+}
+async function saveSeed(seed) {
   await runTransaction(db, async (tx) => {
     const cur = (await tx.get(resultRef())).data();
-    if (Object.keys(cur.draws || {}).length > 0) throw new Error("already");
-    tx.update(resultRef(), { draws: drawAll(cur.tickets, seed, DRAW_ORDER, cur.tieBreak || {}) });
+    if (cur.draws?.seed) throw new Error("이미 숫자를 정했어요. 한 번 정한 숫자는 바꿀 수 없어요.");
+    tx.update(resultRef(), { "draws.seed": seed });
   });
 }
-const drawError = (err) => (err.message === "already" ? "이미 추첨했어요. 추첨 결과는 다시 뽑거나 바꿀 수 없어요."
-  : "추첨하지 못했어요. 잠시 뒤 다시 눌러 주세요.");
+async function editPaper(prize, pid, add) {
+  await runTransaction(db, async (tx) => {
+    const cur = (await tx.get(resultRef())).data();
+    if (cur.draws?.t6) throw new Error("6등을 뽑은 뒤에는 수상자를 바꿀 수 없어요.");
+    const list = cur.draws?.[prize.key]?.winners || [];
+    if (add) {
+      const why = list.includes(pid) ? "이미 입력한 이름이에요." : paperBlock(resolvePrizes(prizeInput(cur)), prize, pid, cur.tickets);
+      if (why) throw new Error(why);
+    }
+    tx.update(resultRef(), { [`draws.${prize.key}`]: { winners: add ? [...list, pid] : list.filter((x) => x !== pid) } });
+  });
+}
+async function runOnline() {
+  await runTransaction(db, async (tx) => {
+    const cur = (await tx.get(resultRef())).data();
+    if (cur.draws?.t6) throw new Error("이미 뽑았어요. 6등 추첨은 다시 할 수 없어요.");
+    const res = resolvePrizes(prizeInput(cur));
+    if (res.seed == null) throw new Error("현장 숫자를 먼저 정해 주세요.");
+    tx.update(resultRef(), { [`draws.${ONLINE_PRIZE.key}`]: { winners: drawOnline(cur.tickets || {}, res.seed, res.taken) } });
+  });
+}
+const drawError = (err) => (err?.code ? "저장하지 못했어요. 잠시 뒤 다시 눌러 주세요." : err.message);
 
-// 숫자를 넣고 "추첨하기"를 누르면 한 번 더 눌러 확인한다. 브라우저 확인창(confirm)은 전체 화면을 풀어 버려서 쓰지 않는다.
-function DrawForm({ onDrawn }) {
+// 확정 버튼은 한 번 더 눌러 확인한다. 브라우저 확인창(confirm)은 전체 화면을 풀어 버려서 쓰지 않는다.
+
+// 현장 숫자 넣기
+function SeedForm() {
   const [seed, setSeed] = useState("");
   const [armed, setArmed] = useState(""); // 확인을 기다리는 숫자
   const [busy, setBusy] = useState(false);
@@ -44,25 +85,85 @@ function DrawForm({ onDrawn }) {
     setMsg("");
     if (!confirming) return setArmed(s);
     setBusy(true);
-    try {
-      await runDrawAll(s);
-      onDrawn?.();
-    } catch (err) {
-      setMsg(drawError(err));
-    } finally {
-      setBusy(false);
-      setArmed("");
-    }
+    try { await saveSeed(s); } catch (err) { setMsg(drawError(err)); } finally { setBusy(false); setArmed(""); }
   }
   return (
     <div className="stack tight">
       <div className="inline">
         <input className="pk-input seed-input" value={seed} maxLength={20} inputMode="numeric"
-          onChange={(e) => setSeed(e.target.value)} placeholder="현장에서 정한 숫자" aria-label="추첨 숫자" />
-        <button className="pk-btn gold" disabled={busy} onClick={go}>{confirming ? `숫자 ${armed}로 추첨 확정` : "추첨하기"}</button>
+          onChange={(e) => setSeed(e.target.value)} placeholder="현장에서 정한 숫자" aria-label="현장 숫자" />
+        <button className="pk-btn gold" disabled={busy} onClick={go}>{confirming ? `숫자 ${armed}로 확정` : "숫자 정하기"}</button>
         {confirming && <button className="pk-btn sm ghost" disabled={busy} onClick={() => setArmed("")}>취소</button>}
       </div>
-      {confirming && <p className="small" role="status">{DRAW_ORDER.map(rankWord).join("·")}이 한 번에 정해지고 다시 뽑을 수 없어요. 숫자가 맞으면 한 번 더 눌러 주세요.</p>}
+      {confirming && <p className="small" role="status">한 번 정하면 바꿀 수 없어요. 숫자가 맞으면 한 번 더 눌러 주세요.</p>}
+      {msg && <p className="error small" role="alert">{msg}</p>}
+    </div>
+  );
+}
+
+// 종이로 뽑힌 이름 입력: 이름 일부를 치면 후보가 나오고, 누르면 들어간다. 잘못 넣은 이름은 ✕로 지운다.
+function PaperForm({ r, prize, res, left }) {
+  const { nameOf, byPid } = useApp();
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const people = useMemo(() => Object.entries(r.tickets || {}).filter(([, n]) => n > 0).map(([pid]) => pid)
+    .sort((a, b) => nameOf(a).localeCompare(nameOf(b), "ko")), [r.tickets, nameOf]);
+  const word = q.trim();
+  const hits = word ? people.filter((pid) => nameOf(pid).includes(word)).slice(0, 8) : [];
+  async function add(pid) {
+    setBusy(true);
+    setMsg("");
+    try { await editPaper(prize, pid, true); setQ(""); } catch (err) { setMsg(drawError(err)); } finally { setBusy(false); }
+  }
+  const locked = Boolean(r.draws?.t6);
+  if (locked || left <= 0) return msg ? <p className="error small" role="alert">{msg}</p> : null;
+  return (
+    <form className="paper-form" onSubmit={(e) => { e.preventDefault(); if (hits.length === 1) add(hits[0]); else setMsg(hits.length ? "아래 후보에서 골라 주세요." : "명단에서 찾지 못했어요. 이름을 다시 확인해 주세요."); }}>
+      <div className="inline">
+        <input className="pk-input name-input" value={q} onChange={(e) => { setQ(e.target.value); setMsg(""); }} placeholder="뽑힌 이름 입력" aria-label={`${rankWord(prize)} 뽑힌 이름`} autoComplete="off" disabled={busy} />
+        <span className="small">{rankWord(prize)} 남은 자리 {left}</span>
+      </div>
+      {hits.length > 0 && (
+        <div className="inline name-hits">
+          {hits.map((pid) => (
+            <button type="button" key={pid} className="pk-btn sm" disabled={busy} onClick={() => add(pid)}>
+              {nameOf(pid)}{byPid?.[pid]?.part ? ` (${byPid[pid].part})` : ""} · {res ? r.tickets[pid] : ""}장
+            </button>
+          ))}
+        </div>
+      )}
+      {msg && <p className="error small" role="alert">{msg}</p>}
+    </form>
+  );
+}
+
+// 입력한 이름 옆의 ✕(잘못 입력했을 때). 6등을 뽑은 뒤에는 없다.
+function RemoveName({ r, prize, pid }) {
+  const { nameOf } = useApp();
+  if (r.draws?.t6) return null;
+  return <button type="button" className="text-btn name-x" aria-label={`${nameOf(pid)} 지우기`} title="잘못 입력했으면 지우기" onClick={() => editPaper(prize, pid, false).catch(() => {})}>✕</button>;
+}
+
+// 6등 사이트 추첨 버튼(한 번 더 눌러 확정)
+function OnlineForm({ ready, why }) {
+  const [armed, setArmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  async function go() {
+    setMsg("");
+    if (!ready) return setMsg(why);
+    if (!armed) return setArmed(true);
+    setBusy(true);
+    try { await runOnline(); } catch (err) { setMsg(drawError(err)); } finally { setBusy(false); setArmed(false); }
+  }
+  return (
+    <div className="stack tight">
+      <div className="inline">
+        <button className="pk-btn gold" disabled={busy} onClick={go}>{armed ? `${rankWord(ONLINE_PRIZE)} 추첨 확정` : `${rankWord(ONLINE_PRIZE)} 추첨하기`}</button>
+        {armed && <button className="pk-btn sm ghost" disabled={busy} onClick={() => setArmed(false)}>취소</button>}
+      </div>
+      {armed && <p className="small" role="status">뽑은 뒤에는 1~6등을 모두 바꿀 수 없어요. 1~5등 이름이 맞는지 확인하고 한 번 더 눌러 주세요.</p>}
       {msg && <p className="error small" role="alert">{msg}</p>}
     </div>
   );
@@ -93,33 +194,44 @@ export default function Reveal() {
   const allPairsOpen = shown.has("detective");
   const presentingNow = !isAdmin && upto < slides.length;
 
-  const draws = r.draws || {};
   const myManito = r.pairs.find((p) => p.receiverPid === myPid)?.giverPid;
   const mine = myPid ? r.ticketDetail?.[myPid] : null;
   const revealedPairs = r.pairs.filter((p) => pairOpen(p.receiverPid));
-  const drawn = Object.keys(draws).length > 0;
   const quickest = noticedTop(r.noticed);
+  // 수상자: 무대에서 "겹친 자리 다시 채우기"(refill) 장면이 지나기 전에는 1등을 뽑기 전 모습으로 보인다(무대와 같은 순서로 바뀌게)
+  const input = prizeInput(r);
+  const final = resolvePrizes(input);
+  const view = shown.has("refill") ? final : resolvePrizes({ ...input, withGrand: false });
+  const started = final.seed != null;
+  const hasReview = input.reviews.length > 0;
   // 1등부터 6등까지 한 줄씩. 참여자에게는 발표된 것만 보인다(운영자는 모두)
-  const prizeRows = [PRIZES.grand, PRIZES.bestManito, PRIZES.bestReview, ...PRIZES.tiers].map((prize) => {
+  const prizeRows = PRIZE_ORDER.map((prize) => {
     const isBest = prize === PRIZES.bestManito;
     const isReview = prize === PRIZES.bestReview;
     let people = []; // 발표된 사람
     let state = ""; // 아직 보일 것이 없을 때의 안내
-    if (isReview) {
-      if (!r.bestReview) state = "공감을 받은 후기가 없어 수상자가 없어요";
-      else if (shown.has("bestReview")) people = [r.bestReview.receiverPid];
-      else state = "발표 전";
-    } else if (!drawn) {
-      state = "추첨 전";
-    } else {
-      const all = winnersOf(draws[prize.key]);
-      // 2등은 한 명씩 발표하므로 발표된 사람만, 나머지 순서는 그 장면이 열렸을 때 모두
-      const open = isBest ? Array.from({ length: prize.count }, (_, k) => shown.has(`best${k}`)).every(Boolean) : shown.has(`draw_${prize.key}`);
-      people = isBest ? all.filter((_, k) => shown.has(`best${k}`)) : open ? all : [];
-      if (!open) state = people.length ? "나머지는 발표 전" : "발표 전";
-      else if (all.length === 0) state = "당첨자 없음(응모권이 있는 사람이 앞 순서에서 모두 받았어요)";
+    let quote = null; // 3등 후기
+    if (isReview && !hasReview) state = "공감을 받은 후기가 없어 수상자가 없어요";
+    else if (!started) state = "시상 전";
+    else if (isReview) {
+      if (!shown.has("bestReview")) state = "발표 전";
+      else if (view.review) { people = [view.review.receiverPid]; quote = view.review; }
+      else state = "수상자 없음(공감을 받은 후기를 쓴 사람이 모두 더 큰 상을 받았어요)";
+    } else if (isBest) {
+      const all = view.best;
+      people = shown.has("refill") ? all : all.filter((_, k) => shown.has(`best${k}`));
+      if (people.length < all.length) state = people.length ? "나머지는 발표 전" : "발표 전";
+      else if (all.length === 0) state = "수상자 없음";
+    } else if (prize.how === "online") {
+      if (!final.t6) state = shown.has(`draw_${prize.key}`) ? "곧 뽑아요" : "발표 전";
+      else if (!shown.has(`draw_${prize.key}`)) state = "발표 전";
+      else { people = final.t6; if (!people.length) state = "당첨자 없음(응모권이 있는 사람이 앞에서 모두 받았어요)"; }
+    } else { // 종이 추첨(1·4·5등)
+      const all = prize === PRIZES.grand ? final.grand : view[prize.key];
+      if (!shown.has(`draw_${prize.key}`)) state = "발표 전";
+      else { people = all; if (people.length < prize.count) state = people.length ? "뽑는 중" : "현장에서 뽑는 중"; }
     }
-    return { prize, isBest, isReview, people, state };
+    return { prize, isBest, isReview, people, state, quote };
   });
   const records = [
     shown.has("detective") && quickest && (
@@ -161,12 +273,12 @@ export default function Reveal() {
             <p className="target-name">{pairOpen(myPid) ? (myManito ? nameOf(myManito) : "-") : "무대에서 공개돼요"}</p>
             {mine && allPairsOpen && (
               <p className="small">
-                내 응모권 {mine.total}장: 미션 {mine.mission} + 카드 {mine.card ?? mine.hard ?? 0} + 인증 입력 {mine.entries}
+                내 응모권 {mine.total}장: 미션 {mine.mission} + 카드 {mine.card ?? mine.hard ?? 0}{mine.cost > 0 ? ` + 비용 카드 ${mine.cost}` : ""} + 인증 입력 {mine.entries}
                 {mine.comp > 0 && ` + 못 받은 주차 보상 ${mine.comp}`} + 은신 {mine.hidden} + 정답 지목 {mine.guess}
                 {mine.partBonus > 0 && ` + 우승 파트 ${mine.partBonus}`}
                 {mine.angel > 0 && ` + 수호천사 ${mine.angel}`}
                 {mine.assumed > 0 && ` (대상의 인증 없이 인정된 미션 ${mine.assumed}건 포함: 대상 불참, 운영진 확인, 전달된 칭찬 카드. 이런 미션에는 카드 추가분 없음)`}
-                {mine.total === 0 && mine.mission + (mine.card ?? mine.hard ?? 0) + mine.entries + mine.hidden + mine.guess + (mine.comp || 0) + (mine.partBonus || 0) + (mine.angel || 0) > 0 && " · 수상 제외 또는 중도 이탈로 0장 처리됐어요"}
+                {mine.total === 0 && mine.mission + (mine.card ?? mine.hard ?? 0) + (mine.cost || 0) + mine.entries + mine.hidden + mine.guess + (mine.comp || 0) + (mine.partBonus || 0) + (mine.angel || 0) > 0 && " · 수상 제외 또는 중도 이탈로 0장 처리됐어요"}
               </p>
             )}
           </div>
@@ -175,16 +287,15 @@ export default function Reveal() {
 
       <Panel title="추첨·시상">
         <p className="small">
-          현장에서 정한 숫자 하나(예: 참석자가 부른 네 자리 숫자)로 큰 상부터 한 번에 정해요: {DRAW_ORDER.map(rankWord).join(" → ")}. 한 사람은 그중 하나만 받아요.
-          {" "}{PRIZES.bestManito.label}는 추첨이 아니라 1등 당첨자를 뺀 응모권 최다 {PRIZES.bestManito.count}명이에요.
-          동점이면 내 미션에 달린 후기가 받은 공감(♥)이 많은 사람, 그래도 같으면 같은 숫자로 가려요.
-          {" "}{PRIZES.bestReview.label}은 익명 피드에서 공감(♥)을 가장 많이 받은 후기예요(동점이면 먼저 쓴 후기). 공감 수에서 그 미션의 당사자 두 사람(후기를 쓴 사람과 그 미션을 한 마니또)이 누른 것은 빼요. 발표는 {rankWord(PRIZES.tiers[PRIZES.tiers.length - 1])}부터 하고, 한 번 뽑은 결과는 다시 뽑을 수 없어요.
-          같은 숫자로 누가 다시 계산해도 같은 결과가 나오니 발표가 끝나면 아래 "추첨 검증"으로 확인할 수 있어요.
+          한 사람은 하나만 받아요. 겹치면 큰 상을 받고, 빈 자리는 다시 채워요.
+          {" "}{PRIZES.bestManito.label}는 응모권이 가장 많은 {PRIZES.bestManito.count}명이에요(동점이면 내 미션에 달린 후기가 받은 공감(♥), 그래도 같으면 현장 숫자로 가려요).
+          {" "}{PRIZES.bestReview.label}은 익명 피드에서 공감(♥)을 가장 많이 받은 후기예요(당사자 두 사람의 공감은 빼고, 동점이면 먼저 쓴 후기).
+          {" "}{[...PAPER_TIERS, PRIZES.grand].map(rankWord).join("·")}은 현장에서 응모권 수만큼 넣은 이름 종이로 뽑고, {rankWord(ONLINE_PRIZE)}은 현장 숫자와 응모권 표로 사이트가 뽑아요.
         </p>
-        {!drawn && isAdmin && config.phase === PHASE.REVEAL && <DrawForm />}
-        {drawn && <p className="small muted">현장에서 정한 숫자: {draws[DRAW_ORDER[0].key]?.seed}</p>}
+        {isAdmin && config.phase === PHASE.REVEAL && !final.t6 && <p className="small note">시상은 위 "발표 화면"에서 진행해요(숫자 정하기, 종이로 뽑힌 이름 입력, {rankWord(ONLINE_PRIZE)} 추첨).</p>}
+        {started && <p className="small muted">현장에서 정한 숫자: {final.seed}</p>}
         <ol className="draws">
-          {prizeRows.map(({ prize, isBest, isReview, people, state }) => (
+          {prizeRows.map(({ prize, isBest, people, state, quote }) => (
             <li key={prize.label} className={prize === PRIZES.grand ? "draw grand" : "draw"}>
               <div className="draw-head">
                 <strong>{prize.label}</strong>
@@ -193,29 +304,30 @@ export default function Reveal() {
               {people.length > 0 && (
                 <div className="winner-row">
                   {people.map((pid) => (
-                    <span key={pid} className="winner">
+                    <span key={pid} className={pid === myPid ? "winner me" : "winner"}>
                       <Avatar pid={pid} size={48} /><span>{nameOf(pid)}</span>
                       {isBest && <span className="small muted">{r.tickets?.[pid] ?? 0}장{r.tieBreak?.[pid] ? ` · ♥ ${r.tieBreak[pid]}` : ""}</span>}
                     </span>
                   ))}
                 </div>
               )}
-              {isReview && people.length > 0 && <Dialogue speaker={`${nameOf(r.bestReview.receiverPid)}${r.bestReview.likes ? ` · ♥ 공감 ${r.bestReview.likes}` : ""}`}>{r.bestReview.review}</Dialogue>}
+              {quote && <Dialogue speaker={`${nameOf(quote.receiverPid)}${quote.likes ? ` · ♥ 공감 ${quote.likes}` : ""}`}>{quote.review}</Dialogue>}
               {state && <p className="muted small">{state}</p>}
             </li>
           ))}
         </ol>
-        {drawn && (isAdmin || shown.has(`draw_${PRIZES.grand.key}`)) && (
+        {final.t6 && myPid && shown.has(`draw_${ONLINE_PRIZE.key}`) && (
+          <p className="note" role="status">
+            {(() => { const mineP = prizeOf(final, myPid) || (final.t6.includes(myPid) ? ONLINE_PRIZE : null); return mineP ? `축하해요! ${nameOf(myPid)}님은 ${mineP.label}에 뽑혔어요.` : "이번에는 뽑히지 않았어요. 3주 동안 수고하셨어요!"; })()}
+          </p>
+        )}
+        {final.t6 && (isAdmin || shown.has(`draw_${ONLINE_PRIZE.key}`)) && (
           <div className="stack tight">
-            <button type="button" className="pk-btn sm" onClick={() => setCheck(verifyDraws(r.tickets, draws, DRAW_ORDER, r.tieBreak || {}))}>추첨 검증</button>
+            <button type="button" className="pk-btn sm" onClick={() => setCheck(verifyOnline(input))}>{rankWord(ONLINE_PRIZE)} 추첨 검증</button>
             {check && (
-              <ul className="plain">
-                {check.map((x) => (
-                  <li key={x.key} className={x.ok ? "small" : "error"}>
-                    {DRAW_ORDER.find((d) => d.key === x.key)?.label}: {x.ok ? "숫자와 응모권으로 다시 계산한 결과와 같아요" : "다시 계산한 결과와 달라요! 운영진에게 알려 주세요"}
-                  </li>
-                ))}
-              </ul>
+              <p className={check.ok ? "small" : "error"} role="status">
+                {ONLINE_PRIZE.label}: {check.ok ? "현장 숫자와 응모권 표로 다시 계산한 결과와 같아요" : "다시 계산한 결과와 달라요! 운영진에게 알려 주세요"}
+              </p>
             )}
           </div>
         )}
@@ -320,9 +432,10 @@ function PartBoardList({ r, myPart, showWinner = true, big = false }) {
 // ── 발표 화면(운영자, 큰 화면용) ────────────────────────────────────────────────
 // → / Space / PageDown: 다음, ← / PageUp: 이전, F: 전체 화면. 닫기는 버튼으로만(닫으면 운영자 화면에 모든 결과가 보여서, 실수로 닫히지 않게 Esc로는 닫지 않는다).
 // 넘긴 장면 번호를 results/public.step에 남긴다(가장 멀리 간 장면). 참여자 결과 탭은 그 장면까지만 열린다.
-// 무대에서는 이름이 잠깐 뒤에 나오거나(짝·시상) 이름이 돌아간 뒤에 당첨자가 나오므로(추첨), 휴대폰에 먼저 보이지 않게 그만큼 늦게 남긴다.
-const spinMs = (step) => (step.key === PRIZES.grand.key ? 3000 : 1500);
-const revealDelay = (slide) => (slide.type === "draw" ? spinMs(slide.step) + 400 : 1800);
+// 무대에서는 이름이 잠깐 뒤에 나오므로(짝·2등·3등), 휴대폰에 먼저 보이지 않게 그만큼 늦게 남긴다.
+// 종이 추첨·6등 장면은 현장에서 뽑아 입력하는 것이 곧 발표라 바로 남긴다.
+const SPIN_MS = 1500; // 6등: 이름이 돌아가는 시간(연출)
+const revealDelay = (slide) => (["paper", "refill", "online", "drawGo"].includes(slide.type) ? 300 : 1800);
 function Presenter({ r, slides, onClose }) {
   const { nameOf } = useApp();
   const [i, setI] = useState(() => Math.min(r.step ?? 0, slides.length - 1));
@@ -330,8 +443,17 @@ function Presenter({ r, slides, onClose }) {
   const rootRef = useRef(null);
   const slide = slides[i];
   const last = slides.length - 1;
-  const drawn = Object.keys(r.draws || {}).length > 0;
-  const mustDraw = slide.type === "drawGo" && !drawn; // 추첨하기 전에는 발표 장면으로 넘어가지 않는다(먼저 넘겨 두면 추첨하는 순간 휴대폰에 한꺼번에 열린다)
+  const res = resolvePrizes(prizeInput(r));
+  const started = res.seed != null;
+  // 이 장면에서 할 일이 남았으면 다음으로 넘어가지 않는다(숫자 정하기, 종이로 뽑힌 이름 입력, 겹친 자리 다시 뽑기).
+  // 자리를 비워 둔 채 넘어가야 하면 "비워 두고 넘어가기"를 누른다.
+  const [skipped, setSkipped] = useState(() => new Set());
+  const todo = slide.type === "drawGo" ? (started ? "" : "숫자를 정해야 다음 장면으로 넘어가요")
+    : slide.type === "paper" && !res.t6 && res.open[slide.prize.key] > 0 && (slide.prize === PRIZES.grand || res.grand.length === 0) ? `${rankWord(slide.prize)} ${res.open[slide.prize.key]}자리를 더 입력해야 넘어가요`
+      : slide.type === "refill" && !res.t6 && PAPER_TIERS.some((t) => res.open[t.key] > 0) ? "비게 된 자리를 다시 뽑아 입력해야 넘어가요"
+        : "";
+  const mustDraw = Boolean(todo) && !skipped.has(slide.id);
+  const canSkip = mustDraw && slide.type !== "drawGo";
   const go = (d) => { if (d > 0 && mustDraw) return; setI((x) => Math.max(0, Math.min(last, x + d))); };
 
   useEffect(() => {
@@ -363,7 +485,7 @@ function Presenter({ r, slides, onClose }) {
   const pairCount = slides.filter((s) => s.type === "pairShow").length;
   // 추첨한 뒤 발표가 끝나기 전에 닫으면 운영자 화면(결과 탭)에 아직 발표하지 않은 당첨자까지 보인다
   const close = () => {
-    if (drawn && i < last && !window.confirm("발표 화면을 닫을까요?\n\n닫으면 이 화면(운영자 결과 탭)에 아직 발표하지 않은 당첨자까지 모두 보여요. 큰 화면에 띄워 둔 상태라면 발표를 마친 뒤에 닫아 주세요.")) return;
+    if (started && i < last && !window.confirm("발표 화면을 닫을까요?\n\n닫으면 이 화면(운영자 결과 탭)에 아직 발표하지 않은 당첨자까지 모두 보여요. 큰 화면에 띄워 둔 상태라면 발표를 마친 뒤에 닫아 주세요.")) return;
     if (i > (r.step ?? -1)) updateDoc(resultRef(), { step: i }).catch(() => {}); // 늦게 남기려던 장면 번호를 닫기 전에 남긴다
     onClose();
   };
@@ -377,7 +499,8 @@ function Presenter({ r, slides, onClose }) {
         <button className="pk-btn sm" onClick={() => go(-1)} disabled={i === 0}>◀ 이전</button>
         <span className="small">{i + 1} / {slides.length}</span>
         <button className="pk-btn main" onClick={() => go(1)} disabled={i === last || mustDraw}>다음 ▶</button>
-        {mustDraw && <span className="small">숫자를 넣고 추첨해야 다음 장면으로 넘어가요</span>}
+        {mustDraw && <span className="small">{todo}</span>}
+        {canSkip && <button className="text-btn" onClick={() => setSkipped((x) => new Set(x).add(slide.id))}>비워 두고 넘어가기</button>}
         {slide.type.startsWith("pair") && (
           <>
             <button className={auto ? "pk-btn sm gold" : "pk-btn sm"} aria-pressed={auto} onClick={() => setAuto(!auto)}>{auto ? "자동 넘기기 끄기" : "자동 넘기기"}</button>
@@ -515,22 +638,34 @@ function Slide({ r, slide, nameOf, pairCount }) {
           )}
         </div>
       );
-    case "bestReview":
+    case "bestReview": {
+      // 발표할 때의 모습(1등을 뽑기 전): 2등 수상자를 뺀 공감 1위 후기
+      const before = resolvePrizes({ ...prizeInput(r), withGrand: false });
+      const rv = before.review;
       return (
         <div className="pres-center">
           <p className="pres-kicker">{PRIZES.bestReview.label} · {PRIZES.bestReview.prize}</p>
-          <p className="pres-sub">가장 많은 공감을 받은 후기{r.bestReview.likes ? ` ♥ ${r.bestReview.likes}` : ""}</p>
-          <blockquote className="pres-quote">{r.bestReview.review}</blockquote>
-          <h1 className="pres-title pop delay">{nameOf(r.bestReview.receiverPid)}</h1>
+          {before.seed == null ? <p className="pres-sub">아직 시상 전이에요. "시상·추첨" 장면에서 숫자를 먼저 정해 주세요.</p>
+            : !rv ? <p className="pres-sub">수상자 없음 (공감을 받은 후기를 쓴 사람이 모두 더 큰 상을 받았어요)</p>
+              : (
+                <>
+                  <p className="pres-sub">가장 많은 공감을 받은 후기{rv.likes ? ` ♥ ${rv.likes}` : ""}</p>
+                  <blockquote className="pres-quote">{rv.review}</blockquote>
+                  <h1 className="pres-title pop delay">{nameOf(rv.receiverPid)}</h1>
+                </>
+              )}
         </div>
       );
+    }
     case "best": {
-      const done = Boolean(r.draws?.[PRIZES.bestManito.key]);
-      const pid = winnersOf(r.draws?.[PRIZES.bestManito.key])[slide.rank];
+      // 발표할 때의 모습(1등을 뽑기 전). 1등과 겹쳐 바뀐 자리는 "겹친 자리 다시 채우기" 장면에서 보여 준다
+      const before = resolvePrizes({ ...prizeInput(r), withGrand: false });
+      const done = before.seed != null;
+      const pid = before.best[slide.rank];
       return (
         <div className="pres-center">
           <p className="pres-kicker">{PRIZES.bestManito.label} · {PRIZES.bestManito.prize}</p>
-          {!done ? <p className="pres-sub">아직 추첨 전이에요. "응모권 추첨" 장면에서 숫자를 넣어 주세요.</p>
+          {!done ? <p className="pres-sub">아직 시상 전이에요. "시상·추첨" 장면에서 숫자를 먼저 정해 주세요.</p>
             : !pid ? <p className="pres-sub">수상자 없음 (응모권이 있는 사람이 모자라요)</p>
               : (
                 <>
@@ -552,8 +687,12 @@ function Slide({ r, slide, nameOf, pairCount }) {
       );
     case "drawGo":
       return <DrawGoSlide r={r} />;
-    case "draw":
-      return <DrawSlide r={r} step={slide.step} nameOf={nameOf} />;
+    case "paper":
+      return <PaperSlide r={r} prize={slide.prize} nameOf={nameOf} />;
+    case "refill":
+      return <RefillSlide r={r} nameOf={nameOf} />;
+    case "online":
+      return <OnlineSlide r={r} prize={slide.prize} nameOf={nameOf} />;
     default:
       return (
         <div className="pres-center">
@@ -564,48 +703,145 @@ function Slide({ r, slide, nameOf, pairCount }) {
   }
 }
 
-// 추첨 장면: 숫자 하나를 넣으면 1·2·4·5·6등이 한 번에 정해져 저장된다. 발표는 다음 장면부터 작은 상 → 큰 상 순서로.
+// 시상 시작 장면: 현장 숫자를 정한다. 이 숫자로 2등 동점을 가르고 6등을 사이트가 뽑는다(한 번 정하면 바꿀 수 없다).
 function DrawGoSlide({ r }) {
-  const done = Object.keys(r.draws || {}).length > 0;
+  const seed = r.draws?.seed;
   return (
     <div className="pres-center wide">
-      <p className="pres-kicker">응모권 추첨</p>
-      <h1 className="pres-title">숫자 하나로 한 번에!</h1>
-      <p className="pres-sub">현장에서 정한 숫자를 넣으면 큰 상부터 차례로 정해져요. 한 사람은 하나만 받고, 발표는 {rankWord(PRIZES.tiers[PRIZES.tiers.length - 1])}부터 합니다.</p>
-      {done
-        ? <p className="pres-sub pop">추첨 완료! 현장에서 정한 숫자 {r.draws[DRAW_ORDER[0].key]?.seed} · 다음 장면부터 발표합니다</p>
-        : <DrawForm />}
+      <p className="pres-kicker">시상·추첨</p>
+      <h1 className="pres-title">먼저 숫자 하나!</h1>
+      <p className="pres-sub">
+        참석자가 부른 숫자를 넣어 주세요. 2등 동점을 가르고 {rankWord(ONLINE_PRIZE)} 사이트 추첨에 써요.
+        {" "}{[...PAPER_TIERS, PRIZES.grand].map(rankWord).join("·")}은 통에서 이름 종이를 직접 뽑아요. 한 사람은 하나만 받아요.
+      </p>
+      {seed
+        ? <p className="pres-sub pop">현장에서 정한 숫자 {seed} · 다음 장면부터 시상합니다</p>
+        : <SeedForm />}
     </div>
   );
 }
 
-// 발표 장면: 장면에 들어오면 응모권이 있는 사람 이름이 잠깐 돌아간 뒤 당첨자가 나온다.
-// (돌아가는 이름은 연출일 뿐, 당첨자는 추첨 장면에서 숫자와 응모권 표로 이미 정해져 저장된 것이다)
-function DrawSlide({ r, step, nameOf }) {
-  const done = Boolean(r.draws?.[step.key]); // 당첨자가 0명인 순서(앞 순서에서 모두 받음)도 뽑은 것이다
-  const drawn = winnersOf(r.draws?.[step.key]);
-  const [spinning, setSpinning] = useState(true);
-  const [flash, setFlash] = useState("");
-  const pool = useMemo(() => Object.entries(r.tickets || {}).filter(([, n]) => n > 0).map(([pid]) => pid), [r.tickets]);
-  const ms = spinMs(step);
-  useEffect(() => {
-    if (!done || !spinning) return undefined;
-    if (pool.length === 0) { setSpinning(false); return undefined; }
-    const t = setInterval(() => setFlash(pool[Math.floor(Math.random() * pool.length)]), 80);
-    const stop = setTimeout(() => setSpinning(false), ms);
-    return () => { clearInterval(t); clearTimeout(stop); };
-  }, [done, spinning, pool, ms]);
+// 수상자 줄(큰 화면)
+function WinnerRow({ r, prize, pids, nameOf, removable }) {
+  return (
+    <div className="pres-row winners">
+      {pids.map((pid) => (
+        <span key={pid} className="pres-person pop">
+          <Avatar pid={pid} size={pids.length > 6 ? 64 : pids.length > 1 ? 110 : 200} /><b>{nameOf(pid)}</b>
+          {removable && <RemoveName r={r} prize={prize} pid={pid} />}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// 종이 추첨 장면(1·4·5등): 통에서 뽑은 이름을 읽고 운영자가 입력한다. 입력하면 참여자 휴대폰에도 바로 보인다.
+// 4·5등 장면은 1등을 뽑기 전 모습 그대로 둔다(1등과 겹쳐 비게 된 자리는 "겹친 자리 다시 채우기" 장면에서 뽑는다).
+function PaperSlide({ r, prize, nameOf }) {
+  const input = prizeInput(r);
+  const res = resolvePrizes(input);
+  const isGrand = prize === PRIZES.grand;
+  const before = resolvePrizes({ ...input, withGrand: false });
+  const list = isGrand ? res.grand : before[prize.key];
+  const canEdit = isGrand || res.grand.length === 0; // 1등을 뽑은 뒤에는 4·5등 장면에서 고치지 않는다
+  const overlap = isGrand && res.grand[0] ? prizeOf(before, res.grand[0]) : null;
   return (
     <div className="pres-center wide">
-      <p className="pres-kicker">{step.prize} · {step.count}명</p>
-      <h1 className="pres-title">{step.label}</h1>
-      {!done && <p className="pres-sub">아직 추첨 전이에요. "응모권 추첨" 장면에서 숫자를 넣어 주세요.</p>}
-      {done && spinning && <p className="pres-spin">{flash ? nameOf(flash) : "…"}</p>}
-      {done && !spinning && (
-        <div className="pres-row winners">
-          {drawn.map((pid) => <span key={pid} className="pres-person pop"><Avatar pid={pid} size={drawn.length > 6 ? 64 : 110} /><b>{nameOf(pid)}</b></span>)}
-          {drawn.length === 0 && <p className="pres-sub">당첨자 없음 (응모권이 있는 사람이 앞 순서에서 모두 받았어요)</p>}
-        </div>
+      <p className="pres-kicker">{prize.prize} · {prize.count}명</p>
+      <h1 className="pres-title">{prize.label}</h1>
+      {res.seed == null ? <p className="pres-sub">아직 시상 전이에요. "시상·추첨" 장면에서 숫자를 먼저 정해 주세요.</p> : (
+        <>
+          <p className="pres-sub">
+            {isGrand ? "통에서 이름 종이 한 장! 이미 다른 상을 받은 사람이 뽑혀도 1등이에요(그 자리는 다시 채워요)." : "통에서 이름 종이를 뽑아요. 이미 상을 받은 사람이 나오면 다시 뽑아요."}
+          </p>
+          {list.length > 0 && <WinnerRow r={r} prize={prize} pids={list} nameOf={nameOf} removable={canEdit} />}
+          {overlap && <p className="pres-sub pop">{nameOf(res.grand[0])}님은 {rankWord(overlap)} 수상자였어요 → 1등만 받고, {rankWord(overlap)} 한 자리는 다음 장면에서 다시 채워요</p>}
+          {canEdit && <PaperForm r={r} prize={prize} res={res} left={res.open[prize.key]} />}
+        </>
+      )}
+    </div>
+  );
+}
+
+// 겹친 자리 다시 채우기: 1등이 2~5등과 겹쳤으면 그 자리를 채운다. 2등은 다음 순위, 3등은 다음 후기가 자동으로 올라오고,
+// 4·5등은 종이를 더 뽑아 입력한다. 2·3등으로 올라간 사람이 4·5등이었다면 그 자리도 다시 뽑는다.
+function RefillSlide({ r, nameOf }) {
+  const input = prizeInput(r);
+  const res = resolvePrizes(input);
+  const before = resolvePrizes({ ...input, withGrand: false });
+  const moved = (list, now) => list.filter((pid) => !now.includes(pid));
+  const lines = [];
+  const up = (pid) => { const p = prizeOf(res, pid); return p ? `${nameOf(pid)}님은 ${rankWord(p)}으로` : `${nameOf(pid)}님`; };
+  const bestOut = moved(before.best, res.best), bestIn = moved(res.best, before.best);
+  if (bestOut.length) lines.push({ key: "best", text: `${PRIZES.bestManito.label}: ${bestOut.map(up).join(", ")} → 다음 순위 ${bestIn.length ? `${bestIn.map(nameOf).join(", ")}님이 받아요` : "없음"}` });
+  const rvBefore = before.review?.receiverPid, rvNow = res.review?.receiverPid;
+  if (rvBefore && rvBefore !== rvNow) lines.push({ key: "review", text: `${PRIZES.bestReview.label}: ${up(rvBefore)} → ${rvNow ? `다음으로 공감이 많은 후기의 ${nameOf(rvNow)}님이 받아요` : "다음 후기가 없어 수상자 없음"}` });
+  const slots = PAPER_TIERS.map((t) => ({ prize: t, out: moved(before[t.key], res[t.key]), added: moved(res[t.key], before[t.key]), open: res.open[t.key] }));
+  const anyPaper = slots.some((x) => x.out.length || x.open > 0);
+  const nothing = lines.length === 0 && !anyPaper;
+  return (
+    <div className="pres-center wide">
+      <p className="pres-kicker">한 사람은 하나만</p>
+      <h2 className="pres-h2">겹친 자리 다시 채우기</h2>
+      {res.grand.length === 0 ? <p className="pres-sub">1등을 먼저 뽑아 주세요(앞 장면).</p>
+        : nothing ? <p className="pres-sub pop">1등 {nameOf(res.grand[0])}님은 다른 상과 겹치지 않았어요. 그대로 확정!</p>
+          : (
+            <>
+              <p className="pres-sub">1등 {nameOf(res.grand[0])}님이 받았던 자리를 다시 채워요.</p>
+              <ul className="pres-story refill-list">
+                {lines.map((x) => <li key={x.key}>{x.text}</li>)}
+                {slots.filter((x) => x.out.length || x.open > 0).map((x) => (
+                  <li key={x.prize.key}>
+                    {x.prize.label}: {x.out.length ? `${x.out.map(up).join(", ")} → ` : ""}
+                    {x.added.length > 0 && <b>{x.added.map(nameOf).join(", ")}님이 새로 뽑혔어요 </b>}
+                    {x.open > 0 && `종이를 ${x.open}장 더 뽑아 주세요`}
+                  </li>
+                ))}
+              </ul>
+              {slots.filter((x) => x.open > 0).map((x) => <PaperForm key={x.prize.key} r={r} prize={x.prize} res={res} left={x.open} />)}
+            </>
+          )}
+    </div>
+  );
+}
+
+// 6등 사이트 추첨: 현장 숫자와 응모권 표로, 1~5등을 받은 사람을 빼고 뽑는다. 뽑으면 각자 휴대폰 결과 탭에서 확인한다.
+// 이름이 잠깐 돌아가는 것은 연출이고, 당첨자는 버튼을 누르는 순간 정해져 저장된다.
+function OnlineSlide({ r, prize, nameOf }) {
+  const res = resolvePrizes(prizeInput(r));
+  const drawn = res.t6;
+  const openLeft = res.open[PRIZES.grand.key] + PAPER_TIERS.reduce((n, t) => n + res.open[t.key], 0);
+  const [force, setForce] = useState(false);
+  const why = res.seed == null ? "현장 숫자를 먼저 정해 주세요(\"시상·추첨\" 장면)." : "아직 입력하지 않은 1~5등 자리가 있어요. 앞 장면에서 입력하거나, 아래 \"빈 자리를 비워 둔 채 뽑기\"를 눌러 주세요.";
+  const [spinning, setSpinning] = useState(!drawn); // 이미 뽑혀 있던 화면(다시 들어온 경우)은 바로 보인다
+  const [flash, setFlash] = useState("");
+  const pool = useMemo(() => Object.entries(r.tickets || {}).filter(([pid, n]) => n > 0 && !res.taken.has(pid)).map(([pid]) => pid), [r.tickets, r.draws]); // eslint-disable-line react-hooks/exhaustive-deps
+  const isDrawn = Boolean(drawn);
+  useEffect(() => {
+    if (!isDrawn || !spinning) return undefined;
+    if (pool.length === 0) { setSpinning(false); return undefined; }
+    const t = setInterval(() => setFlash(pool[Math.floor(Math.random() * pool.length)]), 80);
+    const stop = setTimeout(() => setSpinning(false), SPIN_MS);
+    return () => { clearInterval(t); clearTimeout(stop); };
+  }, [isDrawn, spinning]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div className="pres-center wide">
+      <p className="pres-kicker">{prize.prize} · {prize.count}명</p>
+      <h1 className="pres-title">{prize.label}</h1>
+      {!drawn && (
+        <>
+          <p className="pres-sub">1~5등을 받은 사람을 빼고, 현장 숫자{res.seed ? ` ${res.seed}` : ""}와 응모권 표로 사이트가 뽑아요. 결과는 각자 휴대폰 결과 탭에서 확인!</p>
+          <OnlineForm ready={res.seed != null && (openLeft === 0 || force)} why={why} />
+          {res.seed != null && openLeft > 0 && !force && <button className="text-btn" onClick={() => setForce(true)}>1~5등 빈 자리 {openLeft}곳을 비워 둔 채 뽑기</button>}
+        </>
+      )}
+      {drawn && spinning && <p className="pres-spin">{flash ? nameOf(flash) : "…"}</p>}
+      {drawn && !spinning && (
+        <>
+          <WinnerRow r={r} prize={prize} pids={drawn} nameOf={nameOf} />
+          {drawn.length === 0 && <p className="pres-sub">당첨자 없음 (응모권이 있는 사람이 앞에서 모두 받았어요)</p>}
+          <p className="pres-sub">휴대폰 결과 탭에서 내 이름을 확인하세요</p>
+        </>
       )}
     </div>
   );

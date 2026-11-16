@@ -37,10 +37,10 @@ const val = (v) => v.stringValue ?? (v.integerValue !== undefined ? Number(v.int
   const admin = await mk("운영자");
   await admin.goto(BASE + "?setup");
   await admin.getByRole("button", { name: "운영자·공동 운영자 계정 만들기" }).click();
-  await admin.getByPlaceholder("자주 확인하는 메일 주소").fill("fadmin@example.com");
+  await admin.getByPlaceholder("회사 메일 아이디").fill("fadmin@example.com");
   await admin.locator('input[type="password"]').fill("secret123");
   await admin.getByRole("button", { name: "운영자 계정 만들기" }).click();
-  await panel(admin, "1. 명단").locator("textarea").fill(ALL.map((n) => `${n},SR3,${PART[n]}`).join("\n"));
+  await panel(admin, "1. 명단").locator("textarea").fill(ALL.map((n) => `${n},${PART[n]}`).join("\n"));
   await admin.getByRole("button", { name: "명단에 추가" }).click(); await admin.getByText("5명을 추가했어요.").waitFor();
   await admin.getByRole("button", { name: "배정하기" }).click(); await admin.getByText(/5명 배정 완료/).waitFor();
   await showSecrets(admin);
@@ -53,9 +53,9 @@ const val = (v) => v.stringValue ?? (v.integerValue !== undefined ? Number(v.int
     await page.goto(BASE);
     await page.getByRole("tab", { name: "처음 가입" }).click();
     await page.getByPlaceholder("운영진에게 받은 6자리").fill(invite[name]);
-    await page.getByPlaceholder("자주 확인하는 메일 주소").fill(`f${i}@example.com`);
+    await page.getByPlaceholder("회사 메일 아이디").fill(`f${i}@example.com`);
     await page.locator('input[type="password"]').fill("secret123");
-    await page.getByRole("button", { name: "가입하고 내 이름 연결" }).click();
+    await page.getByRole("button", { name: "가입하기" }).click();
     await page.locator(".target-name").waitFor();
     // 프로필을 채워야 단서 6개가 대상에게 가고 은신 응모권 자격이 생긴다
     await H.fillProfile(page, H.answersFor(PQ, i, name), PQ);

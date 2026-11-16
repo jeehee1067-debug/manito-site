@@ -23,9 +23,9 @@ const BASE = "http://localhost:5173/", P = "demo-manito", FS = `http://127.0.0.1
     await p.goto(BASE);
     await p.getByRole("tab", { name: "처음 가입" }).click();
     await p.getByPlaceholder("운영진에게 받은 6자리").fill(code);
-    await p.getByPlaceholder("자주 확인하는 메일 주소").fill(email);
+    await p.getByPlaceholder("회사 메일 아이디").fill(email);
     await p.locator('input[type="password"]').fill("secret123");
-    await p.getByRole("button", { name: "가입하고 내 이름 연결" }).click();
+    await p.getByRole("button", { name: "가입하기" }).click();
   };
   const tableRow = (page, name) => page.locator(".pk-table tbody tr", { has: page.locator("td", { hasText: new RegExp(`^${name}$`) }) });
 
@@ -33,10 +33,10 @@ const BASE = "http://localhost:5173/", P = "demo-manito", FS = `http://127.0.0.1
   const admin = await mk("운영자");
   await admin.goto(BASE + "?setup");
   await admin.getByRole("button", { name: "운영자·공동 운영자 계정 만들기" }).click();
-  await admin.getByPlaceholder("자주 확인하는 메일 주소").fill("admin@example.com");
+  await admin.getByPlaceholder("회사 메일 아이디").fill("admin@example.com");
   await admin.locator('input[type="password"]').fill("secret123");
   await admin.getByRole("button", { name: "운영자 계정 만들기" }).click();
-  await admin.locator("section.panel", { has: admin.locator("h2", { hasText: "1. 명단" }) }).locator("textarea").fill("가나,SR3,가파트\n다라,SR3,가파트\n마바,S1L,나파트");
+  await admin.locator("section.panel", { has: admin.locator("h2", { hasText: "1. 명단" }) }).locator("textarea").fill("가나,가파트\n다라,가파트\n마바,나파트");
   await admin.getByRole("button", { name: "명단에 추가" }).click(); await admin.getByText("3명을 추가했어요.").waitFor();
   await admin.getByRole("button", { name: "배정하기" }).click(); await admin.getByText(/3명 배정 완료/).waitFor();
   console.log("  배정 결과 문구(가파트 2명/3명이라 같은 파트를 피할 수 없는 경우):", await admin.locator(".note.banner").innerText());

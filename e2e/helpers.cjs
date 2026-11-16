@@ -23,7 +23,7 @@ function maker(browser, errors, dialogs = []) {
 async function setupAdmin(admin, lines, email = "admin@example.com") {
   await admin.goto(BASE + "?setup");
   await admin.getByRole("button", { name: "운영자·공동 운영자 계정 만들기" }).click();
-  await admin.getByPlaceholder("자주 확인하는 메일 주소").fill(email);
+  await admin.getByPlaceholder("회사 메일 아이디").fill(email);
   await admin.locator('input[type="password"]').fill("secret123");
   await admin.getByRole("button", { name: "운영자 계정 만들기" }).click();
   await panel(admin, "1. 명단").locator("textarea").fill(lines.join("\n"));
@@ -43,9 +43,9 @@ async function signup(page, code, email) {
   await page.goto(BASE);
   await page.getByRole("tab", { name: "처음 가입" }).click();
   await page.getByPlaceholder("운영진에게 받은 6자리").fill(code);
-  await page.getByPlaceholder("자주 확인하는 메일 주소").fill(email);
+  await page.getByPlaceholder("회사 메일 아이디").fill(email);
   await page.locator('input[type="password"]').fill("secret123");
-  await page.getByRole("button", { name: "가입하고 내 이름 연결" }).click();
+  await page.getByRole("button", { name: "가입하기" }).click();
 }
 // answers: 6개 답(고르기는 보기 글자 그대로). null인 칸은 건드리지 않는다.
 async function fillProfile(page, answers, PQ) {

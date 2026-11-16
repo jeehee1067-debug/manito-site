@@ -57,20 +57,58 @@ a { color: var(--blue-dark); }
 @keyframes slide { 0% { transform: translateX(-110%); } 100% { transform: translateX(260%); } }
 
 /* ---------- 상단 HUD ---------- */
-.hud { position: sticky; top: 0; z-index: 20; padding: 6px 0 10px; background: linear-gradient(#141821 70%, transparent); }
-.hud-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-bottom: 8px; }
-.hud-logo {
-  font-size: 22px; color: #fff; -webkit-text-stroke: 4px var(--ink); paint-order: stroke fill;
-  text-shadow: 0 3px 0 rgba(0, 0, 0, 0.5); white-space: nowrap;
+/* 화면 위에 붙어 있는 막대. 배경이 비치지 않게 단단한 색으로 칠하고(스크롤할 때 아래 패널이 겹쳐 보이지 않게), 아래 모서리만 둥글게 */
+.hud {
+  position: sticky; top: 0; z-index: 20; margin-bottom: 14px; padding: 0 12px;
+  background: #141a26; border: 3px solid var(--ink); border-top: 0; border-radius: 0 0 14px 14px;
+  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.45), inset 0 -3px 0 rgba(255, 255, 255, 0.05);
 }
+.hud-row { display: flex; align-items: center; gap: 10px; padding: 8px 0 8px; min-width: 0; }
+.hud-brand { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.hud-logo { font-size: 21px; font-weight: 800; letter-spacing: 0.5px; color: #fff; text-shadow: 0 2px 0 rgba(0, 0, 0, 0.55); white-space: nowrap; }
+.hud-logo b { color: var(--gold); font-weight: 800; }
+/* 지금 단계: 금색 표시등 + 글자 */
 .hud-chip {
-  background: var(--gold); border: 2px solid var(--ink); border-radius: 20px; padding: 1px 10px;
-  font-size: 13px; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 6px; flex: none;
+  background: #232b3b; border: 2px solid #3b4660; border-radius: 20px; padding: 2px 10px 2px 8px;
+  color: #ffe9a8; font-size: 12.5px; font-weight: 700; white-space: nowrap;
 }
-.hud-out { margin-left: auto; width: auto !important; margin-top: 0 !important; }
-.hud-who { font-weight: 700; color: var(--blue-dark); margin-right: 6px; }
-.tabs { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.hud-chip::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 0 2px rgba(232, 184, 59, 0.25); }
+/* 로그인한 사람과 로그아웃 */
+.hud-out {
+  margin-left: auto; flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 8px;
+  background: none; border: 2px solid #3b4660; border-radius: 10px; padding: 4px 10px;
+  color: #c9d2e3; font-size: 12.5px; font-weight: 700; cursor: pointer; white-space: nowrap;
+}
+.hud-out:hover { border-color: #6c7a99; color: #fff; }
+.hud-who { color: #fff; font-size: 14px; min-width: 2.5em; max-width: 8em; overflow: hidden; text-overflow: ellipsis; }
+.hud-who + .hud-out-label { padding-left: 8px; border-left: 2px solid #3b4660; }
+/* 메뉴: 막대 아래쪽에 밑줄 탭. 좁은 화면에서는 옆으로 민다(오른쪽 끝이 흐려져 더 있음을 알린다) */
+.tabs {
+  display: flex; gap: 2px; margin: 0 -6px; padding: 0 6px; overflow-x: auto; scrollbar-width: none;
+  border-top: 2px solid #242c3c;
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent);
+}
 .tabs::-webkit-scrollbar { display: none; }
+.tab {
+  position: relative; flex: none; background: none; border: 0; padding: 9px 9px 10px; cursor: pointer;
+  color: #9aa6bd; font-size: 14px; font-weight: 700; white-space: nowrap;
+}
+.tab:hover { color: #dfe6f3; }
+.tab::after { content: ""; position: absolute; left: 6px; right: 6px; bottom: 0; height: 4px; border-radius: 4px 4px 0 0; background: transparent; }
+.tab.is-on { color: #fff; }
+.tab.is-on::after { background: var(--gold); }
+.tab:focus-visible { outline-offset: -3px; }
+/* 휴대폰 폭: 한 줄에 다 들어가게 로고의 "S1FA"를 줄이고 간격을 좁힌다 */
+@media (max-width: 480px) {
+  .hud { padding: 0 8px; }
+  .hud-row { gap: 6px; }
+  .hud-logo-pre { display: none; }
+  .hud-chip { padding: 2px 8px 2px 7px; font-size: 12px; }
+  .hud-out { padding: 4px 8px; gap: 6px; }
+  .hud-who + .hud-out-label { padding-left: 6px; }
+  .tab { padding: 9px 7px 10px; font-size: 13.5px; }
+}
 
 /* ---------- 칩 ---------- */
 .chip-row { display: flex; gap: 8px; margin-bottom: 10px; }
@@ -373,7 +411,7 @@ textarea.pk-input { resize: vertical; line-height: 1.6; }
 }
 
 /* 안 읽은 표시(탭 숫자) */
-.tab-badge { display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 5px; border: 2px solid var(--ink); border-radius: 9px; background: var(--red); color: #fff; font-size: 11px; line-height: 14px; text-align: center; }
+.tab-badge { display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 5px; border: 2px solid #141a26; border-radius: 9px; background: var(--red); color: #fff; font-size: 11px; line-height: 14px; text-align: center; vertical-align: 1px; }
 
 /* 이번 주 할 일 */
 .todo-list { margin: 4px 0 6px; padding-left: 20px; display: grid; gap: 4px; }
@@ -441,3 +479,28 @@ textarea.pk-input { resize: vertical; line-height: 1.6; }
 
 /* 수호천사 미션: 도와줄 사람 이름(작게) */
 .target-name.sm { font-size: 20px; margin: 0 6px 0 0; display: inline-block; }
+
+/* 현장 종이 추첨용 이름 종이(운영 화면 집계). 인쇄하면 이 영역만 나온다 */
+.print-title { margin: 0 0 6px; font-size: 15px; }
+.slip-counts { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; }
+.slips { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 0; border-top: 1px dashed #555; border-left: 1px dashed #555; }
+.slip { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 48px; padding: 6px 4px; border-right: 1px dashed #555; border-bottom: 1px dashed #555; background: #fff; color: #000; font-size: 15px; text-align: center; break-inside: avoid; }
+.slip small { font-size: 10px; color: #444; }
+@media print {
+  body * { visibility: hidden !important; }
+  .print-area, .print-area * { visibility: visible !important; }
+  .print-area { position: absolute; left: 0; top: 0; width: 100%; }
+  .slips { grid-template-columns: repeat(6, 1fr); }
+}
+
+/* 로그인: 회사 메일 아이디 입력(뒤에 도메인이 붙어 보인다) */
+.id-field { display: flex; align-items: center; gap: 6px; }
+.id-field .pk-input { flex: 1; min-width: 0; }
+.id-domain { flex: none; font-size: 14px; color: var(--ink-soft); white-space: nowrap; }
+/* 발표 화면: 종이로 뽑힌 이름 입력 */
+.paper-form { display: grid; gap: 8px; justify-items: center; width: 100%; }
+.name-input { max-width: 240px; font-size: 20px; text-align: center; }
+.name-hits { justify-content: center; }
+.name-x { margin-left: 2px; font-size: 14px; color: var(--ink-soft); }
+.refill-list { text-align: left; font-size: clamp(15px, 1.9vw, 24px); color: var(--ink); }
+.winner.me { outline: 3px solid var(--gold); border-radius: 8px; }

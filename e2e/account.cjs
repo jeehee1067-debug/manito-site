@@ -20,7 +20,7 @@ function watchPage(page, label) {
   });
   page.on("pageerror", (e) => errors.push(`[${label}] pageerror ${e.message}`));
 }
-const mailBox = (page) => page.getByPlaceholder("자주 확인하는 메일 주소");
+const mailBox = (page) => page.getByPlaceholder("회사 메일 아이디");
 async function logout(page) {
   await page.locator(".hud-out").click();
   await mailBox(page).waitFor();
@@ -53,7 +53,7 @@ async function expectSession(page, who) {
   await mailBox(page).fill(MAIL.운영자);
   await page.locator('input[type="password"]').fill(PW);
   await page.getByRole("button", { name: "운영자 계정 만들기" }).click();
-  await page.locator("section.panel", { has: page.locator("h2", { hasText: "1. 명단" }) }).locator("textarea").fill("가나,SR3,가파트\n다라,SR3,가파트\n마바,S1L,나파트");
+  await page.locator("section.panel", { has: page.locator("h2", { hasText: "1. 명단" }) }).locator("textarea").fill("가나,가파트\n다라,가파트\n마바,나파트");
   await page.getByRole("button", { name: "명단에 추가" }).click(); await page.getByText("3명을 추가했어요.").waitFor();
   await page.getByRole("button", { name: "배정하기" }).click(); await page.getByText(/3명 배정 완료/).waitFor();
   const inv = {};
@@ -70,7 +70,7 @@ async function expectSession(page, who) {
     await page.getByPlaceholder("운영진에게 받은 6자리").fill(inv[who]);
     await mailBox(page).fill(MAIL[who]);
     await page.locator('input[type="password"]').fill(PW);
-    await page.getByRole("button", { name: "가입하고 내 이름 연결" }).click();
+    await page.getByRole("button", { name: "가입하기" }).click();
     for (let t = 0; t < 6; t++) {
       await page.waitForTimeout(700);
       console.log(`  [${who} +${((t + 1) * 0.7).toFixed(1)}s]`, (await page.locator("body").innerText()).replace(/\n+/g, " | ").replace(/^.*?HAPPY NEW YEAR \| /, "").slice(0, 150));

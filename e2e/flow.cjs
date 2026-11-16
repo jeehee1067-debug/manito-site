@@ -94,7 +94,7 @@ const step = (s) => console.log("▶", s);
   assert.equal(await admin.getByRole("button", { name: "운영자·공동 운영자 계정 만들기" }).count(), 0, "기본 주소에서는 숨김");
   await admin.goto(BASE + "?setup");
   await admin.getByRole("button", { name: "운영자·공동 운영자 계정 만들기" }).click();
-  await admin.getByPlaceholder("자주 확인하는 메일 주소").fill("admin1@example.com");
+  await admin.getByPlaceholder("회사 메일 아이디").fill("admin1@example.com");
   await admin.locator('input[type="password"]').fill(PW);
   await admin.getByRole("button", { name: "운영자 계정 만들기" }).click();
   await panel(admin, "운영 단계").waitFor();
@@ -104,7 +104,7 @@ const step = (s) => console.log("▶", s);
   await panel(admin, "짝 현황").getByText("아직 배정 전이에요.").waitFor();
 
   step("명단(파트 포함) 입력, 배정 (팀 편성 단계 없음)");
-  await panel(admin, "1. 명단").locator("textarea").fill(PEOPLE.map((p) => `${p.name},${p.loc},${p.part}`).join("\n"));
+  await panel(admin, "1. 명단").locator("textarea").fill(PEOPLE.map((p) => `${p.name},${p.part},${p.id.split("@")[0]}`).join("\n"));
   await admin.getByRole("button", { name: "명단에 추가" }).click();
   await admin.getByText(`${N}명을 추가했어요.`).waitFor();
   assert.equal(await admin.getByRole("button", { name: "무작위로 팀 편성" }).count(), 0, "팀 편성 버튼 없음");
@@ -159,9 +159,9 @@ const step = (s) => console.log("▶", s);
     await page.goto(BASE);
     await page.getByRole("tab", { name: "처음 가입" }).click();
     await page.getByPlaceholder("운영진에게 받은 6자리").fill(invite[p.name]);
-    await page.getByPlaceholder("자주 확인하는 메일 주소").fill(p.id);
+    await page.getByPlaceholder("회사 메일 아이디").fill(p.id);
     await page.locator('input[type="password"]').fill(PW);
-    await page.getByRole("button", { name: "가입하고 내 이름 연결" }).click();
+    await page.getByRole("button", { name: "가입하기" }).click();
     await page.locator("nav.tabs button", { hasText: "내 미션" }).waitFor();
     await tab(page, "내 프로필");
     await page.locator(".avatar-cell").nth(i % 4).click();
@@ -433,7 +433,7 @@ const step = (s) => console.log("▶", s);
   {
     await co.goto(BASE + "?setup");
     await co.getByRole("button", { name: "운영자·공동 운영자 계정 만들기" }).click();
-    await co.getByPlaceholder("자주 확인하는 메일 주소").fill("coadmin@example.com");
+    await co.getByPlaceholder("회사 메일 아이디").fill("coadmin@example.com");
     await co.locator('input[type="password"]').fill(PW);
     await co.getByRole("button", { name: "운영자 계정 만들기" }).click();
     // 이미 운영자가 있으므로 운영자가 되지 않고 "연결 전" 화면이 나온다

@@ -19,7 +19,7 @@ const H = require("./helpers.cjs");
 
   step("명단(엑셀에서 붙여 넣은 탭 구분) 4명 → 아무도 가입하기 전에 배정");
   const admin = await mk("운영자");
-  const inv = await H.setupAdmin(admin, PEOPLE.map(([n, part]) => `${n}\tSR3\t${part}`));
+  const inv = await H.setupAdmin(admin, PEOPLE.map(([n, part], i) => `${n}\t${part}\tlate${i}`));
   assert.deepEqual(Object.keys(inv).sort(), PEOPLE.map(([n]) => n).sort(), "탭으로 구분한 줄도 이름·근무지·파트로 읽는다");
   console.log("  4명 배정 완료(가입한 사람 0명). 초대 코드 4개 발급");
 

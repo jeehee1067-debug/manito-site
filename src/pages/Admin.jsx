@@ -5,10 +5,10 @@ import {
 import { db } from "../firebase.js";
 import { useApp } from "../App.jsx";
 import { Panel } from "../ui.jsx";
-import { PHASE, PHASES, CLUE_COUNT, LEVEL_LABEL, LOCS, PART_HINT_IDX, PRAISE_SLOT, RULES_VERSION } from "../lib/constants.js";
+import { PHASE, PHASES, CLUE_COUNT, LEVEL_LABEL, MAIL_DOMAIN, PART_HINT_IDX, PRAISE_SLOT, RULES_VERSION } from "../lib/constants.js";
 import { SLOT_STATUS_LABEL, clueAnswers, cluesDoneSet, pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../lib/pairs.js";
 import { assignManito, assignmentMemo, generateCodes, makeInviteCode } from "../lib/assign.js";
-import { computeTickets, missionLikes, noticedWeeks, partStandings, pickBestReview, reviewLikes, weeklyPartBoard } from "../lib/scoring.js";
+import { computeTickets, missionLikes, noticedWeeks, partStandings, rankReviews, reviewLikes, weeklyPartBoard } from "../lib/scoring.js";
 import { angelQueue, angelQueueStatus, matchAngels, needyReceivers } from "../lib/angels.js";
 import { PRIZES, TICKET_RULES as R } from "../config/prizes.js";
 import { parseRosterLine, rosterSummary, sameSummary } from "../lib/roster.js";
@@ -161,7 +161,7 @@ export default function Admin() {
     // 미션 시작 전: 가입 안 한 사람이 있으면 그 사람의 마니또는 인증을 받을 수 없어 미션 응모권이 0장이 된다.
     const unjoined = phase === PHASE.SETUP && fullRoster ? fullRoster.filter((r) => !r.uid) : [];
     const warn = unjoined.length
-      ? `\n\n⚠ 아직 가입 안 한 사람 ${unjoined.length}명: ${unjoined.map((r) => r.name).join(", ")}\n이 사람들도 이미 배정돼 있고, 미션이 시작된 뒤에도 초대 코드로 가입해 바로 참여할 수 있어요. 가입하기 전까지는 받는 미션을 인증할 수 없고 자기 미션도 못 해요(끝까지 가입하지 않으면 불참으로 처리: 응모권 0장, 그 사람의 마니또가 완료를 알린 미션은 인정). 아예 참여하지 않을 사람이면 명단에서 지우고 다시 배정한 뒤 시작하세요.`
+      ? `\n\n⚠ 아직 가입 안 한 사람 ${unjoined.length}명: ${unjoined.map((r) => r.name).join(", ")}\n이 사람들도 이미 배정돼 있고, 미션이 시작된 뒤에도 가입해 바로 참여할 수 있어요. 가입하기 전까지는 받는 미션을 인증할 수 없고 자기 미션도 못 해요(끝까지 가입하지 않으면 불참으로 처리: 응모권 0장, 그 사람의 마니또가 완료를 알린 미션은 인정). 아예 참여하지 않을 사람이면 명단에서 지우고 다시 배정한 뒤 시작하세요.`
       : "";
     if (!window.confirm(`${PHASES[phase]} → ${PHASES[phase + 1]}\n\n${NEXT_PHASE_NOTE[phase]}${warn}\n\n되돌릴 수 없어요. 진행할까요?`)) return;
     if (phase === PHASE.SETUP && fullRoster) await publishRoster(fullRoster);
@@ -360,16 +360,23 @@ function Setup() {
     const start = roster.reduce((m, r) => Math.max(m, Number(r.pid.slice(1)) || 0), 0);
     const ops = [];
     const bad = [];
+    const dup = [];
+    const used = new Set(roster.map((r) => r.email).filter(Boolean)); // 메일(아이디)은 한 사람에 하나
     lines.forEach((line, i) => {
-      // "이름,근무지,파트" — 근무지·파트는 생략 가능
-      const { name, loc, part, badLoc } = parseRosterLine(line, LOCS);
-      if (badLoc) bad.push(`${name}(${badLoc})`);
+      // "이름, 파트, 아이디" — 엑셀에서 세 칸을 복사해 붙여 넣으면 된다(탭으로 나뉜다). 아이디는 회사 메일의 @ 앞부분
+      const { name, part, email, bad: badId } = parseRosterLine(line, MAIL_DOMAIN);
+      if (!name || badId) bad.push(`${name || "(이름 없음)"}${badId ? `(${badId})` : ""}`);
+      if (email && used.has(email)) dup.push(`${name}(${email})`);
+      if (email) used.add(email);
       const pid = `p${String(start + i + 1).padStart(3, "0")}`;
       const invite = makeInviteCode();
-      ops.push((b) => b.set(doc(db, "roster", pid), { name, loc, part, uid: null, disqualified: false }));
+      ops.push((b) => b.set(doc(db, "roster", pid), { name, part, email, uid: null, disqualified: false }));
       ops.push((b) => b.set(doc(db, "invites", invite), { personId: pid }));
+      // 메일 → 명단 번호: 메일 인증을 마친 사람이 자기 이름을 찾는 데 쓴다(보안 규칙)
+      if (email) ops.push((b) => b.set(doc(db, "mailIndex", email), { personId: pid }));
     });
-    if (bad.length) return setMsg(`근무지는 ${LOCS.join(", ")} 중 하나로 적어 주세요: ${bad.join(", ")}`);
+    if (bad.length) return setMsg(`"이름, 파트, 아이디" 순서로 적어 주세요. 아이디는 회사 메일의 @ 앞부분(영문·숫자)이에요: ${bad.join(", ")}`);
+    if (dup.length) return setMsg(`같은 아이디가 두 번 있어요(이미 명단에 있거나 입력에 겹침): ${dup.join(", ")}`);
     setBusy(true);
     await commitInChunks(ops);
     setBusy(false);
@@ -380,13 +387,28 @@ function Setup() {
   async function removePerson(r) {
     if (r.uid) return window.alert("이미 가입한 사람은 지울 수 없어요. 먼저 연결 해제하세요.");
     if (!window.confirm(`${r.name}님을 명단에서 지울까요?`)) return;
-    await deleteDoc(doc(db, "roster", r.pid));
-    if (invites[r.pid]) await deleteDoc(doc(db, "invites", invites[r.pid]));
+    const b = writeBatch(db);
+    b.delete(doc(db, "roster", r.pid));
+    if (invites[r.pid]) b.delete(doc(db, "invites", invites[r.pid]));
+    if (r.email) b.delete(doc(db, "mailIndex", r.email));
+    await b.commit();
   }
 
-  async function cycleLoc(r) {
-    const next = LOCS[(LOCS.indexOf(r.loc) + 1) % LOCS.length];
-    await updateDoc(doc(db, "roster", r.pid), { loc: next });
+  // 아이디(회사 메일) 고치기: 명단에 잘못 적었을 때. 메일 인증으로 연결되는 주소가 바뀐다(처음 운영자만, 보안 규칙).
+  async function editEmail(r) {
+    const cur = r.email ? (r.email.endsWith(`@${MAIL_DOMAIN}`) ? r.email.slice(0, -MAIL_DOMAIN.length - 1) : r.email) : "";
+    const next = window.prompt(`${r.name}님의 회사 메일 아이디(@ 앞부분). 비우면 메일 인증 없이 초대 코드로만 가입해요.`, cur);
+    if (next === null) return;
+    const { email, bad } = parseRosterLine(`${r.name},,${next}`, MAIL_DOMAIN);
+    if (bad) return setMsg(`아이디는 회사 메일의 @ 앞부분(영문·숫자)으로 적어 주세요: ${bad}`);
+    if (email === (r.email || null)) return;
+    if (email && roster.some((x) => x.pid !== r.pid && x.email === email)) return setMsg(`이미 다른 사람이 쓰는 아이디예요: ${email}`);
+    const b = writeBatch(db);
+    b.update(doc(db, "roster", r.pid), { email });
+    if (r.email) b.delete(doc(db, "mailIndex", r.email));
+    if (email) b.set(doc(db, "mailIndex", email), { personId: r.pid });
+    await b.commit().then(() => setMsg(`${r.name}님의 아이디를 ${email || "(없음)"}로 바꿨어요.${r.uid ? " 이미 연결된 계정은 그대로예요." : ""}`))
+      .catch(() => setMsg("아이디를 바꾸지 못했어요. 처음 운영자 계정인지, 보안 규칙이 최신인지 확인해 주세요."));
   }
 
   async function editPart(r) {
@@ -455,7 +477,7 @@ function Setup() {
         + (noPart && noPart < roster.length ? ` 파트가 비어 있는 ${noPart}명이 마니또인 경우는 파트 단서가 나가지 않아요.` : "")
         + (warnings.length ? " " + warnings.join(" ") : "")
         + ` ${siteMatched ? "같은 근무지끼리, " : ""}${partExcluded && noPart < roster.length ? "다른 파트끼리, " : ""}맞마니또 없이 짝지었어요.`
-        + (siteMatched ? "" : " 근무지가 다른 짝은 원격 미션 카드가 나와요.")
+        + (siteMatched || !roster.some((r) => r.loc) ? "" : " 근무지가 다른 짝은 원격 미션 카드가 나와요.")
         + " 누가 누구의 마니또인지는 아래 '짝 현황' 표에서 볼 수 있어요.");
     } catch (err) {
       setMsg(err?.code === "permission-denied"
@@ -471,29 +493,44 @@ function Setup() {
   for (const r of roster) if (r.part) partCount[r.part] = (partCount[r.part] || 0) + 1;
   const parts = Object.entries(partCount).sort((a, b) => b[1] - a[1]);
   const inviteText = sorted.map((r) => `${r.name}\t${invites[r.pid] || ""}`).join("\n");
+  const hasLoc = roster.some((r) => r.loc); // 근무지는 예전에 넣은 명단에만 있다(지금은 입력하지 않는다)
+  const joined = roster.filter((r) => r.uid).length;
+  const notJoined = sorted.filter((r) => !r.uid);
+  const shortId = (email) => (email ? (email.endsWith(`@${MAIL_DOMAIN}`) ? email.slice(0, -MAIL_DOMAIN.length - 1) : email) : "");
 
   return (
     <>
       <Panel title="1. 명단">
         <p className="small">
-          한 줄에 한 명, "이름,근무지,파트" 형식. 같은 파트끼리는 마니또가 되지 않게 배정하고,
-          최종 지목이 열릴 때 "내 마니또는 ○○ 소속" 단서가 자동으로 나가요. 파트 순위도 이 파트로 매겨요.
+          한 줄에 한 명, <b>"이름, 파트, 아이디"</b> 순서. 엑셀에서 세 칸을 복사해 그대로 붙여 넣으면 돼요.
+          아이디는 회사 메일의 @ 앞부분이에요(뒤에 @{MAIL_DOMAIN}이 붙어요). 참여자는 이 아이디로 가입하고, 그 메일로 온 인증 링크를 누르면 명단의 자기 이름과 자동으로 연결돼요.
+          같은 파트끼리는 마니또가 되지 않게 배정하고, 최종 지목이 열릴 때 "내 마니또는 ○○ 소속" 단서가 자동으로 나가요. 파트 순위도 이 파트로 매겨요.
         </p>
-        <textarea className="pk-input" rows={6} value={text} onChange={(e) => setText(e.target.value)} placeholder={"홍길동,SR3,공정파트\n김철수,S1L,소자파트"} />
+        <textarea className="pk-input" rows={6} value={text} onChange={(e) => setText(e.target.value)} placeholder={"홍길동\t공정파트\tgildong.hong\n김철수\t소자파트\tcs.kim"} />
         <button className="pk-btn main" onClick={addPeople} disabled={busy || !loaded || !isOwner}>명단에 추가</button>
         {!isOwner && <p className="small muted">명단 추가·삭제와 초대 코드는 처음 운영자만 할 수 있어요.</p>}
       </Panel>
 
       <Panel title="2. 마니또 배정">
-        <div className="chip-row">
-          <button className={siteMode === "any" ? "chip is-on" : "chip"} onClick={() => setSiteMode("any")}>근무지 상관없이</button>
-          <button className={siteMode === "same" ? "chip is-on" : "chip"} onClick={() => setSiteMode("same")}>같은 근무지끼리만</button>
-        </div>
         <p className="small">
-          {siteMode === "any"
-            ? "다른 근무지끼리도 짝이 될 수 있어요. 대상이 다른 근무지면 직접 가지 않아도 되는 미션 카드만 나와요."
-            : "같은 근무지끼리만 짝을 지어요. 실물 미션을 모두 할 수 있고, 추리 보드에서 다른 근무지가 후보에서 빠져요."}
+          <b>배정은 미션을 시작하는 날에 누르세요.</b> 배정하는 순간 가입한 사람에게 자기 대상이 보여요.
+          명단에 있는 사람은 가입 여부와 상관없이 모두 배정돼요(나중에 가입해도 그대로 참여). 참여하지 않겠다는 사람은 배정 전에 명단에서 지워 주세요.
+          {roster.length > 0 && ` 지금 가입 ${joined} / ${roster.length}명.`}
+          {notJoined.length > 0 && notJoined.length <= 20 && ` 아직 가입 안 한 사람: ${notJoined.map((r) => r.name).join(", ")}.`}
         </p>
+        {hasLoc && (
+          <>
+            <div className="chip-row">
+              <button className={siteMode === "any" ? "chip is-on" : "chip"} onClick={() => setSiteMode("any")}>근무지 상관없이</button>
+              <button className={siteMode === "same" ? "chip is-on" : "chip"} onClick={() => setSiteMode("same")}>같은 근무지끼리만</button>
+            </div>
+            <p className="small">
+              {siteMode === "any"
+                ? "다른 근무지끼리도 짝이 될 수 있어요. 대상이 다른 근무지면 직접 가지 않아도 되는 미션 카드만 나와요."
+                : "같은 근무지끼리만 짝을 지어요. 실물 미션을 모두 할 수 있고, 추리 보드에서 다른 근무지가 후보에서 빠져요."}
+            </p>
+          </>
+        )}
         <p className="small">
           {parts.length
             ? <>파트: {parts.map(([name, n]) => `${name} ${n}명`).join(" · ")}{roster.length - parts.reduce((a, [, n]) => a + n, 0) > 0 && ` · 파트 없음 ${roster.length - parts.reduce((a, [, n]) => a + n, 0)}명`}.
@@ -507,20 +544,26 @@ function Setup() {
 
       {msg && <p className="note banner" role="status">{msg}</p>}
 
-      <Panel title={`명단 ${roster.length}명`}>
+      <Panel title={`명단 ${roster.length}명 (가입 ${joined}명)`}>
         <div className="reveal-row">
           <button className="pk-btn sm" aria-pressed={showSecret} onClick={() => setShowSecret(!showSecret)}>{showSecret ? "초대 코드·메일 가리기" : "초대 코드·메일 보기"}</button>
           <button className="pk-btn sm" onClick={() => navigator.clipboard.writeText(inviteText)}>이름과 초대 코드 복사</button>
         </div>
+        <p className="small">
+          참여자는 아이디로 가입해 회사 메일의 인증 링크를 누르면 연결돼요. <b>초대 코드는 인증 메일이 오지 않는 사람에게만</b> 본인에게 직접 알려 주세요(예비).
+          아이디가 "없음"인 사람은 초대 코드로만 가입할 수 있어요.
+        </p>
         <div className="table-wrap">
           <table className="pk-table">
-            <thead><tr><th>이름</th><th>근무지</th><th>파트</th><th>초대 코드</th><th>연결된 메일</th><th></th></tr></thead>
+            <thead><tr><th>이름</th><th>파트</th><th>아이디</th><th>초대 코드</th><th>연결된 메일</th><th></th></tr></thead>
             <tbody>
               {sorted.map((r) => (
                 <tr key={r.pid}>
                   <td>{r.name}</td>
-                  <td><button className="text-btn" onClick={() => cycleLoc(r)} title="눌러서 근무지 바꾸기">{r.loc || "미정"}</button></td>
                   <td><button className="text-btn" onClick={() => editPart(r)} title="눌러서 파트 바꾸기">{r.part || "미정"}</button></td>
+                  <td className="mail-id">{isOwner
+                    ? <button className="text-btn" onClick={() => editEmail(r)} title="눌러서 아이디 바꾸기">{shortId(r.email) || "없음"}</button>
+                    : shortId(r.email) || "없음"}</td>
                   <td className="mono">{mask(invites[r.pid], showSecret) || "-"}</td>
                   <td className="email">{r.uid ? mask(emails[r.uid], showSecret) || "연결됨" : "-"}</td>
                   <td>
@@ -1342,7 +1385,7 @@ async function calcAll(roster, assignVer, { awards = true } = {}) {
   // 후기별 "남이 누른 공감 수" → 3등 베스트 후기상(가장 많이 받은 후기)과 2등 동점 기준(마니또마다 내 미션 후기가 받은 공감의 합).
   // 당사자 두 사람(후기를 쓴 받는 사람, 그 미션을 한 마니또)이 누른 공감은 뺀다. 공감 문서(feedLikes)를 통째로 읽으면 최대 수천 건이라,
   // 공감을 받은 후기마다 두 사람의 문서(ID가 "글ID_pid"로 정해져 있다)만 골라 읽는다.
-  let bestReview = null;
+  let reviewRank = []; // 공감 많은 순 후기(3등 후보 순서). 1위가 더 큰 상을 받으면 다음 순위가 3등이 된다
   let tieBreak = {};
   if (awards) {
     const giverOfCode = {};
@@ -1352,7 +1395,7 @@ async function calcAll(roster, assignVer, { awards = true } = {}) {
       .flatMap(([code, r]) => [r.receiverPid, giverOfCode[code]].filter(Boolean).map((pid) => `${r.feedId}_${pid}`));
     const ownLikes = new Set((await Promise.all(ownIds.map(async (id) => ((await getDoc(doc(db, "feedLikes", id))).exists() ? id : null)))).filter(Boolean));
     const likeRows = reviewLikes({ redemptions, feed, giverOfCode, ownLikes });
-    bestReview = pickBestReview(likeRows, new Set(people.filter((p) => p.disqualified || !p.joined || p.dropout).map((p) => p.pid)));
+    reviewRank = rankReviews(likeRows, new Set(people.filter((p) => p.disqualified || !p.joined || p.dropout).map((p) => p.pid)));
     tieBreak = missionLikes(likeRows);
   }
   const stats = {
@@ -1372,7 +1415,7 @@ async function calcAll(roster, assignVer, { awards = true } = {}) {
     angelPid: a.angelPid, receiverPid, done: Object.values(angelGifts).filter((g) => g.receiverPid === receiverPid && g.confirmed).length,
     ...(volunteerOrder[a.angelPid] ? { order: volunteerOrder[a.angelPid] } : {}),
   })).filter((x) => x.done > 0);
-  const extras = { guesses: finalGuess, noticed, story, stats, bestReview, tieBreak, angels: angelList };
+  const extras = { guesses: finalGuess, noticed, story, stats, bestReview: reviewRank[0] || null, reviewRank, tieBreak, angels: angelList };
   return { assignments, deliveries, people, tickets, extras };
 }
 
@@ -1445,8 +1488,8 @@ function Scoring() {
         <p className="small">
           응모권, 파트 대항전 순위, {PRIZES.bestReview.label}(공감을 가장 많이 받은 후기), 칭찬 벽을 계산해요. 위 "집계 전 확인"과 수상 제외·중도 이탈 표시를 먼저 끝내고 누르세요.
           다시 누르면 다시 계산돼요. 집계해야 공개 단계로 넘어갈 수 있고, 공개 단계로 넘어간 뒤에는 다시 집계할 수 없어요.
-          {" "}{PRIZES.grand.label}·{PRIZES.bestManito.label}와 4~6등은 공개 단계의 발표 화면에서 현장 숫자 하나로 한 번에 정해요
-          ({PRIZES.bestManito.label}는 1등 당첨자를 뺀 응모권 최다 {PRIZES.bestManito.count}명).
+          {" "}시상은 공개 단계의 발표 화면에서 해요: 현장 숫자를 넣으면 {PRIZES.bestManito.label}(응모권 최다 {PRIZES.bestManito.count}명)와 {PRIZES.bestReview.label}이 정해지고,
+          4·5등과 1등은 현장에서 종이로 뽑아 이름을 입력하고, 6등은 사이트가 뽑아요. 한 사람은 하나만 받아요(겹치면 큰 상).
         </p>
         <div className="reveal-row">
           <button className="pk-btn main" onClick={compute} disabled={busy || !fullRoster}>{result ? "다시 집계" : "집계하기"}</button>
@@ -1458,19 +1501,55 @@ function Scoring() {
           : <p className="error" role="alert">검산: {audit.length}명이 달라요 — {audit.map((x) => `${nameOf(x.pid)} 저장 ${x.saved}장/다시 계산 ${x.now}장`).join(", ")}. 집계 뒤에 확인·제외 표시가 바뀌었으면 다시 집계하세요.</p>)}
         {result && (
           <ul className="plain">
-            <li>응모권 상위({PRIZES.bestManito.label} 후보, 1등 당첨자는 빠져요): {Object.entries(result.tickets || {}).filter(([, n]) => n > 0)
+            <li>응모권 상위({PRIZES.bestManito.label} 후보, 1등으로 뽑힌 사람은 빠지고 다음 순위가 받아요): {Object.entries(result.tickets || {}).filter(([, n]) => n > 0)
               .sort((x, y) => y[1] - x[1] || (result.tieBreak?.[y[0]] || 0) - (result.tieBreak?.[x[0]] || 0) || nameOf(x[0]).localeCompare(nameOf(y[0]), "ko")).slice(0, PRIZES.bestManito.count + 3)
               .map(([pid, n]) => `${nameOf(pid)} ${n}장${result.tieBreak?.[pid] ? `(♥ ${result.tieBreak[pid]})` : ""}`).join(", ") || "-"}
-              {" "}— 동점이면 내 미션 후기가 받은 공감(♥)이 많은 사람, 그래도 같으면 추첨 숫자로 정해요</li>
+              {" "}— 동점이면 내 미션 후기가 받은 공감(♥)이 많은 사람, 그래도 같으면 현장 숫자로 정해요</li>
             <li>{PRIZES.bestReview.label}: {result.bestReview
               ? `${nameOf(result.bestReview.receiverPid)} (♥ ${result.bestReview.likes ?? "-"}, 당사자 공감 제외) "${String(result.bestReview.review).slice(0, 40)}…"`
-              : "공감을 받은 후기가 없어 수상자가 없어요"}</li>
+              : "공감을 받은 후기가 없어 수상자가 없어요"}{result.bestReview ? " — 이 사람이 1·2등을 받으면 다음으로 공감이 많은 후기가 받아요" : ""}</li>
             <li>파트 대항전: {(result.partBoard || []).length
               ? result.partBoard.map((x) => `${x.part} ${x.done}/${x.max}${x.winner ? " (우승)" : ""}`).join(", ")
               : "파트가 입력되지 않아 없음"}</li>
           </ul>
         )}
+        {result && <SlipSheet tickets={result.tickets || {}} roster={roster} />}
       </Panel>
     </>
+  );
+}
+
+// 현장 종이 추첨용: 사람마다 응모권 수만큼 이름 종이를 인쇄한다(잘라서 본인이 접어 통에 넣는다). 1·4·5등을 이 종이로 뽑는다.
+function SlipSheet({ tickets, roster }) {
+  const [open, setOpen] = useState(false);
+  const rows = roster
+    .map((r) => ({ pid: r.pid, name: r.name, part: r.part || "", n: tickets[r.pid] || 0 }))
+    .filter((x) => x.n > 0)
+    .sort(byPartThenName);
+  const total = rows.reduce((s, x) => s + x.n, 0);
+  return (
+    <div className="stack tight">
+      <p className="small">
+        <b>현장 종이 추첨 준비</b> 응모권이 있는 사람 {rows.length}명, 이름 종이 {total}장(응모권 1장 = 종이 1장).
+        아래를 인쇄해 잘라서 각자 자기 종이를 접어 통에 넣게 하세요. 집계를 다시 하면 장수가 바뀔 수 있으니 마지막 집계 뒤에 인쇄하세요.
+      </p>
+      <div className="inline">
+        <button type="button" className="pk-btn sm" aria-pressed={open} onClick={() => setOpen(!open)}>{open ? "이름 종이 접기" : `이름 종이 ${total}장 보기`}</button>
+        {open && <button type="button" className="pk-btn sm" onClick={() => window.print()}>인쇄</button>}
+      </div>
+      {open && (
+        <div className="print-area">
+          <h3 className="print-title">응모권 수 ({rows.length}명, {total}장)</h3>
+          <ul className="slip-counts">
+            {rows.map((x) => <li key={x.pid}>{x.name}{x.part ? ` (${x.part})` : ""} <b>{x.n}장</b></li>)}
+          </ul>
+          <div className="slips">
+            {rows.flatMap((x) => Array.from({ length: x.n }, (_, k) => (
+              <span key={`${x.pid}_${k}`} className="slip"><b>{x.name}</b>{x.part && <small>{x.part}</small>}</span>
+            )))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

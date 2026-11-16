@@ -12,7 +12,7 @@ const step = (s) => console.log("▶", s);
   const b = await chromium.launch(); const errs = []; const mk = H.maker(b, errs);
   const admin = await mk("운영자", { width: 1100, height: 900 });
   const NAMES = ["가나", "다라", "마바", "사아"];
-  const inv = await H.setupAdmin(admin, ["가나,SR3,가파트", "다라,SR3,나파트", "마바,SR3,가파트", "사아,SR3,나파트"], "fadmin@example.com");
+  const inv = await H.setupAdmin(admin, ["가나,가파트", "다라,나파트", "마바,가파트", "사아,나파트"], "fadmin@example.com");
   const advance = async (to) => { await admin.getByRole("button", { name: `다음 단계로: ${to}` }).click(); await admin.locator(".hud-chip", { hasText: to }).waitFor(); };
   // 이번 주 할 일 목록의 항목만(아래 '다음 일정' 줄은 빼고)
   const todoOf = async (p) => {

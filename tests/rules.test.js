@@ -38,7 +38,8 @@ const CODES = {
 const ADMIN = "admin"; // 운영자(참여하지 않는 계정, 명단에 연결되지 않음)
 const review20 = "가".repeat(20);
 // 한 번에 쓰는 추첨 결과(Reveal.jsx runDrawAll, scoring.js drawAll): 다섯 칸, 같은 숫자
-const DRAWS = Object.fromEntries([["grand", ["p001"]], ["best", ["p002", "p003"]], ["t4", ["p004"]], ["t5", []], ["t6", []]].map(([k, winners]) => [k, { seed: "4821", winners }]));
+// 추첨 결과(src/lib/scoring.js resolvePrizes가 읽는 모양): 현장 숫자, 종이로 뽑힌 1·4·5등 이름, 사이트가 뽑은 6등
+const DRAWS = { seed: "4821", grand: { winners: ["p001"] }, t4: { winners: ["p004"] }, t5: { winners: [] }, t6: { winners: ["p002"] } };
 const FEED_B1 = "feedB1B1xx"; // 시드: p003이 p002의 1주차 미션(B1B1)을 인증하면서 올라간 피드 글
 
 async function seed({ phase = 1, week = 1, cluesReleased = 2, admins = [ADMIN], results = false, extra } = {}) {
@@ -48,7 +49,8 @@ async function seed({ phase = 1, week = 1, cluesReleased = 2, admins = [ADMIN], 
     const b = writeBatch(db);
     b.set(doc(db, "config", "app"), { admins, phase, week, cluesReleased, siteMatched: false, partExcluded: true });
     for (const pid of ["p001", "p002", "p003", "p004", "p005"]) {
-      b.set(doc(db, "roster", pid), { name: pid, loc: "SR3", part: PART[pid], uid: UID[pid] || null, disqualified: false });
+      b.set(doc(db, "roster", pid), { name: pid, part: PART[pid], email: `${pid}@corp.example`, uid: UID[pid] || null, disqualified: false });
+      b.set(doc(db, "mailIndex", `${pid}@corp.example`), { personId: pid });
     }
     b.set(doc(db, "invites", "INV005"), { personId: "p005" });
     b.set(doc(db, "public", "roster"), { people: Object.fromEntries(["p001", "p002", "p003", "p004", "p005"].map((pid) => [pid, { name: pid, loc: "SR3", part: PART[pid] }])) });
@@ -83,6 +85,9 @@ async function seed({ phase = 1, week = 1, cluesReleased = 2, admins = [ADMIN], 
 
 const as = (uid) => env.authenticatedContext(uid).firestore();
 const asMail = (uid, email) => env.authenticatedContext(uid, { email }).firestore();
+const CO = "co"; // 공동 운영자 계정(seed({ admins: [ADMIN, CO] })로 지정)
+// 메일 인증을 마친 계정(토큰의 email_verified = true)
+const asVerified = (uid, email) => env.authenticatedContext(uid, { email, email_verified: true }).firestore();
 const p = (pid) => as(UID[pid]);
 const admin = () => as(ADMIN);
 
@@ -750,6 +755,71 @@ describe("5. 미션 슬롯: 완료한 슬롯의 난이도는 못 바꾸고, 열�
 describe("앱 흐름: 참여자 화면", () => {
   beforeEach(() => seed());
 
+  test("가입 후 회사 메일 인증으로 연결 (account.js claimWithMail): 초대 코드 없이, 인증된 메일이 명단의 메일과 같을 때", async () => {
+    const db = asVerified("u5", "p005@corp.example");
+    const idx = await assertSucceeds(getDoc(doc(db, "mailIndex", "p005@corp.example"))); // 내 메일로 명단 번호 찾기
+    const personId = idx.data().personId;
+    if (personId !== "p005") throw new Error("색인이 가리키는 사람이 다름");
+    await assertSucceeds(updateDoc(doc(db, "roster", personId), { uid: "u5", inviteUsed: "@mail" }));
+    await assertSucceeds(setDoc(doc(db, "users", "u5"), { personId, eliminated: [], email: "p005@corp.example", n: N }, { merge: true }));
+    await assertSucceeds(getDoc(doc(db, "config", "app"))); // 연결되면 참여자 화면을 읽을 수 있다
+    // 같은 사람이 다시 눌러도: 명단 수정은 거부되지만 users는 통과(화면은 이 거부를 넘긴다)
+    await assertFails(updateDoc(doc(db, "roster", personId), { uid: "u5", inviteUsed: "@mail" }));
+    await assertSucceeds(setDoc(doc(db, "users", "u5"), { personId, eliminated: [], email: "p005@corp.example", n: N }, { merge: true }));
+  });
+
+  test("회사 메일 인증 연결이 막는 것: 인증 전 메일, 남의 메일, 다른 이름, 메일이 없는 이름, 남의 색인", async () => {
+    // 인증하지 않은 메일(누구나 남의 주소로 계정은 만들 수 있다): 연결되지 않는다
+    const unverified = asMail("u5", "p005@corp.example");
+    await assertFails(updateDoc(doc(unverified, "roster", "p005"), { uid: "u5", inviteUsed: "@mail" }));
+    await assertFails(setDoc(doc(unverified, "users", "u5"), { personId: "p005", eliminated: [], email: "p005@corp.example", n: N }));
+    // 인증은 했지만 명단의 그 사람 메일이 아님
+    const other = asVerified("u6", "someone@corp.example");
+    await assertFails(updateDoc(doc(other, "roster", "p005"), { uid: "u6", inviteUsed: "@mail" }));
+    await assertFails(getDoc(doc(other, "mailIndex", "p005@corp.example"))); // 남의 메일 색인은 못 읽는다
+    await assertFails(getDocs(collection(other, "mailIndex")));
+    await assertFails(setDoc(doc(other, "mailIndex", "someone@corp.example"), { personId: "p005" })); // 색인을 꾸며 넣기
+    // 내 메일이 맞아도: 이미 연결된 이름, 다른 값까지 바꾸기, 표시를 다르게 쓰기
+    const me = asVerified("u5", "p005@corp.example");
+    await assertFails(updateDoc(doc(me, "roster", "p004"), { uid: "u5", inviteUsed: "@mail" }));
+    await assertFails(updateDoc(doc(me, "roster", "p005"), { uid: "u5", inviteUsed: "@mail", part: "나파트" }));
+    await assertFails(updateDoc(doc(me, "roster", "p005"), { uid: "u5", inviteUsed: "mail" }));
+    await assertFails(updateDoc(doc(me, "roster", "p005"), { uid: "u9", inviteUsed: "@mail" })); // 남의 계정을 연결
+    // 명단에 메일(아이디)이 없는 이름은 메일 인증으로 연결할 수 없다(초대 코드로만)
+    await put("roster/p006", { name: "p006", part: "가파트", email: null, uid: null, disqualified: false });
+    await assertFails(updateDoc(doc(asVerified("u7", "p006@corp.example"), "roster", "p006"), { uid: "u7", inviteUsed: "@mail" }));
+    // 운영자 계정은 메일이 맞아도 참여자가 될 수 없다
+    await put("roster/p006", { name: "p006", part: "가파트", email: "boss@corp.example", uid: null, disqualified: false });
+    await assertFails(setDoc(doc(env.authenticatedContext(ADMIN, { email: "boss@corp.example", email_verified: true }).firestore(), "users", ADMIN),
+      { personId: "p006", eliminated: [], email: "boss@corp.example", n: N }));
+  });
+
+  test("명단의 메일(아이디)과 메일 색인은 처음 운영자만 바꾼다 (Admin.jsx 명단)", async () => {
+    await seed({ phase: 0, admins: [ADMIN, CO] });
+    // 공동 운영자가 남의 이름에 자기 메일을 넣고 메일 인증으로 그 사람인 척 연결하는 것을 막는다
+    await assertFails(updateDoc(doc(as(CO), "roster", "p005"), { email: "co@corp.example" }));
+    await assertFails(setDoc(doc(as(CO), "mailIndex", "co@corp.example"), { personId: "p005" }));
+    await assertFails(getDocs(collection(as(CO), "mailIndex")));
+    await assertSucceeds(updateDoc(doc(as(CO), "roster", "p005"), { disqualified: true })); // 다른 운영 표시는 된다
+    // 처음 운영자: 명단 추가(메일 + 색인 + 초대 코드), 아이디 고치기, 삭제
+    const db = admin();
+    const add = writeBatch(db);
+    add.set(doc(db, "roster", "p006"), { name: "새사람", part: "가파트", email: "new@corp.example", uid: null, disqualified: false });
+    add.set(doc(db, "invites", "INV006"), { personId: "p006" });
+    add.set(doc(db, "mailIndex", "new@corp.example"), { personId: "p006" });
+    await assertSucceeds(add.commit());
+    const fix = writeBatch(db);
+    fix.update(doc(db, "roster", "p006"), { email: "fixed@corp.example" });
+    fix.delete(doc(db, "mailIndex", "new@corp.example"));
+    fix.set(doc(db, "mailIndex", "fixed@corp.example"), { personId: "p006" });
+    await assertSucceeds(fix.commit());
+    const del = writeBatch(db);
+    del.delete(doc(db, "roster", "p006"));
+    del.delete(doc(db, "invites", "INV006"));
+    del.delete(doc(db, "mailIndex", "fixed@corp.example"));
+    await assertSucceeds(del.commit());
+  });
+
   test("가입 후 초대 코드 연결 (account.js claimWithInvite): 명단을 읽지 않고 바로 연결, 로그인한 메일 저장", async () => {
     const db = asMail("u5", "u5@example.com");
     const invite = await assertSucceeds(getDoc(doc(db, "invites", "INV005")));
@@ -1298,32 +1368,51 @@ describe("앱 흐름: 운영 화면", () => {
     await assertFails(setDoc(doc(db, "results", "public"), { pairs: [], tickets: {}, draws: { grand: ["p001"] } }));
   });
 
-  test("공개 단계: 추첨 결과는 한 번 쓰면 덮어쓰거나 지울 수 없고, 결과의 다른 값도 못 바꾼다 (Reveal.jsx draw)", async () => {
+  test("공개 단계의 시상: 숫자는 한 번만, 종이로 뽑힌 이름은 6등을 뽑기 전까지 고칠 수 있고, 6등을 뽑으면 아무것도 못 바꾼다 (Reveal.jsx)", async () => {
     await seed({ phase: 5, results: true });
     const db = admin();
     const ref = doc(db, "results", "public");
-    // 추첨은 다섯 칸(1등·2등·4등·5등·6등)을 같은 숫자로 한 번에 쓴다. 한 칸만, 칸마다 다른 숫자, 모르는 칸은 거부
-    await assertFails(updateDoc(ref, { "draws.grand": { seed: "4821", winners: ["p001"] } })); // 1등만 먼저 정해 두기
-    await assertFails(updateDoc(ref, { draws: { ...DRAWS, t6: { seed: "9", winners: [] } } })); // 칸마다 다른 숫자
-    await assertFails(updateDoc(ref, { draws: { ...DRAWS, extra: { seed: "4821", winners: ["p004"] } } })); // 모르는 칸
-    await assertFails(updateDoc(ref, { draws: { ...DRAWS, grand: { seed: "4821", winners: ["p001", "p002"] } } })); // 1등 두 명
-    await assertFails(updateDoc(ref, { draws: DRAWS, tickets: { p001: 1 } })); // 추첨하면서 다른 값도 같이 바꾸기
-    // 화면은 트랜잭션으로 "아직 안 뽑았는지" 확인하고 쓴다
+    // 숫자 없이 6등부터 쓸 수 없다, 모르는 칸·모양이 다른 값은 거부
+    await assertFails(updateDoc(ref, { "draws.t6": { winners: ["p002"] } }));
+    await assertFails(updateDoc(ref, { "draws.best": { winners: ["p002"] } })); // 2등은 저장하지 않는다(계산한다)
+    await assertFails(updateDoc(ref, { "draws.seed": 4821 })); // 숫자는 글자로
+    await assertFails(updateDoc(ref, { "draws.seed": "" }));
+    await assertFails(updateDoc(ref, { "draws.seed": "1".repeat(21) }));
+    await assertFails(updateDoc(ref, { "draws.t4": ["p004"] })); // { winners: [...] } 모양이 아님
+    await assertFails(updateDoc(ref, { "draws.t4": { winners: ["p004"], seed: "9" } }));
+    await assertFails(updateDoc(ref, { "draws.grand": { winners: ["p001", "p002"] } })); // 1등 두 명
+    await assertFails(updateDoc(ref, { "draws.seed": "4821", tickets: { p001: 1 } })); // 다른 값도 같이 바꾸기
+    // 화면은 트랜잭션으로 지금 값을 확인하고 쓴다: ① 숫자 정하기
     await assertSucceeds(runTransaction(db, async (tx) => {
       const snap = await tx.get(ref);
-      if (Object.keys(snap.data().draws || {}).length) throw new Error("이미 뽑음");
-      tx.update(ref, { draws: DRAWS });
+      if (snap.data().draws?.seed) throw new Error("이미 정함");
+      tx.update(ref, { "draws.seed": "4821" });
     }));
-    await assertFails(updateDoc(ref, { draws: { ...DRAWS, grand: { seed: "4821", winners: ["p003"] } } })); // 다시 뽑아 덮어쓰기
+    await assertFails(updateDoc(ref, { "draws.seed": "9999" })); // 숫자 바꾸기(결과를 보고 고르기)
+    await assertFails(updateDoc(ref, { draws: {} })); // 숫자 지우기
+    // ② 종이로 뽑힌 이름 입력, 잘못 넣은 이름 고치기
+    await assertSucceeds(updateDoc(ref, { "draws.t4": { winners: ["p003"] } }));
+    await assertSucceeds(updateDoc(ref, { "draws.t4": { winners: ["p004"] } }));
+    await assertSucceeds(updateDoc(ref, { "draws.t5": { winners: [] } }));
+    await assertSucceeds(updateDoc(ref, { "draws.grand": { winners: ["p001"] } }));
+    await assertFails(updateDoc(doc(p("p001"), "results", "public"), { "draws.grand": { winners: ["p001"] } })); // 참여자
+    // ③ 6등 사이트 추첨: 쓴 뒤에는 추첨 결과 전체를 바꿀 수 없다
+    await assertSucceeds(runTransaction(db, async (tx) => {
+      const snap = await tx.get(ref);
+      if (snap.data().draws?.t6) throw new Error("이미 뽑음");
+      tx.update(ref, { "draws.t6": { winners: ["p002"] } });
+    }));
+    await assertFails(updateDoc(ref, { "draws.t6": { winners: ["p003"] } })); // 다시 뽑아 덮어쓰기
+    await assertFails(updateDoc(ref, { "draws.grand": { winners: ["p003"] } })); // 6등을 뽑은 뒤 1등 바꾸기
     await assertFails(updateDoc(ref, { "draws.t4": deleteField() }));
     await assertFails(updateDoc(ref, { draws: {} }));
-    await assertFails(updateDoc(ref, { "draws.t7": { seed: "4821", winners: ["p004"] } })); // 칸 더하기
     await assertFails(updateDoc(ref, { tickets: { p001: 99 } })); // 응모권 수 바꾸기
     await assertFails(setDoc(ref, { pairs: [], tickets: {}, draws: {} })); // 다시 집계(덮어쓰기)
     await assertFails(deleteDoc(ref));
     await assertSucceeds(updateDoc(ref, { step: 7 })); // 발표 진행은 계속 된다
     const snap = await assertSucceeds(getDoc(ref));
-    if (JSON.stringify(snap.data().draws) !== JSON.stringify(DRAWS)) throw new Error("추첨 결과가 바뀜");
+    const d = snap.data().draws; // 거부된 요청들이 아무것도 바꾸지 못했는지
+    if (d.seed !== DRAWS.seed || ["grand", "t4", "t5", "t6"].some((k) => JSON.stringify(d[k]) !== JSON.stringify(DRAWS[k]))) throw new Error("추첨 결과가 바뀜");
   });
 
   test("공지·중도 이탈 (Admin.jsx Notice, Moderation)", async () => {
@@ -1476,7 +1565,8 @@ describe("참여 재미 기능: 취향·알레르기, 마니또에게 한마디,
     await assertFails(updateDoc(ref, { step: 4, tickets: { p001: 99 } })); // 진행하면서 다른 값 바꾸기
     await assertFails(updateDoc(doc(p("p001"), "results", "public"), { step: 9 })); // 참여자
     await assertSucceeds(updateDoc(ref, { draws: DRAWS }));
-    await assertFails(updateDoc(ref, { step: 5, "draws.t4": { seed: "9", winners: ["p002"] } })); // 진행하면서 추첨 결과 바꾸기
+    await assertFails(updateDoc(ref, { step: 5, "draws.t4": { winners: ["p002"] } })); // 6등을 뽑은 뒤에는 진행하면서도 추첨 결과를 못 바꾼다
+    await assertSucceeds(updateDoc(ref, { step: 5 }));
   });
 });
 
@@ -1560,7 +1650,6 @@ describe("수호천사: 지원한 참여자를 마니또가 미션을 안 한 �
 
 describe("보안 점검에서 막은 것: 위조·권한 넘기", () => {
   beforeEach(() => seed());
-  const CO = "co"; // 공동 운영자
 
   test("카드 난이도 위조: 카드 번호와 난이도가 맞아야 한다(쉬운 카드를 도전이라고 적을 수 없다)", async () => {
     const gm = doc(p("p001"), "giverMissions", "p001");

@@ -2,11 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { assignManito, assignmentMemo, generateCodes } from "../src/lib/assign.js";
 import { angelQueue, needyReceivers, matchAngels, angelQueueStatus } from "../src/lib/angels.js";
-import { pickBestReview, reviewLikes, missionLikes, cardLevel, computeTickets, weightedDraw, partStandings, weeklyPartBoard, seededDraw, seededTop, drawAll, verifyDraws, DRAW_ORDER, noticedWeeks } from "../src/lib/scoring.js";
+import { pickBestReview, rankReviews, reviewLikes, missionLikes, cardLevel, cardCost, computeTickets, weightedDraw, partStandings, weeklyPartBoard, seededDraw, seededTop, resolvePrizes, drawOnline, verifyOnline, PRIZE_ORDER, PAPER_TIERS, ONLINE_PRIZE, noticedWeeks } from "../src/lib/scoring.js";
 import { pairChain, buildSlides, revealedUpTo } from "../src/lib/reveal.js";
 import { readFileSync } from "node:fs";
 import { seededRandom } from "../src/lib/random.js";
 import { parseRosterLine, rosterSummary, summaryToList, sameSummary } from "../src/lib/roster.js";
+import { PRIZES, TICKET_RULES } from "../src/config/prizes.js";
 import { MISSION_CARDS, PROFILE_QUESTIONS, CLUE_COUNT, EXTRA_NOTES_MAX, CLUE_DATES, SCHEDULE, profileAnswerError } from "../src/lib/constants.js";
 import { pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../src/lib/pairs.js";
 
@@ -383,14 +384,18 @@ test("명단 요약: 이름·근무지·파트만, pid 순서 고정, 가입 여
   assert.ok(sameSummary({ p002: sum.p002, p001: sum.p001 }, sum), "키 순서가 달라도 같은 요약");
 });
 
-test("명단 입력 한 줄: 이름,근무지,파트. 근무지 오타는 알려 준다", () => {
-  const L = ["SR3", "S1L"];
-  assert.deepEqual(parseRosterLine("홍길동,SR3,공정파트", L), { name: "홍길동", loc: "SR3", part: "공정파트", badLoc: null });
-  assert.deepEqual(parseRosterLine("김철수\t s1l \t 소자파트 ", L), { name: "김철수", loc: "S1L", part: "소자파트", badLoc: null });
-  assert.deepEqual(parseRosterLine("이영희", L), { name: "이영희", loc: null, part: null, badLoc: null });
-  assert.deepEqual(parseRosterLine("박민수,,공정파트", L), { name: "박민수", loc: null, part: "공정파트", badLoc: null });
-  assert.equal(parseRosterLine("오타,SR33,가파트", L).badLoc, "SR33");
-  assert.equal(parseRosterLine("칸이 밀림,공정파트", L).badLoc, "공정파트", "근무지 칸에 파트를 쓰면 알려 준다");
+test("명단 입력 한 줄: 이름, 파트, 아이디(쉼표나 탭). 아이디에 회사 메일 도메인을 붙이고, 잘못된 아이디는 알려 준다", () => {
+  const D = "corp.example";
+  assert.deepEqual(parseRosterLine("홍길동, 공정파트, Gildong.Hong", D), { name: "홍길동", part: "공정파트", email: "gildong.hong@corp.example", bad: null });
+  assert.deepEqual(parseRosterLine("김철수\t소자파트\tcs.kim", D), { name: "김철수", part: "소자파트", email: "cs.kim@corp.example", bad: null }, "엑셀에서 붙여 넣은 탭 구분");
+  assert.deepEqual(parseRosterLine("이영희,,yh_lee1", D), { name: "이영희", part: null, email: "yh_lee1@corp.example", bad: null }, "파트는 비울 수 있다");
+  assert.deepEqual(parseRosterLine("박민수,소자파트", D), { name: "박민수", part: "소자파트", email: null, bad: null }, "아이디가 없으면 초대 코드로만 가입");
+  assert.deepEqual(parseRosterLine("최지우,공정파트,jw@other.example", D).email, "jw@other.example", "전체 주소를 적으면 그대로");
+  // 예전 형식("이름,근무지,파트")이나 한글·공백이 든 아이디는 받지 않는다
+  assert.equal(parseRosterLine("가나,SR3,가파트", D).bad, "가파트");
+  assert.equal(parseRosterLine("가나,가파트,ga na", D).bad, "ga na");
+  assert.equal(parseRosterLine("가나,가파트,@", D).bad, "@");
+  assert.equal(parseRosterLine("가나,가파트,ga@na", D).bad, "ga@na", "도메인에 점이 없는 주소");
 });
 
 test("프로필 문항: 6개, 고르기는 보기 중 하나만, 직접 쓰기는 최소 글자 수", () => {
@@ -559,7 +564,7 @@ test("완료 알림은 알림 문서와 완료 표시 둘 다 본다(어느 한�
   assert.equal(unresolvedSlots(rows, { onlyReported: true }).length, 1);
 });
 
-test("추첨: 현장에서 정한 숫자와 응모권만으로 결과가 정해지고, 누구나 다시 계산해 검증할 수 있다", () => {
+test("사이트 추첨(6등): 현장 숫자와 응모권만으로 결과가 정해지고, 누구나 다시 계산해 검증할 수 있다", () => {
   const tickets = Object.fromEntries(pids.slice(0, 20).map((pid, i) => [pid, (i % 4) + 1]));
   tickets.zero = 0;
   const step = { key: "t4", count: 5 };
@@ -568,34 +573,94 @@ test("추첨: 현장에서 정한 숫자와 응모권만으로 결과가 정해�
   assert.notDeepEqual(a, seededDraw(tickets, step, "4822"), "숫자가 다르면 결과가 다르다");
   assert.ok(!a.includes("zero"), "0장은 뽑히지 않는다");
 
-  const draws = drawAll(tickets, " 4821 ");
-  assert.deepEqual(Object.keys(draws), DRAW_ORDER.map((x) => x.key), "1등 → 2등 → 4등 → 5등 → 6등 순서로 모두 정한다");
-  assert.ok(Object.values(draws).every((d) => d.seed === "4821"), "숫자는 앞뒤 공백을 빼고 저장");
-  assert.deepEqual(verifyDraws(tickets, draws).map((x) => x.ok), DRAW_ORDER.map(() => true));
-  // 당첨자를 바꿔 저장했거나, 응모권 수를 바꿨으면 검증에서 드러난다
-  const other = Object.keys(tickets).find((p) => p !== draws.grand.winners[0] && tickets[p] > 0);
-  const forged = { ...draws, grand: { seed: "4821", winners: [other] } };
-  assert.equal(verifyDraws(tickets, forged).find((x) => x.key === "grand").ok, false);
-  assert.equal(verifyDraws({ ...tickets, [draws.grand.winners[0]]: 0 }, draws).find((x) => x.key === "grand").ok, false);
-  // 한 번에 뽑은 결과가 아니면(칸이 빠졌거나 숫자가 칸마다 다르면) 검증에 통과하지 못한다
-  const { t6, ...partial } = draws;
-  assert.ok(verifyDraws(tickets, partial).every((x) => x.ok === false));
-  assert.ok(verifyDraws(tickets, { ...draws, t6: { ...t6, seed: "1" } }).every((x) => x.ok === false));
-  assert.deepEqual(verifyDraws(tickets, {}), []);
+  // 6등: 1~5등을 받은 사람을 빼고 뽑는다
+  const all = Object.fromEntries(pids.map((pid, i) => [pid, (i % 16) + 1]));
+  const draws = { seed: " 2026 ", grand: { winners: [pids[3]] }, t4: { winners: pids.slice(10, 14) }, t5: { winners: pids.slice(20, 27) } };
+  const res = resolvePrizes({ tickets: all, draws });
+  assert.equal(res.seed, "2026", "숫자는 앞뒤 공백을 빼고 쓴다");
+  assert.equal(res.t6, null, "6등은 뽑기 전");
+  const t6 = drawOnline(all, res.seed, res.taken);
+  assert.equal(t6.length, ONLINE_PRIZE.count);
+  assert.ok(t6.every((pid) => !res.taken.has(pid)), "1~5등 수상자는 6등에 뽑히지 않는다");
+  const saved = { ...draws, t6: { winners: t6 } };
+  assert.equal(verifyOnline({ tickets: all, draws: saved }).ok, true);
+  // 당첨자를 바꿔 저장했거나, 응모권 수·종이 추첨 이름을 바꿨으면 검증에서 드러난다
+  const other = pids.find((pid) => !t6.includes(pid) && !res.taken.has(pid));
+  assert.equal(verifyOnline({ tickets: all, draws: { ...saved, t6: { winners: [other, ...t6.slice(1)] } } }).ok, false);
+  assert.equal(verifyOnline({ tickets: { ...all, [t6[0]]: 0 }, draws: saved }).ok, false);
+  assert.equal(verifyOnline({ tickets: all, draws: { ...saved, seed: "2027" } }).ok, false);
+  assert.equal(verifyOnline({ tickets: all, draws }), null, "아직 안 뽑았으면 검증할 것이 없다");
 });
 
-test("추첨: 큰 상부터 정하고 한 사람은 하나만. 2등은 1등을 뺀 응모권 최다 순, 동점은 숫자로 가른다", () => {
-  // 54명: 응모권 1~16장
+test("시상: 한 사람은 하나만. 2등은 응모권 최다, 3등은 2등 수상자를 뺀 공감 1위, 4·5등은 종이로 뽑힌 이름", () => {
+  // 54명: 응모권 1~16장 (p016·p032·p048이 16장, p015·p031·p047이 15장)
   const tickets = Object.fromEntries(pids.map((pid, i) => [pid, (i % 16) + 1]));
-  const d = drawAll(tickets, "2026");
-  const all = DRAW_ORDER.flatMap((x) => d[x.key].winners);
-  assert.equal(new Set(all).size, all.length, "1·2·4·5·6등끼리 중복 당첨 없음");
-  assert.deepEqual(DRAW_ORDER.map((x) => d[x.key].winners.length), DRAW_ORDER.map((x) => x.count), "응모권 있는 사람이 충분하면 정해진 인원만큼");
-  // 2등: 1등 당첨자를 뺀 사람 중 응모권이 가장 많은 순
-  const first = d.grand.winners[0];
-  const rest = Object.entries(tickets).filter(([pid]) => pid !== first).map(([, n]) => n).sort((a, b) => b - a);
-  assert.deepEqual(d.best.winners.map((pid) => tickets[pid]), rest.slice(0, 3));
-  // 1등이 응모권 최다인 사람이면 그 사람은 2등에서 빠지고 다음 사람이 올라온다
+  const top3 = [pids[15], pids[31], pids[47]];
+  const reviews = [{ code: "A", review: "가", receiverPid: pids[15], likes: 9 }, { code: "B", review: "나", receiverPid: pids[1], likes: 5 }, { code: "C", review: "다", receiverPid: pids[2], likes: 3 }];
+  // 숫자를 넣기 전에는 2·3등이 정해지지 않는다
+  const none = resolvePrizes({ tickets, reviews, draws: {} });
+  assert.deepEqual([none.seed, none.best, none.review], [null, [], null]);
+  // 숫자를 넣으면 2등(응모권 최다 3명)과 3등(2등 수상자를 뺀 공감 1위)이 정해진다
+  const a = resolvePrizes({ tickets, reviews, draws: { seed: "7" } });
+  assert.deepEqual([...a.best].sort(), [...top3].sort());
+  assert.equal(a.review.receiverPid, pids[1], "공감 1위(p016)는 2등 수상자라 다음 순위가 3등");
+  assert.deepEqual(a.open, { grand: 1, t4: PRIZES.tiers[0].count, t5: PRIZES.tiers[1].count });
+  // 종이로 뽑힌 이름: 응모권이 없는 사람·중복·이미 받은 사람은 들어가지 않는다(다시 뽑아야 한다)
+  const t4 = [pids[5], pids[5], "nobody", top3[0], pids[6], pids[7], pids[8]];
+  const b = resolvePrizes({ tickets: { ...tickets, zero: 0 }, reviews, draws: { seed: "7", t4: { winners: [...t4, "zero"] }, t5: { winners: [pids[5], pids[9]] } } });
+  assert.deepEqual(b.t4, [pids[5], pids[6], pids[7], pids[8]]);
+  assert.deepEqual(b.dropped.t4, [top3[0]], "2등 수상자가 종이로 뽑히면 빠진다");
+  assert.deepEqual(b.t5, [pids[9]], "4등을 받은 사람은 5등에 들어가지 않는다");
+  assert.equal(b.open.t4, 0);
+  assert.equal(b.open.t5, PRIZES.tiers[1].count - 1);
+  const winners = [...b.grand, ...b.best, b.review.receiverPid, ...b.t4, ...b.t5];
+  assert.equal(new Set(winners).size, winners.length, "상이 겹치는 사람 없음");
+  assert.deepEqual([...b.taken].sort(), [...winners].sort());
+  // 응모권 있는 사람이 모자라면 더 뽑을 자리도 그만큼만
+  const few = resolvePrizes({ tickets: { a: 3, b: 2, c: 1, d: 1, zero: 0 }, draws: { seed: "5" } });
+  assert.deepEqual([few.best.length, few.open.t4, few.open.t5], [3, 1, 1]);
+});
+
+test("시상: 1등은 겹쳐도 뽑고, 겹친 자리는 다시 채운다(2등은 다음 순위, 3등은 다음 후기, 4·5등은 다시 뽑기)", () => {
+  const tickets = Object.fromEntries(pids.map((pid, i) => [pid, (i % 16) + 1]));
+  const top3 = [pids[15], pids[31], pids[47]], next3 = [pids[14], pids[30], pids[46]]; // 16장 3명, 15장 3명
+  const reviews = [{ code: "A", review: "가", receiverPid: pids[1], likes: 9 }, { code: "B", review: "나", receiverPid: pids[2], likes: 5 }, { code: "C", review: "다", receiverPid: pids[3], likes: 3 }];
+  const paper = { t4: { winners: [pids[5], pids[6], pids[7], pids[8]] }, t5: { winners: pids.slice(20, 27) } };
+  const view = (draws, withGrand = true) => resolvePrizes({ tickets, reviews, draws: { seed: "7", ...paper, ...draws }, withGrand });
+  // ① 1등이 아무 상도 없던 사람: 그대로
+  const plain = view({ grand: { winners: [pids[40]] } });
+  assert.deepEqual([plain.grand, [...plain.best].sort(), plain.review.receiverPid, plain.t4, plain.open.t4], [[pids[40]], [...top3].sort(), pids[1], paper.t4.winners, 0]);
+  // ② 1등이 2등 수상자: 1등만 받고, 2등은 다음 순위(15장 중 한 명)가 받는다
+  const g2 = view({ grand: { winners: [top3[0]] } });
+  assert.ok(!g2.best.includes(top3[0]) && g2.best.length === 3);
+  assert.ok(next3.includes(g2.best.find((pid) => !top3.includes(pid))), "다음 순위는 응모권 15장인 사람");
+  // 1등을 뽑기 전 모습(발표 순서상 앞 장면)은 그대로 볼 수 있다
+  assert.deepEqual([...view({ grand: { winners: [top3[0]] } }, false).best].sort(), [...top3].sort());
+  assert.deepEqual(view({ grand: { winners: [top3[0]] } }, false).grand, []);
+  // ③ 1등이 3등 수상자: 다음으로 공감이 많은 후기가 3등
+  assert.equal(view({ grand: { winners: [pids[1]] } }).review.receiverPid, pids[2]);
+  // ④ 1등이 4등 수상자: 4등 한 자리가 비고(다시 뽑아야 함), 새로 뽑은 이름이 들어간다
+  const g4 = view({ grand: { winners: [pids[5]] } });
+  assert.deepEqual([g4.t4, g4.dropped.t4, g4.open.t4], [[pids[6], pids[7], pids[8]], [pids[5]], 1]);
+  const refilled = view({ grand: { winners: [pids[5]] }, t4: { winners: [...paper.t4.winners, pids[41]] } });
+  assert.deepEqual([refilled.t4, refilled.open.t4], [[pids[6], pids[7], pids[8], pids[41]], 0]);
+  assert.deepEqual(view({ grand: { winners: [pids[5]] }, t4: { winners: [...paper.t4.winners, pids[41]] } }, false).t4, paper.t4.winners, "1등을 뽑기 전 모습에는 다시 뽑은 이름이 없다");
+  // ⑤ 2등 다음 순위가 이미 5등으로 뽑힌 사람이면: 더 큰 상(2등)으로 올라가고 5등 자리를 다시 뽑는다
+  const paper5 = { t5: { winners: [...next3, pids[20], pids[21], pids[22], pids[23]] } };
+  const before = view(paper5);
+  assert.deepEqual(before.t5, paper5.t5.winners);
+  const after = view({ ...paper5, grand: { winners: [top3[0]] } });
+  const promoted = after.best.find((pid) => !top3.includes(pid));
+  assert.ok(next3.includes(promoted));
+  assert.ok(!after.t5.includes(promoted) && after.dropped.t5.includes(promoted) && after.open.t5 === 1, "올라간 사람의 5등 자리는 다시 뽑는다");
+  // 어느 경우에도 상이 겹치는 사람은 없다
+  for (const r of [plain, g2, g4, refilled, after]) {
+    const all = [...r.grand, ...r.best, r.review?.receiverPid, ...r.t4, ...r.t5].filter(Boolean);
+    assert.equal(new Set(all).size, all.length);
+  }
+});
+
+test("2등: 응모권이 많은 순, 1등을 받은 사람은 빠지고 다음 사람이 올라온다. 경계에서 동점이면 숫자로 가른다", () => {
   const t = { a: 10, b: 9, c: 8, d: 7, e: 1 };
   assert.deepEqual(seededTop(t, { key: "best", count: 3 }, "1", new Set(["a"])), ["b", "c", "d"]);
   assert.deepEqual(seededTop(t, { key: "best", count: 3 }, "1"), ["a", "b", "c"]);
@@ -609,26 +674,34 @@ test("추첨: 큰 상부터 정하고 한 사람은 하나만. 2등은 1등을 �
     w.slice(1).forEach((pid) => picks.add(pid));
   }
   assert.deepEqual([...picks].sort(), ["b", "c", "d", "e"], "동점자는 누구나 뽑힐 수 있다");
-  // 응모권 있는 사람이 모자라면 큰 상부터 채우고 남는 순서는 당첨자 없음
-  const few = drawAll({ a: 3, b: 2, c: 1, zero: 0 }, "5");
-  assert.equal(few.grand.winners.length, 1);
-  assert.equal(few.best.winners.length, 2);
-  assert.deepEqual([few.t4.winners, few.t5.winners, few.t6.winners], [[], [], []]);
 });
 
-test("추첨: 큰 상부터 정하면 응모권이 많을수록 더 큰 상을 받는다(작은 상에 먼저 뽑혀 큰 상을 놓치지 않는다)", () => {
-  const tickets = Object.fromEntries(pids.map((pid, i) => [pid, i < 8 ? 16 : i < 30 ? 8 : 2])); // 16장 8명, 8장 22명, 2장 24명
-  const hit = { 16: { t4: 0, any: 0 }, 8: { t4: 0, any: 0 }, 2: { t4: 0, any: 0 } };
-  const N = 400;
-  for (let i = 0; i < N; i++) {
-    const d = drawAll(tickets, `s${i}`);
-    for (const pid of d.t4.winners) hit[tickets[pid]].t4++;
-    for (const x of DRAW_ORDER) for (const pid of d[x.key].winners) hit[tickets[pid]].any++;
-  }
-  const per = (n, k, members) => hit[n][k] / N / members;
-  assert.ok(per(16, "any", 8) > per(8, "any", 22) && per(8, "any", 22) > per(2, "any", 24), "응모권이 많을수록 뭐라도 받을 확률이 높다");
-  assert.ok(per(8, "t4", 22) > per(2, "t4", 24) * 2, "4등(큰 추첨 상)도 응모권이 많은 쪽이 더 자주");
-  assert.ok(per(16, "any", 8) > 0.95, "응모권 최다 그룹은 거의 항상 받는다");
+test("비용 카드: 돈이 드는 카드 미션을 대상이 카드와 같다고 확인하면 +1장, 여러 번 해도 한 번만", () => {
+  const costCards = Object.entries(MISSION_CARDS).flatMap(([level, cards]) => cards.filter((c) => c.cost).map((c) => ({ cardId: c.id, level, text: c.text })));
+  const freeHard = MISSION_CARDS.hard.find((c) => !c.cost);
+  assert.ok(costCards.length >= 2 && freeHard);
+  const [c1, c2] = costCards;
+  const base = {
+    people: [{ pid: "A" }, { pid: "B" }], assignments: { A: "B", B: "A" },
+    giverCodes: { A: { 1: "A1", 2: "A2", 3: "A3" }, B: { 1: "B1", 2: "B2", 3: "B3" } }, guesses: {}, deliveries: [],
+  };
+  const run = (choices, reds) => computeTickets({ ...base, redemptions: reds, missions: { A: { choices, done: { 1: true, 2: true } } } }).A;
+  const red = (slot, cardMatch) => ({ receiverPid: "B", slot, voided: false, ...(cardMatch === undefined ? {} : { cardMatch }) });
+  assert.equal(cardCost(c1), true);
+  assert.equal(cardCost({ cardId: freeHard.id, level: "hard", text: freeHard.text }), false);
+  assert.equal(cardCost({ ...c1, text: "다른 글" }), false, "카드 목록과 다르면 인정하지 않는다");
+  // 한 번 하면 +1
+  assert.equal(run({ 1: c1 }, { A1: red(1, true) }).cost, TICKET_RULES.costBonus);
+  // 두 번 해도 +1
+  const twice = run({ 1: c1, 2: c2 }, { A1: red(1, true), A2: red(2, true) });
+  assert.equal(twice.cost, TICKET_RULES.costBonus);
+  assert.equal(twice.total, twice.mission + twice.card + twice.cost + twice.entries + twice.comp + twice.hidden + twice.guess + twice.partBonus + twice.angel);
+  // 대상이 "카드와 달라요"로 인증했거나 카드를 확인하지 않았으면 없다. 돈이 안 드는 카드도 없다
+  assert.equal(run({ 1: c1 }, { A1: red(1, false) }).cost, 0);
+  assert.equal(run({ 1: c1 }, { A1: red(1) }).cost, 0);
+  assert.equal(run({ 1: { cardId: freeHard.id, level: "hard", text: freeHard.text } }, { A1: red(1, true) }).cost, 0);
+  // 대상의 인증 없이 운영자 확인으로 인정된 미션에도 없다
+  assert.equal(computeTickets({ ...base, redemptions: {}, missions: { A: { choices: { 1: c1 }, done: { 1: true } } }, deliveries: [{ receiverPid: "B", slot: 1, kind: "mission" }], verdicts: { B_1: "received" } }).A.cost, 0);
 });
 
 test("3주차 칭찬 카드는 사이트가 전달하므로 받는 사람이 인증하지 않아도 마니또의 미션으로 인정한다", () => {
@@ -709,12 +782,26 @@ test("2등 동점: 응모권이 같으면 내 미션 후기가 받은 공감이 
     third.add(w[2]);
   }
   assert.deepEqual([...third].sort(), [pids[3], pids[4], pids[5]].sort());
-  // 한 번에 추첨과 검증에도 같은 기준이 들어간다(기준이 다르면 검증에 통과하지 못한다)
-  const d = drawAll(tickets, "2026", DRAW_ORDER, tb);
-  const rest = [pids[7], pids[20], pids[33], pids[40]].filter((pid) => pid !== d.grand.winners[0]).slice(0, 3);
-  assert.deepEqual(d.best.winners, rest, "1등 당첨자를 뺀 공감 순");
-  assert.ok(verifyDraws(tickets, d, DRAW_ORDER, tb).every((x) => x.ok));
-  assert.equal(verifyDraws(tickets, d, DRAW_ORDER, {}).find((x) => x.key === "best").ok, false);
+  // 시상에도 같은 기준이 들어간다: 1등을 받은 사람을 뺀 공감 순
+  const res = resolvePrizes({ tickets, tieBreak: tb, draws: { seed: "2026", grand: { winners: [pids[7]] } } });
+  assert.deepEqual(res.best, [pids[20], pids[33], pids[40]]);
+  assert.deepEqual(resolvePrizes({ tickets, tieBreak: tb, draws: { seed: "2026", grand: { winners: [pids[7]] } }, withGrand: false }).best, [pids[7], pids[20], pids[33]]);
+});
+
+test("3등 후보 순서: 공감 많은 순으로 저장해 두고, 1위가 더 큰 상을 받으면 다음 순위가 받는다", () => {
+  const at = (seconds) => [seconds, 0];
+  const rows = [
+    { code: "C", receiverPid: "c", giverPid: "x", review: "셋", likes: 2, at: at(30) },
+    { code: "A", receiverPid: "a", giverPid: "x", review: "하나", likes: 5, at: at(10) },
+    { code: "B", receiverPid: "b", giverPid: "x", review: "둘", likes: 5, at: at(20) },
+    { code: "Z", receiverPid: "z", giverPid: "x", review: "공감 없음", likes: 0, at: at(1) },
+    { code: "D", receiverPid: "d", giverPid: "x", review: "수상 제외", likes: 9, at: at(5) },
+  ];
+  const rank = rankReviews(rows, new Set(["d"]));
+  assert.deepEqual(rank.map((x) => x.code), ["A", "B", "C"], "공감 순, 동점이면 먼저 쓴 후기, 공감 0과 수상 대상이 아닌 사람은 뺀다");
+  assert.deepEqual(Object.keys(rank[0]).sort(), ["code", "likes", "receiverPid", "review"]);
+  assert.deepEqual(pickBestReview(rows, new Set(["d"])), rank[0]);
+  assert.equal(rankReviews(rows, new Set(), 2).length, 2);
 });
 
 // ── 수호천사 자동 연결 ─────────────────────────────────────────────────────────
@@ -783,13 +870,15 @@ test("수호천사 연결: 먼저 지원한 순서대로, 본인·그 사람의 
     ["1F:own", "2E:own", "3A:waiting", "4B:linked", "5C:waiting"]);
 });
 
-test("보안 규칙의 추첨 칸 이름이 상품 설정(DRAW_ORDER)과 같고, 카드 번호가 규칙의 난이도 표기와 맞는다", () => {
+test("보안 규칙의 추첨 칸 이름이 상품 설정과 같고, 카드 번호가 규칙의 난이도 표기와 맞는다", () => {
   const rules = readFileSync(new URL("../firestore.rules", import.meta.url), "utf8");
-  const m = rules.match(/d\.keys\(\)\.hasOnly\(\[([^\]]+)\]\) && d\.keys\(\)\.hasAll\(\[([^\]]+)\]\)/);
+  const m = rules.match(/function drawsShapeOk\(d\) \{\s*return d\.keys\(\)\.hasOnly\(\[([^\]]+)\]\)/);
   assert.ok(m, "규칙에서 추첨 칸 목록을 찾지 못함");
   const keys = (t) => t.split(",").map((x) => x.trim().replace(/'/g, "")).sort();
-  assert.deepEqual(keys(m[1]), DRAW_ORDER.map((x) => x.key).sort(), "prizes.js의 추첨 key를 바꾸면 firestore.rules의 drawsShapeOk도 같이 고친다");
-  assert.deepEqual(keys(m[2]), DRAW_ORDER.map((x) => x.key).sort());
+  // 저장하는 칸: 현장 숫자(seed), 종이로 뽑는 상(1·4·5등), 사이트가 뽑는 상(6등). 2·3등은 저장하지 않는다(계산한다)
+  const stored = ["seed", PRIZES.grand.key, ...PAPER_TIERS.map((t) => t.key), ONLINE_PRIZE.key].sort();
+  assert.deepEqual(keys(m[1]), stored, "prizes.js의 key나 정하는 방법(how)을 바꾸면 firestore.rules의 drawsShapeOk도 같이 고친다");
+  assert.deepEqual(PRIZE_ORDER.map((x) => x.how), ["paper", "rank", "review", "paper", "paper", "online"]);
   // 카드 번호: 규칙은 e·n·h + 숫자 1~2자리로 난이도를 본다
   const prefix = { easy: "e", normal: "n", hard: "h" };
   for (const [level, cards] of Object.entries(MISSION_CARDS)) {
@@ -892,11 +981,14 @@ test("발표 화면: 짝은 원을 따라 잇고(공개된 마니또가 다음 �
   const slides = buildSlides(r, (x) => x);
   assert.equal(slides.filter((x) => x.type === "pairAsk").length, 5);
   assert.equal(slides.filter((x) => x.type === "pairShow").length, 5);
-  // 추첨은 숫자 넣는 장면 하나, 발표는 6등 → 5등 → 4등 → 3등(후기상) → 2등(3명, 응모권 적은 순부터) → 1등
+  // 시상: 숫자 정하기 → 2등(3명, 한 명씩) → 3등(후기상) → 4등 → 5등(종이) → 1등(종이) → 겹친 자리 다시 채우기 → 6등(사이트)
   const tail = slides.slice(slides.findIndex((x) => x.type === "drawGo")).map((x) => x.id);
-  assert.deepEqual(tail, ["drawGo", "draw_t6", "draw_t5", "draw_t4", "bestReview", "best2", "best1", "best0", "draw_grand", "end"]);
-  // 장면 수는 추첨 전후가 같다(step이 장면 번호라서)
-  assert.equal(buildSlides({ ...r, draws: { best: { seed: "1", winners: ["A"] } } }, (x) => x).length, slides.length);
+  assert.deepEqual(tail, ["drawGo", "best2", "best1", "best0", "bestReview", "draw_t4", "draw_t5", "draw_grand", "refill", "draw_t6", "end"]);
+  // 장면 수는 시상 전후가 같다(step이 장면 번호라서)
+  assert.equal(buildSlides({ ...r, draws: { seed: "1", grand: { winners: ["A"] }, t6: { winners: ["B"] } } }, (x) => x).length, slides.length);
+  // 공감을 받은 후기가 없으면 3등 장면이 없다
+  assert.ok(!buildSlides({ ...r, bestReview: null }, (x) => x).some((x) => x.id === "bestReview"));
+  assert.ok(buildSlides({ ...r, bestReview: null, reviewRank: [{ code: "A" }] }, (x) => x).some((x) => x.id === "bestReview"));
   assert.equal(slides[0].type, "intro");
   assert.equal(slides.at(-1).type, "end");
   // 참여자 화면: 넘긴 장면까지만, step이 없는 예전 결과는 모두

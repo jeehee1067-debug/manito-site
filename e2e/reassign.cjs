@@ -13,7 +13,7 @@ const H = require("./helpers.cjs");
   const PEOPLE = [["가나", "가파트"], ["다라", "나파트"], ["마바", "다파트"], ["사아", "라파트"]]; // 파트를 모두 다르게: 파트 단서로 마니또가 누구인지 확인
   const partOf = Object.fromEntries(PEOPLE);
   const admin = await mk("운영자");
-  const inv = await H.setupAdmin(admin, PEOPLE.map(([n, part]) => `${n},SR3,${part}`));
+  const inv = await H.setupAdmin(admin, PEOPLE.map(([n, part]) => `${n},${part}`));
   const u = {}, ans = {};
   for (const [i, [name]] of PEOPLE.entries()) {
     const p = await mk(name); u[name] = p;

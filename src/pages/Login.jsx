@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { doc, setDoc } from "firebase/firestore";
 import { auth, db } from "../firebase.js";
-import { login, signup, claimWithInvite, resetPassword, validateEmail, validatePassword, authErrorMessage } from "../lib/account.js";
+import { login, signup, claimWithInvite, resetPassword, sendVerifyMail, toEmail, validateEmail, validatePassword, authErrorMessage } from "../lib/account.js";
+import { MAIL_DOMAIN } from "../lib/constants.js";
 import { Garland, Gifts, XMAS_LEADERS, XmasTree } from "../xmas.jsx";
 
 // 운영자 계정 만들기 버튼은 주소 끝에 ?setup을 붙였을 때만 보인다(참여자 화면에는 숨김).
@@ -40,11 +41,13 @@ export default function Login({ bootstrap = false }) {
       if (mode === "login") {
         await login(email, password, keep);
       } else if (mode === "signup") {
-        if (!invite.trim()) throw new Error("운영진에게 받은 초대 코드를 입력해 주세요.");
         const bad = validateEmail(email) || validatePassword(password);
         if (bad) throw new Error(bad);
         await signup(email, password, keep);
-        await claimWithInvite(invite);
+        // 회사 메일로 인증 메일을 보낸다. 다음 화면("연결 전")에서 인증을 확인하면 명단의 내 이름과 자동으로 연결된다.
+        // 메일이 안 오는 경우를 위해 초대 코드를 받은 사람은 여기서 바로 연결할 수도 있다(예비).
+        await sendVerifyMail().catch(() => {});
+        if (invite.trim()) await claimWithInvite(invite);
       } else if (mode === "reset") {
         const bad = validateEmail(email);
         if (bad) throw new Error(bad);
@@ -105,20 +108,18 @@ export default function Login({ bootstrap = false }) {
               : "운영자와 공동 운영자는 마니또에 참여하지 않는 계정이에요. 아직 운영자가 없으면 이 계정이 운영자가 되고, 이미 있으면 다음 화면에 나오는 계정 번호를 운영자에게 알려 주면 공동 운영자로 지정받아요."}
           </p>
         )}
-        {mode === "reset" && <p className="small">가입할 때 쓴 메일 주소를 적으면 비밀번호를 다시 정하는 링크를 보내 드려요.</p>}
+        {mode === "reset" && <p className="small">가입할 때 쓴 회사 메일 아이디를 적으면 그 메일로 비밀번호를 다시 정하는 링크를 보내 드려요.</p>}
 
         <form onSubmit={submit} className="stack">
-          {mode === "signup" && (
-            <label>
-              <span className="panel-label">초대 코드</span>
-              <input className="pk-input" value={invite} onChange={(e) => setInvite(e.target.value)} autoComplete="off" placeholder="운영진에게 받은 6자리" />
-            </label>
-          )}
           {!(mode === "bootstrap" && signedIn) && (
             <label>
-              <span className="panel-label">메일 주소</span>
-              <input className="pk-input" type="email" inputMode="email" value={email} onChange={(e) => setEmail(e.target.value)}
-                autoComplete="username" placeholder="자주 확인하는 메일 주소" />
+              <span className="panel-label">회사 메일 아이디</span>
+              <span className="id-field">
+                <input className="pk-input" type="text" inputMode="email" autoCapitalize="none" spellCheck={false} value={email} onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="username" placeholder="회사 메일 아이디" />
+                {!email.includes("@") && <span className="id-domain">@{MAIL_DOMAIN}</span>}
+              </span>
+              {mode === "signup" && <span className="small muted">@ 앞부분만 적어 주세요. {email.trim() ? `${toEmail(email)}로 인증 메일이 가요.` : "이 메일로 인증 메일이 가요."}</span>}
             </label>
           )}
           {needsPassword && (
@@ -134,10 +135,17 @@ export default function Login({ bootstrap = false }) {
               이 기기에서 로그인 유지 (내 휴대폰·내 PC일 때만 켜 주세요)
             </label>
           )}
+          {mode === "signup" && (
+            <label>
+              <span className="panel-label">초대 코드 (받은 사람만)</span>
+              <input className="pk-input" value={invite} onChange={(e) => setInvite(e.target.value)} autoComplete="off" placeholder="운영진에게 받은 6자리" />
+              <span className="small muted">인증 메일이 오지 않을 때 운영진이 주는 코드예요. 없으면 비워 두세요.</span>
+            </label>
+          )}
           {error && <p className="error" role="alert">{error}</p>}
           {notice && <p className="note" role="status">{notice}</p>}
           <button className="pk-btn main" disabled={busy}>
-            {{ login: "로그인", signup: "가입하고 내 이름 연결", reset: "재설정 메일 보내기", bootstrap: bootstrap ? "운영자로 시작하기" : "운영자 계정 만들기" }[mode]}
+            {{ login: "로그인", signup: "가입하기", reset: "재설정 메일 보내기", bootstrap: bootstrap ? "운영자로 시작하기" : "운영자 계정 만들기" }[mode]}
           </button>
         </form>
 
@@ -156,9 +164,9 @@ export default function Login({ bootstrap = false }) {
         </div>
       </section>
       {mode === "signup" && (
-        <p className="login-note">비밀번호를 잊으면 로그인 화면의 '비밀번호를 잊었어요'로<br />이 메일에서 다시 정할 수 있어요.</p>
+        <p className="login-note">가입하면 회사 메일로 인증 메일이 가요. 메일의 링크를 누르면 명단의 내 이름과 연결돼요.<br />사이트 비밀번호는 회사 비밀번호와 다르게 새로 정해 주세요.</p>
       )}
-      <p className="login-note">운영진은 비밀번호를 묻지 않아요. 초대 코드는 나만 쓰고 다른 사람에게 보여 주지 마세요.<br />여러 사람이 같이 쓰는 기기에서는 다 쓴 뒤 꼭 로그아웃해 주세요.</p>
+      <p className="login-note">운영진은 비밀번호를 묻지 않아요. 인증 메일의 링크와 초대 코드는 나만 쓰고 다른 사람에게 보여 주지 마세요.<br />여러 사람이 같이 쓰는 기기에서는 다 쓴 뒤 꼭 로그아웃해 주세요.</p>
     </main>
   );
 }
