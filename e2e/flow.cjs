@@ -240,6 +240,7 @@ const step = (s) => console.log("▶", s);
     assert.equal(await page.getByText("투표").count(), 0, "규칙 탭에 '투표' 글자 없음(투표는 없앰)");
     assert.equal(await page.getByText("팀").count(), 0, "규칙 탭에 '팀' 글자 없음");
     await panel(page, "단서와 최종 지목").getByText("마니또의 파트").waitFor();
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "규칙 탭: 휴대폰 폭에서 가로 스크롤 없음(표가 화면 밖으로 밀리지 않음)");
     await shot(page, "rules");
     await tab(page, "내 미션");
     // 내 응모권: 미션 3건이 모두 인증되기 전에는 "끝까지 해야 받는 응모권" 안내가 보인다
