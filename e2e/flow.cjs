@@ -441,7 +441,9 @@ const step = (s) => console.log("▶", s);
     // 공동 운영자 화면이 운영 화면으로 바뀌고, 짝 현황이 보인다
     await co.getByRole("button", { name: "지정됐는지 다시 확인" }).click(); // 연결 전 화면은 다시 확인을 눌러야(또는 다른 창에 갔다 오면) 바뀐다
     await co.locator("nav.tabs button", { hasText: "운영" }).waitFor();
-    assert.deepEqual(await co.locator("nav.tabs button").allInnerTexts(), ["규칙", "결과", "운영"], "운영자 메뉴(참여자 메뉴 없음)");
+    // 메뉴가 다 그려질 때까지 잠깐 기다린 뒤 확인한다(그려지는 도중에 읽어 한 번 실패한 적이 있다)
+    await co.waitForFunction(() => [...document.querySelectorAll("nav.tabs button")].map((b) => b.innerText.trim()).join("|") === "규칙|결과|운영", null, { timeout: 10000 }).catch(() => {});
+    assert.deepEqual((await co.locator("nav.tabs button").allInnerTexts()).map((t) => t.trim()), ["규칙", "결과", "운영"], "운영자 메뉴(참여자 메뉴 없음)");
     await panel(co, `짝 현황 (${N}쌍)`).waitFor();
     assert.equal(await co.locator(".hud-who").innerText(), "운영자");
     assert.equal((await getAs(await tokenOf("coadmin@example.com"), "assignments?pageSize=5")).ok, true);
