@@ -472,16 +472,16 @@ def hand_mask(src, box):
 
 
 SPECS = {
-    1: dict(name="rudolph", label="루돌프",
-            head=lambda L, s, p: antlers(L, 73, 2, 56, (73, 57)),
+    1: dict(name="beanie", label="털모자",
+            head=lambda L, s, p: beanie(L, Fit(p, 17, 27)),
             scarf=(73, 82, 46, RED, RED_D, WHT, -1),
             prop=lambda L: candy_cane(L, 15, 250, 320), hand=(3, 258, 28, 300)),
     2: dict(name="elf", label="엘프",
             head=lambda L, s, p: elf_hat(L, Fit(p, 12, 21)),
             scarf=(75, 82, 46, RED, RED_D, GRN, 1),
             prop=lambda L: gift_box(L, 2, 297, 28, 318), hand=(3, 258, 28, 300)),
-    3: dict(name="beanie", label="털모자",
-            head=lambda L, s, p: beanie(L, Fit(p, 18, 28)),
+    3: dict(name="rudolph", label="루돌프",
+            head=lambda L, s, p: antlers(L, 73, 2, 60, (73, 58)),
             scarf=(72, 86, 52, GRN, GRN_D, WHT, 1),
             prop=lambda L: cocoa_mug(L, -14, 276, 2, 296), hand=(0, 256, 24, 302)),
     4: dict(name="santa", label="산타",
