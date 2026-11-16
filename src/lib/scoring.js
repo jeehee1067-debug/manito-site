@@ -1,5 +1,14 @@
 import { PRIZES, TICKET_RULES as R } from "../config/prizes.js";
 import { secureRandom, seededRandom } from "./random.js";
+import { MISSION_CARDS } from "./constants.js";
+
+// 카드 목록(번호 → 난이도·글). 고른 카드(choice)의 번호·난이도·글이 목록과 모두 같을 때만 그 난이도를 인정한다.
+// 저장된 난이도를 그대로 믿으면, 쉬운 카드를 "도전"이라고 적어 추가 응모권을 받을 수 있다(보안 규칙은 번호와 난이도가 맞는지만 본다).
+const CARD_BY_ID = Object.fromEntries(Object.entries(MISSION_CARDS).flatMap(([level, cards]) => cards.map((c) => [c.id, { level, text: c.text }])));
+export function cardLevel(choice) {
+  const c = choice && CARD_BY_ID[choice.cardId];
+  return c && c.level === choice.level && c.text === choice.text ? c.level : null;
+}
 
 /**
  * 응모권 계산
@@ -10,8 +19,10 @@ import { secureRandom, seededRandom } from "./random.js";
  * assignments: { giverPid: receiverPid }
  * giverCodes: { giverPid: { 1: code, 2: code, 3: code } }
  * redemptions: { code: { receiverPid, slot, voided, cardMatch } }
- *   cardMatch = false: 받는 사람이 "받은 것이 마니또가 고른 카드와 달라요"로 인증함 → 카드 추가분 없음
- * missions: { giverPid: { choices: { slot: { level } } } }
+ *   cardMatch = true: 받는 사람이 마니또가 고른 카드를 보고 "받은 것이 이 카드와 같아요"라고 함 → 카드 추가분이 붙는다.
+ *   false("달라요")이거나 값이 없으면(완료 알림보다 먼저 인증해서 카드를 못 봤고, 나중에도 확인하지 않음) 카드 추가분이 없다.
+ * missions: { giverPid: { choices: { slot: { cardId, level, text } }, done: { slot: true } } }
+ *   카드 추가분의 난이도는 cardLevel로 정한다(번호·난이도·글이 카드 목록과 같을 때만). 완료 표시는 정확히 true일 때만 센다.
  * guesses: { receiverPid: guessPid }
  * deliveries: [{ receiverPid, slot, kind, hidden }]  마니또가 "완료 알리기"(또는 쪽지 더 보내기)를 누를 때마다 1건
  *   kind = "praise"(3주차 칭찬 카드)이고 운영자가 가리지 않은(hidden 아님) 것은 사이트가 직접 전달한 것이라 인증 없이도 인정한다(아래 ②)
@@ -52,7 +63,7 @@ export function computeTickets({ people, assignments, giverCodes, redemptions, m
   const delivered = new Set(deliveries.map((d) => `${d.receiverPid}:${d.slot}`));
   const autoPraise = new Set(deliveries.filter((d) => d.kind === "praise" && !d.hidden).map((d) => `${d.receiverPid}:${d.slot}`));
   for (const [giver, receiver] of Object.entries(assignments)) {
-    for (const [slot, on] of Object.entries(missions[giver]?.done || {})) if (on) delivered.add(`${receiver}:${slot}`);
+    for (const [slot, on] of Object.entries(missions[giver]?.done || {})) if (on === true) delivered.add(`${receiver}:${slot}`);
   }
   const cluesOk = (giver) => !R.hiddenNeedsClues || cluesDone == null || cluesDone.has(giver);
   const verdictOf = (receiver, slot) => verdicts[`${receiver}_${slot}`] || null;
@@ -75,8 +86,8 @@ export function computeTickets({ people, assignments, giverCodes, redemptions, m
       if (!byReceiver && !byConfirm) continue;
       redeemed++;
       if (byConfirm) assumed++;
-      // 카드 추가분(보통·도전)은 받는 사람이 직접 인증했고, 받은 것이 고른 카드와 같다고 한 미션만
-      else if (redemptions[code].cardMatch !== false) card += R.cardBonus[missions[giver]?.choices?.[slot]?.level] || 0;
+      // 카드 추가분(보통·도전)은 받는 사람이 직접 인증했고, 카드를 보고 받은 것과 같다고 한 미션만. 난이도는 카드 목록으로 확인한다
+      else if (redemptions[code].cardMatch === true) card += R.cardBonus[cardLevel(missions[giver]?.choices?.[slot])] || 0;
     }
     credited[giver] = redeemed;
     redeemed = Math.min(redeemed, R.maxMissions);
@@ -283,8 +294,10 @@ export function verifyDraws(tickets, draws, order = DRAW_ORDER, tieBreak = {}) {
  */
 export function reviewLikes({ redemptions = {}, feed = {}, giverOfCode = {}, ownLikes = new Set() }) {
   const when = (t) => (t && typeof t.seconds === "number" ? [t.seconds, t.nanoseconds || 0] : [Infinity, 0]);
+  const seen = new Set(); // 피드 글 하나는 한 번만 센다(보안 규칙도 두 인증이 글 하나를 같이 가리키지 못하게 한다)
   return Object.entries(redemptions)
-    .filter(([, r]) => !r.voided && r.feedId && feed[r.feedId] && !feed[r.feedId].voided && !feed[r.feedId].hidden)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .filter(([, r]) => !r.voided && r.feedId && feed[r.feedId] && !feed[r.feedId].voided && !feed[r.feedId].hidden && !seen.has(r.feedId) && seen.add(r.feedId))
     .map(([code, r]) => {
       const giverPid = giverOfCode[code] || null;
       const own = [r.receiverPid, giverPid].filter((pid) => pid && ownLikes.has(`${r.feedId}_${pid}`)).length;

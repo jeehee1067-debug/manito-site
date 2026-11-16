@@ -49,7 +49,7 @@ export default function Rules() {
         <table className="rules-table">
           <tbody>
             <tr><th rowSpan={3}>마니또로서</th><td>내 미션이 인증될 때마다</td><td className="num">{R.perRedeemedMission}장 (최대 {R.maxMissions})</td></tr>
-            <tr><td>고른 카드가 보통이나 도전이고 대상이 직접 인증하면 추가로(대상이 "받은 것이 카드와 달라요"로 인증하면 없음)</td><td className="num">보통 +{R.cardBonus.normal}장, 도전 +{R.cardBonus.hard}장 (합계 최대 {R.maxCardBonus})</td></tr>
+            <tr><td>고른 카드가 보통이나 도전이고, 대상이 인증하면서 받은 것이 그 카드와 같다고 확인하면 추가로(대상이 "카드와 달라요"라고 하면 없음)</td><td className="num">보통 +{R.cardBonus.normal}장, 도전 +{R.cardBonus.hard}장 (합계 최대 {R.maxCardBonus})</td></tr>
             <tr><td>끝까지 안 들키면(대상이 나를 지목하지 못함). {allMissions ? `내 미션 ${R.maxMissions}건이 모두 인증되고` : `내 미션이 ${R.hiddenMinMissions}건 이상 인증되고`}{R.hiddenNeedsClues ? ", 프로필을 다 채워 단서 6개가 대상에게 간 경우만" : " 경우만"}</td><td className="num">{R.hidden}장</td></tr>
             <tr><th rowSpan={2}>받는 사람으로서</th><td>받은 미션을 인증할 때마다(코드 + 후기 {REVIEW_MIN}자 이상). 수호천사가 보낸 것을 "받았어요"로 확인한 것도 쳐요</td><td className="num">{R.perReceiverEntry}장 (최대 {R.maxReceiverEntries})</td></tr>
             <tr><td>내 마니또를 맞히면</td><td className="num">{R.correctGuess}장</td></tr>
@@ -74,7 +74,8 @@ export default function Rules() {
           </li>
           <li>3주차 칭찬 카드는 사이트로 전달되니, 보내면 대상이 인증하지 않아도 내 미션으로 인정돼요. 대상은 인증해야 자기 인증 응모권을 받아요.</li>
           <li>내 대상이 불참(가입 안 함, 중도 이탈)이면 내가 완료를 알린 미션은 인증된 것으로 쳐요. 대상이 받고도 끝까지 인증하지 않은 경우는 운영진이 확인한 뒤 주차별로 인정할 수 있어요.</li>
-          <li>이렇게 대상 불참이나 운영진 확인으로 인정된 미션은 미션 응모권 {R.perRedeemedMission}장만 받아요. <b>보통·도전 카드 추가분은 대상이 직접 인증한 미션에만</b> 붙어요.</li>
+          <li>이렇게 대상 불참이나 운영진 확인으로 인정된 미션은 미션 응모권 {R.perRedeemedMission}장만 받아요. <b>보통·도전 카드 추가분은 대상이 직접 인증하면서 카드를 확인한 미션에만</b> 붙어요.</li>
+          <li>미션을 하면 바로 "미션 완료 알리기"를 눌러 주세요. 대상이 알림보다 먼저 코드로 인증하면 고른 카드를 못 보고 인증한 것이라, 알림이 간 뒤 대상이 추리 보드 "내가 인증한 것"에서 카드를 한 번 확인해야 카드 추가분이 붙어요.</li>
           <li>받았는데 인증하지 않은 미션은 내 응모권으로 채워지지 않아요. 받으면 꼭 인증해 주세요. 마니또도 그래야 응모권을 제대로 받아요.</li>
         </ul>
         <p className="small">응모권이 0장이면 추첨 대상이 아니에요. 가입하지 않은 사람, 중도 이탈, 수상 제외도 0장이에요.</p>

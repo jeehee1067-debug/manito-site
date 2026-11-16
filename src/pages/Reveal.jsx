@@ -12,6 +12,9 @@ import { Avatar, Dialogue, Panel } from "../ui.jsx";
 const winnersOf = (d) => d?.winners || [];
 const resultRef = () => doc(db, "results", "public");
 const rankWord = (p) => p.label.split(" ")[0]; // "6등 응모권 추첨" → "6등"
+// 한 장면에 여러 사람이 나올 때 캐릭터 크기: 사람이 많아도 큰 화면 한 장에 다 들어가게 줄인다. 0이면 이름만 보인다.
+const crowdSize = (n) => (n <= 6 ? 110 : n <= 12 ? 84 : n <= 20 ? 64 : n <= 32 ? 48 : 0);
+const WALL_SPEED = 45; // 칭찬 벽이 흘러가는 빠르기(1초에 몇 px)
 
 // 검증할 수 있는 추첨: 당첨자는 "현장에서 정한 숫자 + 응모권 표"만으로 정해진다(scoring.js drawAll).
 // 숫자 하나로 큰 상부터(1등 → 2등 → 4등 → 5등 → 6등) 한 번에 정해 저장하고, 발표만 6등부터 한 장면씩 한다.
@@ -259,6 +262,34 @@ export default function Reveal() {
 }
 
 // 가장 먼저 알아챈 사람: 알아챈 주차가 가장 이른 사람들(최종 지목에서야 맞힌 4는 제외)
+// 발표 화면의 칭찬 벽: 카드가 한 화면을 넘으면 위로 천천히 흘러간다.
+// 마지막 카드까지 보이도록 실제 높이를 재서 흘러갈 거리와 시간을 정한다(카드 수와 상관없이 정해진 비율만 움직이면 뒤쪽 카드가 끝내 안 보인다).
+function PraiseWall({ praises, nameOf }) {
+  const wall = useRef(null);
+  const inner = useRef(null);
+  const [move, setMove] = useState(null); // { shift: 흘러갈 거리(px), secs }. null = 한 화면에 다 들어감
+  useEffect(() => {
+    const measure = () => {
+      if (!wall.current || !inner.current) return;
+      const shift = inner.current.scrollHeight - wall.current.clientHeight;
+      setMove(shift > 4 ? { shift, secs: Math.max(12, Math.round(shift / WALL_SPEED)) } : null);
+    };
+    measure();
+    window.addEventListener("resize", measure); // 전체 화면을 켜고 끌 때 다시 잰다
+    return () => window.removeEventListener("resize", measure);
+  }, [praises.length]);
+  return (
+    <div className="pres-wall" ref={wall}>
+      <div ref={inner} className={move ? "pres-wall-inner moving" : "pres-wall-inner"}
+        style={move ? { "--wall-shift": `-${move.shift}px`, animationDuration: `${move.secs}s` } : undefined}>
+        {praises.map((p, k) => (
+          <Dialogue key={k} speaker={`to. ${nameOf(p.receiverPid)}`} tone="gold">{p.message}</Dialogue>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function noticedTop(noticed) {
   const entries = Object.entries(noticed || {}).filter(([, w]) => w < 4);
   if (entries.length === 0) return null;
@@ -441,15 +472,19 @@ function Slide({ r, slide, nameOf, pairCount }) {
     }
     case "detective": {
       const q = noticedTop(r.noticed);
+      // 일찍 알아챈 사람이 많으면(모두가 열심히 추측한 경우 수십 명) 넓게·작게 놓아 한 장에 다 들어가게 한다
       return (
-        <div className="pres-center">
+        <div className={q && q.pids.length > 6 ? "pres-center wide" : "pres-center"}>
           <h2 className="pres-h2">명탐정</h2>
           {s.guessed != null && <p className="pres-sub">최종 지목 {s.guessed}명 중 <b>{s.correct}</b>명이 마니또를 맞혔어요</p>}
           {q ? (
             <>
-              <p className="pres-kicker">가장 먼저 알아챈 사람</p>
-              <div className="pres-row pop">{q.pids.map((pid) => <span key={pid} className="pres-person"><Avatar pid={pid} size={110} /><b>{nameOf(pid)}</b></span>)}</div>
-              <p className="pres-sub">{q.week}주차 추측부터 끝까지 맞혔어요</p>
+              <p className="pres-kicker">가장 먼저 알아챈 사람 · {q.week}주차 추측부터 끝까지 맞혔어요</p>
+              <div className={q.pids.length > 12 ? "pres-row dense pop" : "pres-row pop"}>
+                {q.pids.map((pid) => (
+                  <span key={pid} className="pres-person">{crowdSize(q.pids.length) > 0 && <Avatar pid={pid} size={crowdSize(q.pids.length)} />}<b>{nameOf(pid)}</b></span>
+                ))}
+              </div>
             </>
           ) : <p className="pres-sub">일찍부터 맞힌 사람은 없었어요. 모두 감쪽같았네요!</p>}
         </div>
@@ -460,15 +495,24 @@ function Slide({ r, slide, nameOf, pairCount }) {
         <div className="pres-center wide">
           <p className="pres-kicker">마니또가 바빴던 사람들을 몰래 챙긴</p>
           <h2 className="pres-h2">숨은 수호천사</h2>
-          <div className="pres-row">
-            {r.angels.map((a) => (
-              <span key={a.receiverPid} className="pres-person pop">
-                <Avatar pid={a.angelPid} size={100} />
-                <b>{nameOf(a.angelPid)}</b>
-                <span className="small">→ {nameOf(a.receiverPid)}님에게 미션 {a.done}건{a.order ? ` · ${a.order}번째로 지원` : ""}</span>
-              </span>
-            ))}
-          </div>
+          {r.angels.length <= 8 ? (
+            <div className="pres-row">
+              {r.angels.map((a) => (
+                <span key={a.receiverPid} className="pres-person pop">
+                  <Avatar pid={a.angelPid} size={r.angels.length <= 4 ? 100 : 72} />
+                  <b>{nameOf(a.angelPid)}</b>
+                  <span className="small">→ {nameOf(a.receiverPid)}님에게 미션 {a.done}건{a.order ? ` · ${a.order}번째로 지원` : ""}</span>
+                </span>
+              ))}
+            </div>
+          ) : (
+            // 수호천사가 많으면 캐릭터 없이 한 줄씩(한 장에 다 들어가게)
+            <ul className="pres-list pop">
+              {r.angels.map((a) => (
+                <li key={a.receiverPid}><b>{nameOf(a.angelPid)}</b> → {nameOf(a.receiverPid)}님 · 미션 {a.done}건{a.order ? ` · 지원 ${a.order}번째` : ""}</li>
+              ))}
+            </ul>
+          )}
         </div>
       );
     case "bestReview":
@@ -503,13 +547,7 @@ function Slide({ r, slide, nameOf, pairCount }) {
       return (
         <div className="pres-center wide">
           <h2 className="pres-h2">칭찬 벽</h2>
-          <div className="pres-wall">
-            <div className="pres-wall-inner">
-              {(r.praises || []).map((p, k) => (
-                <Dialogue key={k} speaker={`to. ${nameOf(p.receiverPid)}`} tone="gold">{p.message}</Dialogue>
-              ))}
-            </div>
-          </div>
+          <PraiseWall praises={r.praises || []} nameOf={nameOf} />
         </div>
       );
     case "drawGo":

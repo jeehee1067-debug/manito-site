@@ -135,6 +135,59 @@ async function tokenOf(email) {
     console.log("  가리기 후 받는 사람 화면: '운영진이 가린 쪽지예요.'");
   }
 
+  step("나중 카드 확인: 완료 알림보다 먼저 인증하면 카드 추가분이 바로 붙지 않고, 알림이 온 뒤 받는 사람이 카드를 확인해야 붙는다");
+  {
+    const g = u["다라"]; await H.tab(g, "추리 보드"); await H.tab(g, "내 미션");
+    const slot = H.panel(g, "1주차 미션");
+    await slot.locator(".card.level-hard").click(); await slot.locator(".chosen").waitFor();
+    const hardText = await slot.locator(".chosen span").nth(1).innerText();
+    const code = (await slot.locator(".code-tag strong").innerText()).trim(); // 실물과 함께 전한 메모의 코드
+    // 받는 사람이 완료 알림보다 먼저 인증한다: 카드가 아직 안 보이므로 확인 칸이 없다
+    const r = u[target["다라"]]; await H.tab(r, "피드"); await H.tab(r, "추리 보드");
+    const entry = H.panel(r, "인증하기");
+    await entry.getByPlaceholder("K7Q2").fill(code);
+    await r.waitForTimeout(800);
+    assert.equal(await entry.locator(".card-check").count(), 0, "완료 알림 전에는 카드 확인 칸이 없다");
+    await entry.locator("textarea").fill("메모에 적힌 코드로 먼저 인증해요. 잘 받았어요, 고마워요!");
+    await entry.getByRole("button", { name: "인증하기" }).click();
+    await r.getByText("인증했어요. 응모권 1장이 쌓였어요.").waitFor();
+    const redDoc = async () => (await (await fetch(`${FS}/redemptions/${code}`, { headers: owner })).json()).fields;
+    assert.equal((await redDoc()).cardMatch, undefined, "카드를 못 보고 한 인증에는 cardMatch가 없다");
+    // 마니또 화면: 미션은 인증됐지만 카드 추가분은 0, 완료 알리기를 누르라는 안내
+    const tk = H.panel(g, "내 응모권 (지금까지)");
+    await tk.getByText(/인증된 미션 1 \/ 3 \+ 카드 추가분 0 \/ 4/).waitFor();
+    await tk.getByText(/카드 확인 대기/).waitFor();
+    await tk.getByText(/1주차 "미션 완료 알리기"를 눌러 주세요/).waitFor();
+    await slot.getByText(/이미 인증해서 카드를 바꿀 수 없어요\. 완료 알리기를 눌러 주세요/).waitFor();
+    // 운영 화면 '인증 검토'에 '카드 확인 전'
+    const mod = H.panel(admin, "인증 검토");
+    await mod.locator("span.small.muted", { hasText: "· 카드 확인 전" }).waitFor();
+    // 마니또가 완료를 알린다 → 받는 사람의 할 일과 '내가 인증한 것'에 카드 확인이 뜬다
+    await slot.getByRole("button", { name: "미션 완료 알리기" }).click();
+    await H.panel(g, "1주차 미션 ✔").waitFor();
+    await tk.getByText(/대상이 추리 보드에서 "카드와 같았어요"를 누르면 카드 추가분이 붙어요/).waitFor();
+    await H.tab(r, "내 미션");
+    await r.getByText("인증한 미션 1건의 카드 확인하기").waitFor();
+    await H.tab(r, "추리 보드");
+    const check = H.panel(r, "내가 인증한 것").locator(".card-check");
+    await check.getByText(hardText).waitFor();
+    await check.getByRole("button", { name: "카드와 같았어요" }).click();
+    await check.waitFor({ state: "detached" });
+    assert.equal((await redDoc()).cardMatch.booleanValue, true);
+    await tk.getByText(/인증된 미션 1 \/ 3 \+ 카드 추가분 2 \/ 4/).waitFor();
+    assert.equal(await tk.getByText(/카드 확인 대기/).count(), 0);
+    await mod.locator("span.small.muted", { hasText: "· 카드 확인 전" }).waitFor({ state: "detached" });
+    await H.tab(r, "내 미션");
+    assert.equal(await r.getByText("인증한 미션 1건의 카드 확인하기").count(), 0);
+    // 한 번 남긴 확인은 받는 사람이 다시 바꿀 수 없다(직접 요청)
+    const tok = await tokenOf(`g${["가나", "다라", "마바"].indexOf(target["다라"])}@example.com`);
+    const again = await fetch(`${FS}/redemptions/${code}?updateMask.fieldPaths=cardMatch`, {
+      method: "PATCH", headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json" }, body: JSON.stringify({ fields: { cardMatch: { booleanValue: false } } }),
+    });
+    assert.equal(again.status, 403);
+    console.log(`  ${target["다라"]}이(가) 알림보다 먼저 인증 → 다라의 카드 추가분 0, '카드 확인 대기' → 완료 알리기 → ${target["다라"]}이(가) "카드와 같았어요" → 추가분 2(도전), 다시 바꾸기 403`);
+  }
+
   step("주차 내리기 확인창, 단서 주차당 2개(직접 요청)");
   {
     await H.panel(admin, "주차").getByRole("button", { name: "2주차" }).click();

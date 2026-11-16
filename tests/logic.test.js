@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { assignManito, assignmentMemo, generateCodes } from "../src/lib/assign.js";
 import { angelQueue, needyReceivers, matchAngels, angelQueueStatus } from "../src/lib/angels.js";
-import { pickBestReview, reviewLikes, missionLikes, computeTickets, weightedDraw, partStandings, weeklyPartBoard, seededDraw, seededTop, drawAll, verifyDraws, DRAW_ORDER, noticedWeeks } from "../src/lib/scoring.js";
+import { pickBestReview, reviewLikes, missionLikes, cardLevel, computeTickets, weightedDraw, partStandings, weeklyPartBoard, seededDraw, seededTop, drawAll, verifyDraws, DRAW_ORDER, noticedWeeks } from "../src/lib/scoring.js";
 import { pairChain, buildSlides, revealedUpTo } from "../src/lib/reveal.js";
 import { readFileSync } from "node:fs";
 import { seededRandom } from "../src/lib/random.js";
@@ -161,17 +161,22 @@ test("재배정 메모(meta/assignment)는 정렬돼 있어 배정 순서를 드
   assert.ok(!memo.pids.every((g, i) => map[g] === memo.pids[(i + 1) % memo.pids.length]), "저장 순서는 배정 원 순서가 아님");
 });
 
+// 카드 추가분 테스트에 쓰는 실제 카드(목록의 번호·난이도·글 그대로)
+const pickCard = (level, i = 0) => ({ cardId: MISSION_CARDS[level][i].id, level, text: MISSION_CARDS[level][i].text });
+const HARD = pickCard("hard"), NORMAL = pickCard("normal"), EASY_CARD = pickCard("easy");
+const PRAISE = { cardId: "praise", level: "praise", text: "올해의 칭찬 한 줄" };
+
 test("응모권 계산: 미션·도전·입력·은신·정답", () => {
   const people = ["A", "B", "C"].map((pid) => ({ pid }));
   const assignments = { A: "B", B: "C", C: "A" };
   const giverCodes = { A: { 1: "A1", 2: "A2", 3: "A3" }, B: { 1: "B1", 2: "B2", 3: "B3" }, C: { 1: "C1", 2: "C2", 3: "C3" } };
   const redemptions = {
-    A1: { receiverPid: "B", slot: 1, voided: false },
-    A2: { receiverPid: "B", slot: 2, voided: false },
+    A1: { receiverPid: "B", slot: 1, voided: false, cardMatch: true },
+    A2: { receiverPid: "B", slot: 2, voided: false, cardMatch: true },
     A3: { receiverPid: "B", slot: 3, voided: true },
     B1: { receiverPid: "C", slot: 1, voided: false },
   };
-  const missions = { A: { choices: { 1: { level: "hard" }, 2: { level: "easy" } } } };
+  const missions = { A: { choices: { 1: HARD, 2: EASY_CARD } } };
   const guesses = { B: "A", C: "A" }; // B는 정답(A), C는 오답(실제 B)
   const t = computeTickets({ people, assignments, giverCodes, redemptions, missions, guesses });
   // A: 미션 2(무효 1건 제외) + 카드 2(1주차 도전) + 받은 입력 0 + 은신 0(들킴) + 보상 3(C가 3주 모두 안 보냄) = 7
@@ -253,7 +258,7 @@ test("불참(가입 안 함·중도 이탈)은 0장, 그 사람의 마니또는 
   const giverCodes = { A: { 1: "A1", 2: "A2", 3: "A3" }, B: { 1: "B1", 2: "B2", 3: "B3" }, C: { 1: "C1", 2: "C2", 3: "C3" } };
   const base = {
     assignments: { A: "B", B: "C", C: "A" }, giverCodes, redemptions: {},
-    missions: { B: { choices: { 1: { level: "hard" }, 2: { level: "easy" } } } },
+    missions: { B: { choices: { 1: HARD, 2: EASY_CARD } } },
     deliveries: [{ receiverPid: "C", slot: 1 }, { receiverPid: "C", slot: 2 }, { receiverPid: "C", slot: 3 }], // B가 C에게 3건 완료 알림
   };
   for (const flag of [{ joined: false }, { joined: true, dropout: true }]) {
@@ -332,13 +337,13 @@ test("카드 추가분은 받는 사람이 직접 인증한 미션만: 불참·�
   const base = {
     assignments: { A: "B", B: "C", C: "A" }, giverCodes, guesses: {},
     people: ["A", "B", "C"].map((pid) => ({ pid })),
-    missions: { A: { choices: { 1: { level: "hard" }, 2: { level: "hard" } } } }, // A는 1·2주차 모두 도전 카드
+    missions: { A: { choices: { 1: HARD, 2: pickCard("hard", 1) } } }, // A는 1·2주차 모두 도전 카드
     deliveries: [{ receiverPid: "B", slot: 1 }, { receiverPid: "B", slot: 2 }],
-    redemptions: { A1: { receiverPid: "B", slot: 1, voided: false } }, // 1주차만 직접 인증
+    redemptions: { A1: { receiverPid: "B", slot: 1, voided: false, cardMatch: true } }, // 1주차만 직접 인증(카드 확인)
   };
   const confirmed = computeTickets({ ...base, verdicts: { B_2: "received" } });
   assert.deepEqual([confirmed.A.mission, confirmed.A.card, confirmed.A.assumed], [2, 2, 1], "직접 인증된 1주차 도전 +2만, 확인으로 인정된 2주차에는 없다");
-  const both = computeTickets({ ...base, redemptions: { ...base.redemptions, A2: { receiverPid: "B", slot: 2, voided: false } } });
+  const both = computeTickets({ ...base, redemptions: { ...base.redemptions, A2: { receiverPid: "B", slot: 2, voided: false, cardMatch: true } } });
   assert.deepEqual([both.A.mission, both.A.card, both.A.assumed], [2, 4, 0], "둘 다 직접 인증되면 도전 2 + 2");
   const absent = computeTickets({ ...base, redemptions: {}, people: [{ pid: "A" }, { pid: "B", joined: false }, { pid: "C" }] });
   assert.deepEqual([absent.A.mission, absent.A.card, absent.A.assumed], [2, 0, 2], "대상 불참으로 인정된 미션에도 없다");
@@ -778,6 +783,20 @@ test("수호천사 연결: 먼저 지원한 순서대로, 본인·그 사람의 
     ["1F:own", "2E:own", "3A:waiting", "4B:linked", "5C:waiting"]);
 });
 
+test("보안 규칙의 추첨 칸 이름이 상품 설정(DRAW_ORDER)과 같고, 카드 번호가 규칙의 난이도 표기와 맞는다", () => {
+  const rules = readFileSync(new URL("../firestore.rules", import.meta.url), "utf8");
+  const m = rules.match(/d\.keys\(\)\.hasOnly\(\[([^\]]+)\]\) && d\.keys\(\)\.hasAll\(\[([^\]]+)\]\)/);
+  assert.ok(m, "규칙에서 추첨 칸 목록을 찾지 못함");
+  const keys = (t) => t.split(",").map((x) => x.trim().replace(/'/g, "")).sort();
+  assert.deepEqual(keys(m[1]), DRAW_ORDER.map((x) => x.key).sort(), "prizes.js의 추첨 key를 바꾸면 firestore.rules의 drawsShapeOk도 같이 고친다");
+  assert.deepEqual(keys(m[2]), DRAW_ORDER.map((x) => x.key).sort());
+  // 카드 번호: 규칙은 e·n·h + 숫자 1~2자리로 난이도를 본다
+  const prefix = { easy: "e", normal: "n", hard: "h" };
+  for (const [level, cards] of Object.entries(MISSION_CARDS)) {
+    for (const c of cards) assert.match(c.id, new RegExp(`^${prefix[level]}[0-9]{1,2}$`), `${level} 카드 번호 ${c.id}`);
+  }
+});
+
 test("보안 규칙의 추가 쪽지 한도가 EXTRA_NOTES_MAX와 같다", () => {
   const rules = readFileSync(new URL("../firestore.rules", import.meta.url), "utf8");
   const limits = [...rules.matchAll(/(?:noteCount\(getAfter\(myMissions\(\)\)\.data, string\(request\.resource\.data\.slot\)\)|n1) <= (\d+)/g)].map((m) => Number(m[1]));
@@ -795,34 +814,60 @@ test("보안 규칙의 단서 형식(clueAnswerOk)이 프로필 문항(PROFILE_Q
   assert.equal((fn.match(/\(i == \d/g) || []).length, PROFILE_QUESTIONS.length, "문항 수");
 });
 
-test("카드 추가분: 받는 사람이 '받은 것이 고른 카드와 달라요'로 인증하면 없다", () => {
+test("카드 추가분: 받는 사람이 카드를 보고 '같아요'라고 한 미션만. '달라요'나 확인 없음은 없다", () => {
   const people = ["A", "B", "C"].map((pid) => ({ pid }));
   const base = {
     people, assignments: { A: "B", B: "C", C: "A" }, guesses: {},
     giverCodes: { A: { 1: "A1", 2: "A2", 3: "A3" }, B: { 1: "B1", 2: "B2", 3: "B3" }, C: { 1: "C1", 2: "C2", 3: "C3" } },
-    missions: { A: { choices: { 1: { level: "hard" }, 2: { level: "hard" } } } },
+    missions: { A: { choices: { 1: HARD, 2: pickCard("hard", 1) } } },
   };
-  const ok = computeTickets({ ...base, redemptions: { A1: { receiverPid: "B", slot: 1, voided: false }, A2: { receiverPid: "B", slot: 2, voided: false, cardMatch: true } } });
-  const bad = computeTickets({ ...base, redemptions: { A1: { receiverPid: "B", slot: 1, voided: false }, A2: { receiverPid: "B", slot: 2, voided: false, cardMatch: false } } });
+  const red = (cardMatch) => ({ A1: { receiverPid: "B", slot: 1, voided: false, cardMatch: true }, A2: { receiverPid: "B", slot: 2, voided: false, ...(cardMatch === undefined ? {} : { cardMatch }) } });
+  const ok = computeTickets({ ...base, redemptions: red(true) });
+  const bad = computeTickets({ ...base, redemptions: red(false) });
+  const unseen = computeTickets({ ...base, redemptions: red(undefined) });
   assert.deepEqual([ok.A.mission, ok.A.card], [2, 4]);
   assert.deepEqual([bad.A.mission, bad.A.card], [2, 2], "미션 응모권은 그대로, 그 주차 카드 추가분만 빠진다");
+  // 완료 알림보다 먼저 인증해서 받는 사람이 카드를 못 봤고 나중에도 확인하지 않은 경우: 추가분이 없다
+  // (도전 카드를 골라 놓고 간단한 것만 건넨 뒤 완료를 알리지 않아 확인을 피하는 것을 막는다)
+  assert.deepEqual([unseen.A.mission, unseen.A.card], [2, 2]);
 });
 
-test("카드 추가분: 쉬움 0, 보통 +1, 도전 +2, 칭찬 카드 0, 합계 최대 4", () => {
+test("카드 추가분: 쉬움 0, 보통 +1, 도전 +2, 칭찬 카드 0, 합계 최대 4. 난이도는 카드 목록과 대조한다", () => {
   const people = ["A", "B", "C"].map((pid) => ({ pid }));
-  const red = (slots) => Object.fromEntries(slots.map((s) => [`A${s}`, { receiverPid: "B", slot: s, voided: false }]));
+  const red = (slots) => Object.fromEntries(slots.map((s) => [`A${s}`, { receiverPid: "B", slot: s, voided: false, cardMatch: true }]));
   const run = (choices) => computeTickets({
     people, assignments: { A: "B", B: "C", C: "A" }, guesses: {},
     giverCodes: { A: { 1: "A1", 2: "A2", 3: "A3" } }, redemptions: red([1, 2, 3]),
     missions: { A: { choices } },
   }).A;
-  const praise = { level: "praise" };
-  assert.equal(run({ 1: { level: "easy" }, 2: { level: "easy" }, 3: praise }).card, 0);
-  assert.equal(run({ 1: { level: "normal" }, 2: { level: "easy" }, 3: praise }).card, 1);
-  assert.equal(run({ 1: { level: "normal" }, 2: { level: "hard" }, 3: praise }).card, 3);
-  const best = run({ 1: { level: "hard" }, 2: { level: "hard" }, 3: praise });
+  assert.equal(run({ 1: EASY_CARD, 2: pickCard("easy", 1), 3: PRAISE }).card, 0);
+  assert.equal(run({ 1: NORMAL, 2: EASY_CARD, 3: PRAISE }).card, 1);
+  assert.equal(run({ 1: NORMAL, 2: HARD, 3: PRAISE }).card, 3);
+  const best = run({ 1: HARD, 2: pickCard("hard", 1), 3: PRAISE });
   assert.deepEqual([best.mission, best.card, best.total], [3, 4, 7 + 2]); // 미션 3 + 카드 4 + 은신 2
-  assert.equal(run({}).card, 0); // 카드를 고르지 않은 채 인증된 미션(예전 자료)
+  assert.equal(run({}).card, 0); // 카드를 고르지 않은 채 인증된 미션
+  // 위조: 쉬운 카드 번호에 "도전"이라고 적거나, 도전 카드 번호에 쉬운 카드 글을 적거나, 목록에 없는 번호는 추가분이 없다
+  assert.equal(cardLevel(HARD), "hard");
+  assert.equal(run({ 1: { ...EASY_CARD, level: "hard" }, 2: EASY_CARD }).card, 0, "쉬운 카드를 도전이라고 적음");
+  assert.equal(run({ 1: { ...HARD, text: EASY_CARD.text }, 2: EASY_CARD }).card, 0, "도전 카드 번호에 쉬운 카드 글(받는 사람은 쉬운 카드 글을 보고 '같아요'라고 한다)");
+  assert.equal(run({ 1: { cardId: "h99", level: "hard", text: "없는 카드" }, 2: EASY_CARD }).card, 0, "목록에 없는 번호");
+  assert.equal(run({ 1: { level: "hard" }, 2: EASY_CARD }).card, 0, "번호 없이 난이도만");
+});
+
+test("완료 표시는 정확히 true일 때만: 문자열·숫자로 완료처럼 보이게 써도 받는 사람의 보상이 줄지 않는다", () => {
+  const people = ["A", "B", "C"].map((pid) => ({ pid }));
+  const base = {
+    people, assignments: { A: "B", B: "C", C: "A" }, guesses: {},
+    giverCodes: { A: { 1: "A1", 2: "A2", 3: "A3" }, B: { 1: "B1", 2: "B2", 3: "B3" }, C: { 1: "C1", 2: "C2", 3: "C3" } },
+    redemptions: { B1: { receiverPid: "C", slot: 1, voided: false } }, // B는 자기 미션 1건 인증(보상 조건)
+  };
+  // A가 아무것도 보내지 않고 완료 표시만 위조: B는 못 받은 3주 보상을 그대로 받는다
+  const faked = computeTickets({ ...base, missions: { A: { done: { 1: "yes", 2: 1, 3: 1 } } } });
+  assert.equal(faked.B.comp, 3);
+  const real = computeTickets({ ...base, missions: { A: { done: { 1: true } } } });
+  assert.equal(real.B.comp, 2, "진짜 완료 표시(true)는 완료를 알린 주차로 친다");
+  const rows = pairRows({ assignments: { A: { receiverPid: "B" } }, missions: { A: { done: { 1: "yes", 2: true } } } });
+  assert.deepEqual([rows[0].slots[1].done, rows[0].slots[2].done], [false, true]);
 });
 
 test("알아챈 주차: 최종 지목이 맞고, 중간 추측을 끝까지 계속 맞힌 첫 주차", () => {

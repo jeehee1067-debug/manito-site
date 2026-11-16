@@ -5,7 +5,7 @@ import {
 import { db } from "../firebase.js";
 import { useApp } from "../App.jsx";
 import { Panel } from "../ui.jsx";
-import { PHASE, PHASES, CLUE_COUNT, LEVEL_LABEL, LOCS, PART_HINT_IDX, RULES_VERSION } from "../lib/constants.js";
+import { PHASE, PHASES, CLUE_COUNT, LEVEL_LABEL, LOCS, PART_HINT_IDX, PRAISE_SLOT, RULES_VERSION } from "../lib/constants.js";
 import { SLOT_STATUS_LABEL, clueAnswers, cluesDoneSet, pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../lib/pairs.js";
 import { assignManito, assignmentMemo, generateCodes, makeInviteCode } from "../lib/assign.js";
 import { computeTickets, missionLikes, noticedWeeks, partStandings, pickBestReview, reviewLikes, weeklyPartBoard } from "../lib/scoring.js";
@@ -78,7 +78,7 @@ function useInvites() {
     const m = {};
     s.docs.forEach((d) => { m[d.data().personId] = d.id; });
     setInvites(m);
-  }), []);
+  }, () => setInvites({})), []); // 초대 코드 목록은 처음 운영자만 읽는다(보안 규칙). 공동 운영자 화면에서는 비어 있다
   return invites;
 }
 
@@ -125,7 +125,7 @@ async function renewInvite(r, oldCode) {
 // (실시간이면 미션을 받은 직후 어느 파트 숫자가 올랐는지로 마니또의 파트가 드러난다).
 // 완료 수는 각자 쓰는 progress.doneCount가 아니라 완료 표시(giverMissions.done)로 센다(완료 알림과 한 묶음으로만 켜지는 값).
 // roster: 명단 전체, missions: { pid: { done } }, week: 열린 주차. 반환: 순위에 든 파트 수
-const doneCountOf = (m) => Object.values(m?.done || {}).filter(Boolean).length;
+const doneCountOf = (m) => [1, 2, 3].filter((slot) => m?.done?.[slot] === true).length; // 1~3주차 칸의 true만 센다
 async function publishPartBoard(roster, missions, week) {
   const w = Math.min(3, Math.max(1, week || 1));
   const people = roster.map((r) => ({ pid: r.pid, part: (r.part || "").trim() || null, joined: Boolean(r.uid), dropout: Boolean(r.dropout) }));
@@ -799,8 +799,11 @@ function Moderation() {
     if (!window.confirm("이 감사 답장을 지울까요? 받는 사람은 다시 쓸 수 없어요.")) return;
     return updateDoc(doc(db, "feed", r.feedId), { thanks: deleteField() });
   };
-  // 받는 사람이 "카드와 달라요"로 인증한 것: 두 사람에게 확인한 뒤 되돌릴 수 있다(카드 추가분)
-  const toggleCard = (r) => updateDoc(doc(db, "redemptions", r.code), { cardMatch: r.cardMatch === false });
+  // 받는 사람이 "카드와 달라요"로 인증했거나, 완료 알림보다 먼저 인증해 카드를 확인하지 않은 것: 두 사람에게 확인한 뒤 "같음"으로 고칠 수 있다(카드 추가분)
+  const setCardSame = (r) => {
+    if (!window.confirm(`${nameOf(r.receiverPid)}님의 ${r.slot}주차 인증을 "받은 것이 카드와 같음"으로 고칠까요?\n\n마니또의 카드 추가분(보통 +${R.cardBonus.normal}, 도전 +${R.cardBonus.hard})이 붙어요. 두 사람에게 확인한 뒤에만 눌러 주세요.`)) return undefined;
+    return updateDoc(doc(db, "redemptions", r.code), { cardMatch: true }).catch(() => window.alert("바꾸지 못했어요. 잠시 뒤 다시 눌러 주세요."));
+  };
   const toggleDq = (r) => {
     if (!r.disqualified && !window.confirm(`${r.name}님을 응모권·수상에서 제외할까요?`)) return;
     return updateDoc(doc(db, "roster", r.pid), { disqualified: !r.disqualified });
@@ -818,6 +821,7 @@ function Moderation() {
           후기만 성의 없고 미션은 실제로 받은 것이 확인되면, 집계 단계의 "집계 전 확인"에서 그 주차를 "받았음"으로 눌러 마니또의 미션은 인정할 수 있어요.
           미션은 제대로 했는데 후기나 답장만 문제라면 "피드에서 가리기"·"답장 지우기"를 쓰세요(응모권은 그대로예요).
           "카드와 다름"은 받는 사람이 받은 것이 마니또가 고른 카드와 다르다고 한 것이에요(보통·도전 카드면 추가 응모권이 빠져요).
+          "카드 확인 전"은 받는 사람이 마니또의 완료 알림보다 먼저 인증해서 카드를 아직 확인하지 않은 것이에요(받는 사람이 추리 보드 "내가 인증한 것"에서 확인하면 추가분이 붙고, 확인이 없으면 붙지 않아요).
         </p>
         <ul className="plain">
           {items.map((r) => {
@@ -827,13 +831,13 @@ function Moderation() {
                 <p>{r.review}</p>
                 {f?.thanks && <p className="small">감사 답장: {f.thanks}</p>}
                 <span className="small muted">
-                  {nameOf(r.receiverPid)} · {r.slot}주차{f?.hidden ? " · 피드에서 가림" : ""}{r.cardMatch === false ? " · 카드와 다름" : ""}
+                  {nameOf(r.receiverPid)} · {r.slot}주차{f?.hidden ? " · 피드에서 가림" : ""}{r.cardMatch === false ? " · 카드와 다름" : r.cardMatch === undefined && r.slot !== PRAISE_SLOT ? " · 카드 확인 전" : ""}
                 </span>
                 <span className="inline">
                   <button className="text-btn" onClick={() => toggleVoid(r)}>{r.voided ? "무효 취소" : "무효 처리"}</button>
                   {f && <button className="text-btn" onClick={() => toggleHide(r)}>{f.hidden ? "피드에 다시 보이기" : "피드에서 가리기"}</button>}
                   {f?.thanks && <button className="text-btn" onClick={() => removeThanks(r)}>답장 지우기</button>}
-                  {r.cardMatch === false && <button className="text-btn" onClick={() => toggleCard(r)}>카드와 같다고 고치기</button>}
+                  {r.cardMatch !== true && r.slot !== PRAISE_SLOT && <button className="text-btn" onClick={() => setCardSame(r)}>카드와 같다고 고치기</button>}
                 </span>
               </li>
             );
@@ -1331,7 +1335,7 @@ async function calcAll(roster, assignVer, { awards = true } = {}) {
     return [g, [1, 2, 3].map((slot) => {
       const c = missions[g]?.choices?.[slot];
       const red = redemptions[codes[slot]];
-      return { slot, level: c?.level || null, text: c?.text || "", done: Boolean(missions[g]?.done?.[slot]), redeemed: Boolean(red && !red.voided) };
+      return { slot, level: c?.level || null, text: c?.text || "", done: missions[g]?.done?.[slot] === true, redeemed: Boolean(red && !red.voided) };
     })];
   }));
   const feedList = Object.values(feed).filter((f) => !f.voided && !f.hidden);

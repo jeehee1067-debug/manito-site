@@ -8,6 +8,9 @@ import { Avatar, Dialogue, Panel } from "../ui.jsx";
 import { LEVEL_LABEL, PHASE, PRAISE_SLOT, PROFILE_QUESTIONS, REVIEW_MIN, CLUE_COUNT, PART_HINT_IDX, clueScheduleText } from "../lib/constants.js";
 import { normalizeCode } from "../lib/random.js";
 import { bump } from "../lib/writes.js";
+import { TICKET_RULES } from "../config/prizes.js";
+
+const CARD_BONUS = TICKET_RULES.cardBonus; // 카드 추가 응모권(보통·도전만)
 
 export default function Detective() {
   const { myPid, config, roster, inbox: items } = useApp();
@@ -30,7 +33,7 @@ export default function Detective() {
       <AngelInbox />
       <CodeEntry myPid={myPid} items={items} />
       <ToManito myPid={myPid} />
-      <MyRedemptions myPid={myPid} />
+      <MyRedemptions myPid={myPid} items={items} />
       <Clues myPid={myPid} partsInUse={partsInUse} hintOpen={hintOpen} hintPart={hintPart} />
       <Suspects myPid={myPid} hintPart={hintOpen ? hintPart : null} />
     </>
@@ -311,27 +314,69 @@ function CodeEntry({ myPid, items }) {
   );
 }
 
-function MyRedemptions({ myPid }) {
+function MyRedemptions({ myPid, items }) {
+  const { config } = useApp();
   const [rows, setRows] = useState([]);
   useEffect(() => {
     return onSnapshot(query(collection(db, "redemptions"), where("receiverPid", "==", myPid)), (s) =>
       setRows(s.docs.map((d) => ({ code: d.id, ...d.data() })).sort((a, b) => a.slot - b.slot))
     );
   }, [myPid]);
+  // 카드 확인도 인증과 같은 기간(미션 진행 ~ 최종 지목 마감)에만 받는다(보안 규칙)
+  const open = config.phase === PHASE.RUNNING || config.phase === PHASE.GUESSING;
+  // 완료 알림보다 먼저 인증해서 카드를 못 보고 인증한 미션: 알림이 온 뒤 그 카드를 보여 주고 한 번 확인받는다.
+  // 추가 응모권이 있는 카드(보통·도전)만 묻는다. 확인이 없으면 마니또의 카드 추가분이 붙지 않는다(scoring.js).
+  const cardToCheck = (r) => (r.cardMatch === undefined && !r.voided
+    ? items.find((it) => it.kind === "mission" && it.slot === r.slot && it.card && CARD_BONUS[it.card.level] > 0)?.card
+    : null) || null;
 
   if (!rows.length) return null;
   return (
     <Panel title="내가 인증한 것">
       <ul className="plain">
-        {rows.map((r) => (
-          <li key={r.code} className="row-item">
-            <p>{r.review}</p>
-            {r.voided && <p className="error small">운영진이 무효 처리한 인증이에요.</p>}
-            {r.feedId && <Thanks feedId={r.feedId} />}
-          </li>
-        ))}
+        {rows.map((r) => {
+          const card = cardToCheck(r);
+          return (
+            <li key={r.code} className="row-item">
+              <p>{r.review}</p>
+              {r.voided && <p className="error small">운영진이 무효 처리한 인증이에요.</p>}
+              {card && open && <CardCheck code={r.code} slot={r.slot} card={card} />}
+              {r.cardMatch === false && <p className="small muted">받은 것이 마니또가 고른 카드와 달랐다고 표시했어요.</p>}
+              {r.feedId && <Thanks feedId={r.feedId} />}
+            </li>
+          );
+        })}
       </ul>
     </Panel>
+  );
+}
+
+// 나중 카드 확인: 인증할 때는 마니또의 완료 알림이 아직 없어 카드를 못 봤던 미션. 한 번만 남길 수 있다(보안 규칙).
+function CardCheck({ code, slot, card }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const answer = async (cardMatch) => {
+    setBusy(true);
+    setError("");
+    try {
+      await updateDoc(doc(db, "redemptions", code), { cardMatch });
+    } catch {
+      setError("저장하지 못했어요. 잠시 뒤 다시 눌러 주세요.");
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="card-check">
+      <p className="small">
+        <b>{slot}주차 카드 확인</b> 인증한 뒤에 마니또의 완료 알림이 왔어요. 마니또가 고른 카드: <b>{LEVEL_LABEL[card.level] || card.level}</b> · {card.text}
+      </p>
+      <p className="small">받은 것이 이 카드 내용과 같았나요? (같았다고 해야 마니또가 카드 추가 응모권을 받아요. 한 번만 고를 수 있어요)</p>
+      <span className="inline">
+        <button type="button" className="pk-btn" disabled={busy} onClick={() => answer(true)}>카드와 같았어요</button>
+        <button type="button" className="pk-btn" disabled={busy} onClick={() => answer(false)}>카드와 달랐어요</button>
+      </span>
+      {error && <p className="error small" role="alert">{error}</p>}
+    </div>
   );
 }
 

@@ -271,7 +271,7 @@ const step = (s) => console.log("▶", s);
     if (await pres.getByText("명탐정").count()) {
       await pres.getByText("가장 먼저 알아챈 사람").waitFor();
       await pres.locator(".pres-person", { hasText: R }).waitFor();
-      await pres.getByText("1주차 추측부터 끝까지 맞혔어요").waitFor();
+      await pres.getByText("가장 먼저 알아챈 사람 · 1주차 추측부터 끝까지 맞혔어요").waitFor();
       sawDetective = true;
     }
     if (await pres.getByText("숨은 수호천사").count()) {

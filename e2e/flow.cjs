@@ -362,6 +362,8 @@ const step = (s) => console.log("▶", s);
     // 피드는 실시간으로 바뀌지 않는다: 열어 둔 화면(카타)은 "새 글 확인"을 눌러야 공감 수가 바뀐다
     await tab(page, "피드");
     const liked = panel(page, "익명 피드").locator(".dialogue", { hasText: `${giverOf["가나"]}님 덕분에` });
+    await liked.waitFor();
+    await panel(page, "익명 피드").getByRole("button", { name: "새 글 확인" }).click();
     await liked.getByText(/♥ 공감 3/).waitFor();
     // 감사 답장: 사아가 보내면 → 피드 글에 붙고, 미션을 보낸 마니또 화면에 보인다
     const r = users["사아"];
