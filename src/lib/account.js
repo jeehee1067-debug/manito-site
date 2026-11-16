@@ -33,7 +33,7 @@ export function validatePassword(pw) {
 
 export function validateEmail(input) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(toEmail(input))) {
-    return "회사 메일 아이디를 정확히 적어 주세요(@ 앞부분만). 이 메일로 인증 메일과 비밀번호 재설정 메일이 가요.";
+    return "Knox ID를 정확히 적어 주세요(@ 앞부분만). 이 메일로 인증 메일과 비밀번호 재설정 메일이 가요.";
   }
   return null;
 }

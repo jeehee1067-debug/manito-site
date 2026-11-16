@@ -525,9 +525,10 @@ textarea.pk-input { resize: vertical; line-height: 1.6; }
   .slips { grid-template-columns: repeat(6, 1fr); }
 }
 
-/* 로그인: 회사 메일 아이디 입력(뒤에 도메인이 붙어 보인다) */
+/* 로그인: Knox ID 입력(뒤에 도메인이 붙어 보인다) */
 .id-field { display: flex; align-items: center; gap: 6px; }
-.id-field .pk-input { flex: 1; min-width: 0; }
+/* 아이디 칸은 아이디 길이만큼만(전체 폭으로 늘리지 않는다). 좁은 화면에서는 남는 폭까지 줄어든다 */
+.id-field .pk-input { flex: 0 1 200px; min-width: 0; }
 .id-domain { flex: none; font-size: 14px; color: var(--ink-soft); white-space: nowrap; }
 /* 발표 화면: 종이로 뽑힌 이름 입력 */
 .paper-form { display: grid; gap: 8px; justify-items: center; width: 100%; }

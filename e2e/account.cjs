@@ -20,7 +20,7 @@ function watchPage(page, label) {
   });
   page.on("pageerror", (e) => errors.push(`[${label}] pageerror ${e.message}`));
 }
-const mailBox = (page) => page.getByPlaceholder("회사 메일 아이디");
+const mailBox = (page) => page.getByPlaceholder("Knox ID");
 async function logout(page) {
   await page.locator(".hud-out").click();
   await mailBox(page).waitFor();

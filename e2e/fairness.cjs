@@ -37,7 +37,7 @@ const val = (v) => v.stringValue ?? (v.integerValue !== undefined ? Number(v.int
   const admin = await mk("운영자");
   await admin.goto(BASE + "?setup");
   await admin.getByRole("button", { name: "운영자·공동 운영자 계정 만들기" }).click();
-  await admin.getByPlaceholder("회사 메일 아이디").fill("fadmin@example.com");
+  await admin.getByPlaceholder("Knox ID").fill("fadmin@example.com");
   await admin.locator('input[type="password"]').fill("secret123");
   await admin.getByRole("button", { name: "운영자 계정 만들기" }).click();
   await panel(admin, "1. 명단").locator("textarea").fill(ALL.map((n) => `${n},${PART[n]}`).join("\n"));
@@ -53,7 +53,7 @@ const val = (v) => v.stringValue ?? (v.integerValue !== undefined ? Number(v.int
     await page.goto(BASE);
     await page.getByRole("tab", { name: "처음 가입" }).click();
     await page.getByPlaceholder("운영진에게 받은 6자리").fill(invite[name]);
-    await page.getByPlaceholder("회사 메일 아이디").fill(`f${i}@example.com`);
+    await page.getByPlaceholder("Knox ID").fill(`f${i}@example.com`);
     await page.locator('input[type="password"]').fill("secret123");
     await page.getByRole("button", { name: "가입하기" }).click();
     await page.locator(".target-name").waitFor();
