@@ -28,16 +28,19 @@ async function runDrawAll(seed) {
 const drawError = (err) => (err.message === "already" ? "이미 추첨했어요. 추첨 결과는 다시 뽑거나 바꿀 수 없어요."
   : "추첨하지 못했어요. 잠시 뒤 다시 눌러 주세요.");
 
+// 숫자를 넣고 "추첨하기"를 누르면 한 번 더 눌러 확인한다. 브라우저 확인창(confirm)은 전체 화면을 풀어 버려서 쓰지 않는다.
 function DrawForm({ onDrawn }) {
   const [seed, setSeed] = useState("");
+  const [armed, setArmed] = useState(""); // 확인을 기다리는 숫자
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const s = seed.trim();
+  const confirming = Boolean(armed) && armed === s;
   async function go() {
-    const s = seed.trim();
     if (!s) return setMsg("현장에서 정한 숫자를 먼저 넣어 주세요(예: 참석자가 부른 네 자리 숫자).");
-    if (!window.confirm(`숫자 "${s}"로 추첨할까요?\n\n${DRAW_ORDER.map(rankWord).join("·")}이 한 번에 정해지고, 다시 뽑을 수 없어요.`)) return;
-    setBusy(true);
     setMsg("");
+    if (!confirming) return setArmed(s);
+    setBusy(true);
     try {
       await runDrawAll(s);
       onDrawn?.();
@@ -45,6 +48,7 @@ function DrawForm({ onDrawn }) {
       setMsg(drawError(err));
     } finally {
       setBusy(false);
+      setArmed("");
     }
   }
   return (
@@ -52,8 +56,10 @@ function DrawForm({ onDrawn }) {
       <div className="inline">
         <input className="pk-input seed-input" value={seed} maxLength={20} inputMode="numeric"
           onChange={(e) => setSeed(e.target.value)} placeholder="현장에서 정한 숫자" aria-label="추첨 숫자" />
-        <button className="pk-btn gold" disabled={busy} onClick={go}>추첨하기</button>
+        <button className="pk-btn gold" disabled={busy} onClick={go}>{confirming ? `숫자 ${armed}로 추첨 확정` : "추첨하기"}</button>
+        {confirming && <button className="pk-btn sm ghost" disabled={busy} onClick={() => setArmed("")}>취소</button>}
       </div>
+      {confirming && <p className="small" role="status">{DRAW_ORDER.map(rankWord).join("·")}이 한 번에 정해지고 다시 뽑을 수 없어요. 숫자가 맞으면 한 번 더 눌러 주세요.</p>}
       {msg && <p className="error small" role="alert">{msg}</p>}
     </div>
   );
@@ -283,8 +289,11 @@ function PartBoardList({ r, myPart, showWinner = true, big = false }) {
 }
 
 // ── 발표 화면(운영자, 큰 화면용) ────────────────────────────────────────────────
-// → / Space / PageDown: 다음, ← / PageUp: 이전, F: 전체 화면, Esc: 닫기.
+// → / Space / PageDown: 다음, ← / PageUp: 이전, F: 전체 화면. 닫기는 버튼으로만(닫으면 운영자 화면에 모든 결과가 보여서, 실수로 닫히지 않게 Esc로는 닫지 않는다).
 // 넘긴 장면 번호를 results/public.step에 남긴다(가장 멀리 간 장면). 참여자 결과 탭은 그 장면까지만 열린다.
+// 무대에서는 이름이 잠깐 뒤에 나오거나(짝·시상) 이름이 돌아간 뒤에 당첨자가 나오므로(추첨), 휴대폰에 먼저 보이지 않게 그만큼 늦게 남긴다.
+const spinMs = (step) => (step.key === PRIZES.grand.key ? 3000 : 1500);
+const revealDelay = (slide) => (slide.type === "draw" ? spinMs(slide.step) + 400 : 1800);
 function Presenter({ r, slides, onClose }) {
   const { nameOf } = useApp();
   const [i, setI] = useState(() => Math.min(r.step ?? 0, slides.length - 1));
@@ -292,17 +301,20 @@ function Presenter({ r, slides, onClose }) {
   const rootRef = useRef(null);
   const slide = slides[i];
   const last = slides.length - 1;
-  const go = (d) => setI((x) => Math.max(0, Math.min(last, x + d)));
+  const drawn = Object.keys(r.draws || {}).length > 0;
+  const mustDraw = slide.type === "drawGo" && !drawn; // 추첨하기 전에는 발표 장면으로 넘어가지 않는다(먼저 넘겨 두면 추첨하는 순간 휴대폰에 한꺼번에 열린다)
+  const go = (d) => { if (d > 0 && mustDraw) return; setI((x) => Math.max(0, Math.min(last, x + d))); };
 
   useEffect(() => {
-    if (i > (r.step ?? -1)) updateDoc(resultRef(), { step: i }).catch(() => {});
-  }, [i, r.step]);
+    if (i <= (r.step ?? -1)) return undefined;
+    const t = setTimeout(() => updateDoc(resultRef(), { step: i }).catch(() => {}), revealDelay(slide));
+    return () => clearTimeout(t);
+  }, [i, r.step]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const on = (e) => {
       if (e.target.tagName === "INPUT") return;
       if (["ArrowRight", "PageDown", " "].includes(e.key)) { e.preventDefault(); go(1); }
       else if (["ArrowLeft", "PageUp"].includes(e.key)) { e.preventDefault(); go(-1); }
-      else if (e.key === "Escape") onClose();
       else if (e.key === "f" || e.key === "F") toggleFull();
     };
     window.addEventListener("keydown", on);
@@ -320,6 +332,12 @@ function Presenter({ r, slides, onClose }) {
   }
   const skipPairs = () => setI(Math.max(i, slides.findIndex((s) => s.id === "detective")));
   const pairCount = slides.filter((s) => s.type === "pairShow").length;
+  // 추첨한 뒤 발표가 끝나기 전에 닫으면 운영자 화면(결과 탭)에 아직 발표하지 않은 당첨자까지 보인다
+  const close = () => {
+    if (drawn && i < last && !window.confirm("발표 화면을 닫을까요?\n\n닫으면 이 화면(운영자 결과 탭)에 아직 발표하지 않은 당첨자까지 모두 보여요. 큰 화면에 띄워 둔 상태라면 발표를 마친 뒤에 닫아 주세요.")) return;
+    if (i > (r.step ?? -1)) updateDoc(resultRef(), { step: i }).catch(() => {}); // 늦게 남기려던 장면 번호를 닫기 전에 남긴다
+    onClose();
+  };
 
   return (
     <div className="presenter" ref={rootRef} role="dialog" aria-label="발표 화면">
@@ -329,7 +347,8 @@ function Presenter({ r, slides, onClose }) {
       <div className="pres-controls">
         <button className="pk-btn sm" onClick={() => go(-1)} disabled={i === 0}>◀ 이전</button>
         <span className="small">{i + 1} / {slides.length}</span>
-        <button className="pk-btn main" onClick={() => go(1)} disabled={i === last}>다음 ▶</button>
+        <button className="pk-btn main" onClick={() => go(1)} disabled={i === last || mustDraw}>다음 ▶</button>
+        {mustDraw && <span className="small">숫자를 넣고 추첨해야 다음 장면으로 넘어가요</span>}
         {slide.type.startsWith("pair") && (
           <>
             <button className={auto ? "pk-btn sm gold" : "pk-btn sm"} aria-pressed={auto} onClick={() => setAuto(!auto)}>{auto ? "자동 넘기기 끄기" : "자동 넘기기"}</button>
@@ -337,7 +356,7 @@ function Presenter({ r, slides, onClose }) {
           </>
         )}
         <button className="pk-btn sm" onClick={toggleFull}>전체 화면</button>
-        <button className="pk-btn sm ghost" onClick={onClose}>닫기</button>
+        <button className="pk-btn sm ghost" onClick={close}>닫기</button>
       </div>
     </div>
   );
@@ -376,7 +395,7 @@ function Slide({ r, slide, nameOf, pairCount }) {
         <div className="pres-center">
           <p className="pres-kicker">우승 파트는…</p>
           <h1 className="pres-title pop delay">{win.join(", ") || "없음"}</h1>
-          <p className="pres-sub delay2">파트원 모두 응모권 +{TICKET_RULES.partBonus}장!</p>
+          <p className="pres-sub delay2">미션을 {TICKET_RULES.partBonusMinMissions}건 이상 한 파트원 응모권 +{TICKET_RULES.partBonus}장!</p>
         </div>
       );
     }
@@ -448,7 +467,7 @@ function Slide({ r, slide, nameOf, pairCount }) {
               <span key={a.receiverPid} className="pres-person pop">
                 <Avatar pid={a.angelPid} size={100} />
                 <b>{nameOf(a.angelPid)}</b>
-                <span className="small">→ {nameOf(a.receiverPid)}님에게 미션 {a.done}건</span>
+                <span className="small">→ {nameOf(a.receiverPid)}님에게 미션 {a.done}건{a.order ? ` · ${a.order}번째로 지원` : ""}</span>
               </span>
             ))}
           </div>
@@ -539,14 +558,14 @@ function DrawSlide({ r, step, nameOf }) {
   const [spinning, setSpinning] = useState(true);
   const [flash, setFlash] = useState("");
   const pool = useMemo(() => Object.entries(r.tickets || {}).filter(([, n]) => n > 0).map(([pid]) => pid), [r.tickets]);
-  const spinMs = step.key === PRIZES.grand.key ? 3000 : 1500;
+  const ms = spinMs(step);
   useEffect(() => {
     if (!done || !spinning) return undefined;
     if (pool.length === 0) { setSpinning(false); return undefined; }
     const t = setInterval(() => setFlash(pool[Math.floor(Math.random() * pool.length)]), 80);
-    const stop = setTimeout(() => setSpinning(false), spinMs);
+    const stop = setTimeout(() => setSpinning(false), ms);
     return () => { clearInterval(t); clearTimeout(stop); };
-  }, [done, spinning, pool, spinMs]);
+  }, [done, spinning, pool, ms]);
   return (
     <div className="pres-center wide">
       <p className="pres-kicker">{step.prize} · {step.count}명</p>

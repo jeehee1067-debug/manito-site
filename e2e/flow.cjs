@@ -791,10 +791,15 @@ const step = (s) => console.log("▶", s);
   const SEED = "4821";
   const gPrize = panel(users["가나"], "추첨·시상");
   await next(); await pres.locator(".pres-title", { hasText: "숫자 하나로 한 번에!" }).waitFor();
+  assert.ok(await pres.getByRole("button", { name: "다음 ▶" }).isDisabled(), "추첨하기 전에는 다음 장면으로 넘어갈 수 없다");
   await pres.getByRole("button", { name: "추첨하기" }).click(); // 숫자 없이 누르면 안내만 나온다
   await pres.getByText("현장에서 정한 숫자를 먼저 넣어 주세요").waitFor();
   await pres.locator(".seed-input").fill(SEED);
   await pres.getByRole("button", { name: "추첨하기" }).click();
+  // 한 번 더 눌러야 추첨된다(브라우저 확인창은 전체 화면을 풀어서 쓰지 않는다)
+  await pres.getByText("한 번에 정해지고 다시 뽑을 수 없어요").waitFor();
+  assert.equal(Object.keys(fields(await readDoc("results/public")).draws || {}).length, 0, "확정하기 전에는 추첨되지 않는다");
+  await pres.getByRole("button", { name: `숫자 ${SEED}로 추첨 확정` }).click();
   await pres.getByText(`추첨 완료! 현장에서 정한 숫자 ${SEED}`).waitFor({ timeout: 8000 });
   assert.equal(await pres.getByRole("button", { name: "추첨하기" }).count(), 0, "추첨한 뒤에는 추첨 버튼이 없다");
   await shot(admin, "pres-draw-go");
@@ -809,36 +814,46 @@ const step = (s) => console.log("▶", s);
   assert.equal(await gPrize.locator(".winner").count(), 0, "발표 전에는 참여자 화면에 당첨자가 없다");
   assert.equal(await gPrize.getByText("발표 전", { exact: true }).count(), 6, "1~6등 모두 발표 전(3등 후기상 포함)");
   assert.equal(await gPrize.getByRole("button", { name: "추첨 검증" }).count(), 0, "발표가 끝나기 전에는 검증 버튼이 없다");
-  let shownCount = 0;
+  let shownCount = 0, waiting = 6;
   const presNames = async () => (await pres.locator(".pres-person b").allInnerTexts()).map((t) => t.trim());
+  // 참여자 화면: 당첨자 칸 수와 "발표 전"인 등수 수
+  const phone = async () => [await gPrize.locator(".winner").count(), await gPrize.getByText("발표 전", { exact: true }).count()];
+  const phoneBecomes = async (want, label) => {
+    for (let k = 0; k < 60 && JSON.stringify(await phone()) !== JSON.stringify(want); k++) await users["가나"].waitForTimeout(150);
+    assert.deepEqual(await phone(), want, label);
+  };
   for (const [key, label] of [["t6", "6등 응모권 추첨"], ["t5", "5등 응모권 추첨"], ["t4", "4등 응모권 추첨"]]) {
     await next(); await pres.locator(".pres-title", { hasText: label }).waitFor();
     await pres.locator(".pres-spin").waitFor(); // 이름이 돌아가는 연출
+    assert.deepEqual(await phone(), [shownCount, waiting], `${label}: 무대에서 이름이 돌아가는 동안 휴대폰에는 아직 안 보인다`);
     if (draws[key].winners.length === 0) await pres.getByText("당첨자 없음").waitFor({ timeout: 8000 });
     else {
       await pres.locator(".pres-person").first().waitFor({ timeout: 8000 });
       assert.deepEqual((await presNames()).sort(), wonNames(key).sort(), `${label} 발표 화면의 이름`);
       await shot(admin, `pres-${key}`);
     }
-    shownCount += draws[key].winners.length;
-    await users["가나"].waitForTimeout(400);
-    assert.equal(await gPrize.locator(".winner").count(), shownCount, `${label}까지 발표: 참여자 화면에 ${shownCount}명`);
+    shownCount += draws[key].winners.length; waiting -= 1;
+    await phoneBecomes([shownCount, waiting], `${label}까지 발표: 참여자 화면에 ${shownCount}명`);
   }
   await next(); await pres.getByText(/3등 베스트 후기상/).waitFor();
-  shownCount += 1;
+  shownCount += 1; waiting -= 1;
+  await phoneBecomes([shownCount, waiting], "3등 발표");
   for (const rank of [2, 1, 0]) {
     await next(); await pres.getByText("2등 베스트 마니또 · 각 10만원").waitFor();
+    assert.equal((await phone())[0], shownCount, "2등: 무대에서 뜸 들이는 동안 휴대폰에는 아직 안 보인다");
     const pid = draws.best.winners[rank];
     if (pid) { await pres.locator(".pres-title", { hasText: nameByPid[pid] }).waitFor(); shownCount += 1; if (rank === 0) { await admin.waitForTimeout(1200); await shot(admin, "pres-best"); } }
     else await pres.getByText("수상자 없음").waitFor();
-    await users["가나"].waitForTimeout(400);
-    assert.equal(await gPrize.locator(".winner").count(), shownCount, `2등 ${3 - rank}번째까지 발표: 참여자 화면에 ${shownCount}명`);
+    if (rank === 2) waiting -= 1; // 2등 칸은 한 명이라도 발표되면 "나머지는 발표 전"으로 바뀐다
+    await phoneBecomes([shownCount, waiting], `2등 ${3 - rank}번째까지 발표: 참여자 화면에 ${shownCount}명`);
   }
   await next(); await pres.locator(".pres-title", { hasText: "1등 대추첨" }).waitFor();
   await pres.locator(".pres-spin").waitFor();
+  assert.deepEqual(await phone(), [shownCount, 1], "1등: 무대에서 이름이 돌아가는 동안 휴대폰에는 아직 안 보인다");
   await pres.locator(".pres-person").first().waitFor({ timeout: 8000 });
   assert.deepEqual(await presNames(), wonNames("grand"));
   await admin.waitForTimeout(600); await shot(admin, "pres-grand");
+  await phoneBecomes([shownCount + 1, 0], "1등 발표 뒤 휴대폰에도 열린다");
   await next(); await pres.getByText("모두 수고하셨어요!").waitFor();
   await pres.getByRole("button", { name: "닫기" }).click();
   const stepNow = fields(await readDoc("results/public")).step;

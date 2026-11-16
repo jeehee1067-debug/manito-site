@@ -149,25 +149,62 @@ const step = (s) => console.log("▶", s);
     await H.panel(r, "익명 피드").locator(".dialogue", { hasText: "서랍 속 간식 덕분에" }).getByText("♥ 공감 2").waitFor();
     console.log(`  ${R}: 1주차 추측(가나) → 할 일에서 사라짐, 인증 → 피드 글에 두 사람이 공감(♥ 2, 같은 사람은 한 번만)`);
   }
-  step("수호천사: 지원 → 운영자가 받은 게 없는 사람에게 연결 → 미션 → 받는 사람 확인");
-  const X = NAMES.map((n) => target[n]).find((r) => giverOf[r] !== "가나"); // 마니또가 아무것도 안 한 사람
-  const ANGEL = NAMES.find((n) => n !== X && n !== giverOf[X]);
+  step("수호천사: 지원 순서 → 2주차를 열 때 자동 연결(운영자가 고르지 않음, 자기 미션을 안 한 지원자는 건너뜀) → 미션 → 받는 사람 확인");
+  // 1주차 미션을 한 마니또는 가나뿐이다. 받은 게 없는 사람은 가나의 대상을 뺀 모두
+  const ANGEL = "가나";
+  const LAZY = NAMES.find((n) => n !== "가나"); // 자기 1주차 미션을 안 한 사람이 먼저 지원한다
+  let X; // 자동으로 연결된 받는 사람
   {
+    const volunteer = async (name) => {
+      const p = u[name];
+      await H.tab(p, "피드"); await H.tab(p, "내 미션");
+      const ap = H.panel(p, "수호천사 지원 (응모권을 더 받고 싶다면)");
+      await ap.getByText("먼저 지원한 순서대로 자동 연결돼요").waitFor();
+      await ap.getByRole("button", { name: "수호천사 지원하기" }).click();
+      await ap.getByText("지원 중이에요").waitFor();
+    };
+    await volunteer(LAZY);
+    await volunteer(ANGEL);
     const a = u[ANGEL];
-    await H.tab(a, "피드"); await H.tab(a, "내 미션");
-    const ap = H.panel(a, "수호천사 지원 (응모권을 더 받고 싶다면)");
-    await ap.getByRole("button", { name: "수호천사 지원하기" }).click();
-    await ap.getByText("지원 중이에요").waitFor();
     await H.tab(admin, "운영");
-    const panel = admin.locator("section.panel", { has: admin.locator("h2.panel-title", { hasText: /^수호천사 \(지원 1명/ }) });
+    const panelOf = (n) => admin.locator("section.panel", { has: admin.locator("h2.panel-title", { hasText: new RegExp(`^수호천사 \\(지원 2명 · 연결 ${n}명`) }) });
+    const before = panelOf(0);
+    await before.waitFor();
+    assert.equal(await before.locator("select").count(), 0, "운영 화면에 수호천사를 고르는 칸이 없다");
+    const q = await before.locator(".angel-queue li").allInnerTexts();
+    assert.ok(q.length === 2 && q[0].startsWith(`1. ${LAZY} `) && q[1].startsWith(`2. ${ANGEL} `), q.join(" | "));
+    // 1주차 중에는 연결하지 않는다
+    await before.getByText("2주차가 열리면 그때 정해져요.").waitFor();
+    assert.ok(await before.getByRole("button", { name: "지금 순서대로 연결 (0쌍)" }).isDisabled());
+    // 2주차를 열면 자동으로 연결된다
+    await H.panel(admin, "주차").getByRole("button", { name: "2주차" }).click();
+    await admin.locator(".hud-chip", { hasText: "2주차" }).waitFor();
+    await admin.getByText("2주차를 열었어요. 수호천사 1명을 지원 순서대로 연결했어요").waitFor();
+    const panel = panelOf(1);
     await panel.waitFor();
-    const row = panel.locator("li.row-item", { has: admin.locator("select") }).filter({ hasText: X });
-    await row.locator("select").selectOption({ label: ANGEL });
-    // 받는 사람 본인과 그 사람의 마니또는 고를 수 없다
-    const opts = await row.locator("option").allInnerTexts();
-    assert.ok(!opts.includes(X) && !opts.includes(giverOf[X]), opts.join(","));
-    await row.getByRole("button", { name: "연결" }).click();
-    await panel.getByText(`${X} ← ${ANGEL} 연결했어요.`).waitFor();
+    const line = (await panel.locator("li.row-item").first().innerText()).replace(/\s+/g, " ");
+    const m = line.match(/^(\S+) ← 수호천사 (\S+) \(지원 (\d+)번째/);
+    assert.ok(m, line);
+    X = m[1];
+    assert.equal(m[2], ANGEL);
+    assert.equal(m[3], "2", "가나는 두 번째로 지원했지만 연결됨(첫 번째 지원자는 자기 미션을 안 해서 건너뜀)");
+    assert.ok(X !== ANGEL && giverOf[X] !== "가나", `받은 게 없는 사람(${X})에게 연결`);
+    const q2 = await panel.locator(".angel-queue li").allInnerTexts();
+    assert.match(q2[0], /1주차까지 자기 미션을 다 하지 않아 건너뜀/);
+    assert.ok(q2[1].includes(`연결됨 → ${X}`), q2[1]);
+    assert.ok(await panel.getByRole("button", { name: "지금 순서대로 연결 (0쌍)" }).isDisabled(), "남은 지원자는 자기 미션을 안 해서 더 연결할 짝이 없다");
+    console.log(`  지원 순서: 1. ${LAZY}(자기 1주차 미션 안 함 → 건너뜀) 2. ${ANGEL} → 2주차를 열자 ${X} ← ${ANGEL} 자동 연결`);
+    // 연결 풀고 다음 순번으로: 넘긴 짝은 다시 붙지 않고, 풀린 지원자는 순서대로 다른 "받은 게 없는 사람"에게 간다
+    const first = X;
+    await panel.locator("li.row-item").first().getByRole("button", { name: "연결 풀고 다음 순번으로" }).click();
+    await panel.getByText(`${first}님의 연결을 풀었어요. 지금 연결할 수 있는 다음 지원자는 없어요.`).waitFor();
+    await panel.locator("li.row-item", { hasText: `← 수호천사 ${ANGEL}` }).filter({ hasNotText: `${first} ←` }).waitFor();
+    const line2 = (await panel.locator("li.row-item").first().innerText()).replace(/\s+/g, " ");
+    X = line2.match(/^(\S+) ← 수호천사 (\S+) \(지원 2번째/)[1];
+    assert.ok(X !== first && X !== ANGEL && giverOf[X] !== "가나", line2);
+    assert.equal(await panel.locator("li.row-item").count(), 1, "연결은 여전히 한 쌍");
+    assert.ok(await panel.getByRole("button", { name: "지금 순서대로 연결 (0쌍)" }).isDisabled(), `넘긴 짝(${first} ← ${ANGEL})은 다시 붙지 않는다`);
+    console.log(`  "연결 풀고 다음 순번으로": ${first}에게는 다시 붙지 않고, ${ANGEL}은(는) 순서대로 ${X}에게 연결됨`);
     // 수호천사 화면: 수호천사 미션 + 이번 주 할 일
     assert.match(await todoOf(a), /수호천사 미션 하기/);
     const mp = H.panel(a, "수호천사 미션");
@@ -188,7 +225,7 @@ const step = (s) => console.log("▶", s);
     await ai.getByRole("button", { name: "받았어요" }).click();
     await ai.getByText("받았어요: 귤 덕분에 오후가 상큼했어요. 고마워요!").waitFor();
     await mp.getByText(/1번: 책상에 귤 두 개 두기 — 확인됨/).waitFor();
-    console.log(`  ${ANGEL}이(가) 지원 → 운영자가 ${X}(마니또 ${giverOf[X]}가 아무것도 안 함)에게 연결 → 수호천사 미션 → ${X}이(가) '받았어요'(수호천사 이름은 안 보임)`);
+    console.log(`  ${X}(마니또 ${giverOf[X]}가 아무것도 안 함)에게 ${ANGEL}이(가) 수호천사 미션 → ${X}이(가) '받았어요'(수호천사 이름은 안 보임)`);
   }
   for (const w of [2, 3]) {
     await H.panel(admin, "주차").getByRole("button", { name: `${w}주차` }).click();

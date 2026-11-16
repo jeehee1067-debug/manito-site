@@ -464,7 +464,7 @@ function AngelCard() {
     setMsg("");
     try {
       await setDoc(doc(db, "angelVolunteers", myPid), { active: !vol, at: serverTimestamp(), ...bump() }, { merge: true });
-      setMsg(vol ? "지원을 취소했어요." : "지원했어요. 도움이 필요한 사람이 생기면 운영진이 연결해 드려요(연결되면 여기에 수호천사 미션이 생겨요).");
+      setMsg(vol ? "지원을 취소했어요. 다시 지원하면 순서는 맨 뒤가 돼요." : "지원했어요. 도움이 필요한 사람이 생기면 먼저 지원한 순서대로 자동 연결돼요(연결되면 여기에 수호천사 미션이 생겨요).");
     } catch {
       setMsg("지금은 바꿀 수 없어요.");
     }
@@ -476,9 +476,12 @@ function AngelCard() {
       {canApply && targets.length === 0 && (
         <Panel title="수호천사 지원 (응모권을 더 받고 싶다면)">
           <p className="small">
-            마니또가 미션을 안 해서 아무것도 받지 못한 사람이 있으면, 운영진이 지원자 중 한 명을 그 사람의 <b>수호천사</b>로 몰래 연결해요.
+            마니또가 미션을 안 해서 아무것도 받지 못한 사람이 있으면, 지원자 중 한 명이 그 사람의 <b>수호천사</b>로 몰래 연결돼요.
             연결되면 그 사람에게 미션을 {R.maxAngel}번까지 해 주고, 그 사람이 확인할 때마다 응모권 +{R.angelPerMission}장(최대 {R.maxAngel}장)을 받아요.
-            도움이 필요한 사람이 없으면 연결되지 않을 수도 있어요. 내 마니또 미션은 그대로 해 주세요.
+          </p>
+          <p className="small">
+            <b>먼저 지원한 순서대로 자동 연결돼요</b>(운영진이 고르지 않아요). 2주차·3주차가 열릴 때, 그때까지 아무것도 받지 못한 사람이 있으면 연결돼요.
+            지난 주차의 내 마니또 미션을 모두 완료한 지원자만 연결되니 내 미션은 그대로 해 주세요. 도움이 필요한 사람이 없으면 연결되지 않을 수도 있어요.
           </p>
           <button className={vol ? "pk-btn sm" : "pk-btn gold sm"} onClick={toggle}>{vol ? "지원 취소" : "수호천사 지원하기"}</button>
           {vol && <p className="small note">지원 중이에요. 연결되면 여기에 "수호천사 미션"이 생겨요.</p>}
@@ -624,7 +627,7 @@ function TicketSummary({ codes, missions, entries }) {
           (지금 인증 {mission}건{waiting > 0 ? `, 인증 대기 ${waiting}건` : ""}{notDone > 0 ? `, 아직 안 한 미션 ${notDone}건` : ""}).
           {notDone > 0
             ? ` 여기서 멈추면 남은 미션 ${notDone}장과 은신 ${R.hidden}장, 합쳐서 ${notDone + R.hidden}장을 놓쳐요.`
-            : waiting > 0 ? " 대상이 인증하면 채워져요." : ""}
+            : waiting > 0 ? " 대상이 인증하면 채워져요(대상이 끝까지 인증하지 않으면 운영진이 확인해 인정할 수 있어요)." : ""}
         </p>
       ))}
       <p className="small">
