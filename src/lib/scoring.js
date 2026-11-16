@@ -16,6 +16,8 @@ import { secureRandom, seededRandom } from "./random.js";
  * deliveries: [{ receiverPid, slot }]  마니또가 "완료 알리기"(또는 쪽지 더 보내기)를 누를 때마다 1건
  *   missions의 완료 표시(done)도 완료 알림으로 친다(둘 중 하나만 있는 예전 자료도 같은 기준으로 보도록. 운영 화면 pairs.js와 같은 기준)
  * cluesDone: Set(giverPid) 프로필을 채워 단서 6개가 지금 대상에게 간 마니또. 주지 않으면(null) 은신 조건에서 단서를 보지 않는다.
+ * angels: { receiverPid: angelPid } 운영자가 연결한 수호천사(마니또가 미션을 안 한 사람에게 지원자를 연결)
+ * angelGifts: [{ receiverPid, k, confirmed }] 수호천사 미션(받는 사람이 확인하면 confirmed)
  * verdicts: { "받는사람pid_주차": "received" | "missing" }
  *   마니또가 완료를 알렸는데 인증이 없는 주차를 운영자가 확인한 결과(받는 사람이 "받은 게 없어요"로 신고한 주차 포함).
  *
@@ -24,7 +26,8 @@ import { secureRandom, seededRandom } from "./random.js";
  *    은신은 내 미션이 1건 이상 인증된 마니또만 받는다(아무것도 안 한 사람이 가장 안 들키는 문제).
  *    그리고 단서 6개를 낸 마니또만 받는다(프로필을 안 채워 단서를 안 내면 덜 들키는 문제).
  *    카드 추가분은 받는 사람이 직접 인증한 미션에만 준다(아래 ②로 인정된 미션에는 주지 않는다).
- *  - 받는 사람: 인증 입력 1장씩(최대 3), 정답 지목 1장.
+ *  - 받는 사람: 인증 입력 1장씩(최대 3), 정답 지목 1장. 수호천사 미션을 확인한 것도 인증 입력으로 친다(보상과 합쳐 최대 3이라 이중으로 받지 않는다).
+ *  - 수호천사: 확인된 수호천사 미션 1건마다 1장(최대 2). 내 미션 인증 수(은신·보상·우승 파트 조건)에는 넣지 않는다.
  *  - 상대방 때문에 손해 보지 않게:
  *    ① 내 마니또가 미션을 안 보낸 주차, 그리고 완료를 알렸지만 운영자가 "못 받음"으로 확인한 주차는 인증 입력 대신 1장(보상).
  *       인증 입력과 합쳐 최대 3장. 내 미션이 1건 이상 인증된 사람만.
@@ -34,11 +37,11 @@ import { secureRandom, seededRandom } from "./random.js";
  *  - 파트 대항전: 미션 완수율 1위 파트원에게 1장(동률이면 모두). 내 미션이 1건 이상 인증된 사람만.
  *  - 가입 안 한 사람, 중도 이탈, 수상 제외는 0장.
  */
-export function computeTickets({ people, assignments, giverCodes, redemptions, missions, guesses, deliveries = [], verdicts = {}, cluesDone = null }) {
+export function computeTickets({ people, assignments, giverCodes, redemptions, missions, guesses, deliveries = [], verdicts = {}, cluesDone = null, angels = {}, angelGifts = [] }) {
   const out = {};
   const absent = new Set(); // 불참: 가입 안 함 또는 중도 이탈
   for (const p of people) {
-    out[p.pid] = { mission: 0, card: 0, entries: 0, comp: 0, hidden: 0, guess: 0, partBonus: 0, total: 0, completion: 0, assumed: 0 };
+    out[p.pid] = { mission: 0, card: 0, entries: 0, comp: 0, hidden: 0, guess: 0, partBonus: 0, angel: 0, total: 0, completion: 0, assumed: 0 };
     if (p.joined === false || p.dropout) absent.add(p.pid);
   }
   const valid = (code) => redemptions[code] && !redemptions[code].voided;
@@ -86,6 +89,17 @@ export function computeTickets({ people, assignments, giverCodes, redemptions, m
     if (r.voided) continue;
     entries[r.receiverPid] = (entries[r.receiverPid] || 0) + 1;
   }
+  // 수호천사 미션: 받는 사람이 확인한 것만. 받는 사람에게는 인증 입력, 연결된 수호천사에게는 수호천사 응모권
+  const angelCount = {};
+  for (const g of angelGifts) {
+    const angel = angels[g.receiverPid];
+    if (!g.confirmed || !angel) continue;
+    entries[g.receiverPid] = (entries[g.receiverPid] || 0) + 1;
+    angelCount[angel] = (angelCount[angel] || 0) + 1;
+  }
+  for (const [pid, n] of Object.entries(angelCount)) {
+    if (out[pid]) out[pid].angel = Math.min(n, R.maxAngel) * R.angelPerMission;
+  }
   for (const [pid, n] of Object.entries(entries)) {
     if (out[pid]) out[pid].entries = Math.min(n, R.maxReceiverEntries) * R.perReceiverEntry;
   }
@@ -113,7 +127,7 @@ export function computeTickets({ people, assignments, giverCodes, redemptions, m
   }
 
   for (const [pid, t] of Object.entries(out)) {
-    t.total = zero.has(pid) ? 0 : t.mission + t.card + t.entries + t.comp + t.hidden + t.guess + t.partBonus;
+    t.total = zero.has(pid) ? 0 : t.mission + t.card + t.entries + t.comp + t.hidden + t.guess + t.partBonus + t.angel;
   }
   return out;
 }

@@ -1423,3 +1423,81 @@ describe("참여 재미 기능: 취향·알레르기, 마니또에게 한마디,
     await assertFails(updateDoc(ref, { step: 5, "draws.t4": { seed: "9", winners: ["p002"] } })); // 진행하면서 추첨 결과 바꾸기
   });
 });
+
+describe("수호천사: 지원한 참여자를 마니또가 미션을 안 한 사람에게 연결", () => {
+  beforeEach(() => seed());
+  // 시드 배정: p001 → p002 → p003 → p004 → p001. p002의 마니또는 p001.
+  const volunteer = (pid, active = true) => setDoc(doc(p(pid), "angelVolunteers", pid), { active, at: serverTimestamp(), n: N }, { merge: true });
+  const link = (db, receiverPid, angelPid) => setDoc(doc(db, "angels", receiverPid), { angelPid, at: serverTimestamp() });
+  const gift = (db, receiverPid, k, more = {}) => setDoc(doc(db, "angelGifts", `${receiverPid}_${k}`), { receiverPid, k, text: "책상에 귤 두기", message: "힘내세요!", createdAt: serverTimestamp(), ...more });
+
+  test("지원 (MyMission.jsx AngelCard): 본인만, 쓴 횟수와 서버 시각으로, 본인·운영자만 읽는다", async () => {
+    await assertFails(setDoc(doc(p("p003"), "angelVolunteers", "p003"), { active: true, at: serverTimestamp() })); // n 없음
+    await assertFails(setDoc(doc(p("p003"), "angelVolunteers", "p003"), { active: true, at: new Date(2020, 0, 1), n: N }));
+    await assertFails(setDoc(doc(p("p004"), "angelVolunteers", "p003"), { active: true, at: serverTimestamp(), n: N })); // 남의 것
+    await assertSucceeds(volunteer("p003"));
+    await assertSucceeds(volunteer("p003", false)); // 취소
+    await assertSucceeds(volunteer("p003", true));
+    await assertSucceeds(getDoc(doc(p("p003"), "angelVolunteers", "p003")));
+    await assertFails(getDoc(doc(p("p004"), "angelVolunteers", "p003")));
+    await assertSucceeds(getDocs(collection(admin(), "angelVolunteers")));
+    await setPhase(2);
+    await assertFails(volunteer("p004")); // 미션 진행이 끝나면 지원할 수 없다
+  });
+
+  test("연결 (Admin.jsx Angels): 운영자만, 지원 중인 사람만, 받는 사람 본인·그 사람의 마니또는 안 된다", async () => {
+    await volunteer("p001"); await volunteer("p003");
+    await assertFails(link(admin(), "p002", "p004")); // 지원하지 않은 사람
+    await assertFails(link(admin(), "p002", "p001")); // p002의 마니또
+    await volunteer("p002");
+    await assertFails(link(admin(), "p002", "p002")); // 본인
+    await assertFails(link(p("p003"), "p002", "p003")); // 참여자가 스스로 연결
+    await assertFails(setDoc(doc(admin(), "angels", "p002"), { angelPid: "p003", at: new Date(2020, 0, 1) }));
+    await assertSucceeds(link(admin(), "p002", "p003"));
+    // 수호천사는 내가 맡은 사람을 알 수 있다(내 것만)
+    await assertSucceeds(getDocs(query(collection(p("p003"), "angels"), where("angelPid", "==", "p003"))));
+    await assertFails(getDocs(query(collection(p("p004"), "angels"), where("angelPid", "==", "p003"))));
+    await assertFails(getDoc(doc(p("p002"), "angels", "p002"))); // 받는 사람은 누가 수호천사인지 모른다
+    await volunteer("p004");
+    await assertSucceeds(link(admin(), "p002", "p004")); // 미션이 오기 전에는 바꿀 수 있다
+    await assertSucceeds(link(admin(), "p002", "p003"));
+    await setPhase(0);
+    await assertFails(link(admin(), "p003", "p004")); // 준비 단계에는 연결하지 않는다
+  });
+
+  test("수호천사 미션과 받는 사람 확인 (MyMission.jsx AngelCard, Detective.jsx AngelInbox)", async () => {
+    await volunteer("p003"); await volunteer("p004");
+    await link(admin(), "p002", "p003");
+    await assertFails(gift(p("p004"), "p002", 1)); // 연결되지 않은 사람
+    await assertFails(gift(p("p003"), "p002", 3)); // 1·2번만
+    await assertFails(setDoc(doc(p("p003"), "angelGifts", "p002_x"), { receiverPid: "p002", k: 1, text: "귤", message: "", createdAt: serverTimestamp() }));
+    await assertFails(gift(p("p003"), "p002", 1, { text: "가" })); // 한 것은 2자 이상
+    await assertFails(gift(p("p003"), "p002", 1, { angelPid: "p003" })); // 보낸 사람 정보 넣기
+    await assertFails(gift(p("p003"), "p002", 1, { createdAt: new Date(2020, 0, 1) }));
+    await assertSucceeds(gift(p("p003"), "p002", 1));
+    await assertFails(gift(p("p003"), "p002", 1, { text: "다시 씀" })); // 한 번만
+    // 읽기: 받는 사람(목록·문서), 수호천사(문서, 아직 없는 2번도 확인 가능), 다른 사람은 못 읽음
+    await assertSucceeds(getDocs(query(collection(p("p002"), "angelGifts"), where("receiverPid", "==", "p002"))));
+    await assertSucceeds(getDoc(doc(p("p003"), "angelGifts", "p002_1")));
+    await assertSucceeds(getDoc(doc(p("p003"), "angelGifts", "p002_2")));
+    await assertFails(getDoc(doc(p("p004"), "angelGifts", "p002_1")));
+    await assertFails(getDoc(doc(p("p001"), "angelGifts", "p002_1"))); // 원래 마니또도 못 봄
+    // 확인: 받는 사람만, 한 번만, 후기 10자 이상
+    const ok = { confirmed: true, review: "귤 맛있게 먹었어요 고마워요!", confirmedAt: serverTimestamp() };
+    await assertFails(updateDoc(doc(p("p003"), "angelGifts", "p002_1"), ok)); // 수호천사가 스스로
+    await assertFails(updateDoc(doc(p("p002"), "angelGifts", "p002_1"), { ...ok, review: "고마워요" }));
+    await assertFails(updateDoc(doc(p("p002"), "angelGifts", "p002_1"), { ...ok, text: "바꿈" }));
+    await assertSucceeds(updateDoc(doc(p("p002"), "angelGifts", "p002_1"), ok));
+    await assertFails(updateDoc(doc(p("p002"), "angelGifts", "p002_1"), { ...ok, review: "다시 쓴 후기입니다 열 자 넘게" }));
+    // 미션이 온 뒤에는 연결을 바꾸거나 풀 수 없다
+    await assertFails(link(admin(), "p002", "p004"));
+    await assertFails(deleteDoc(doc(admin(), "angels", "p002")));
+    // 수호천사는 받는 사람의 "내 마니또에게 알려 줄 것"(알레르기)을 읽는다
+    await put("prefs/p002", { avoid: "땅콩", likes: "", nope: "", n: 1 });
+    await assertSucceeds(getDoc(doc(p("p003"), "prefs", "p002")));
+    await assertFails(getDoc(doc(p("p004"), "prefs", "p002")));
+    await setPhase(2);
+    await assertFails(gift(p("p003"), "p002", 2)); // 미션 진행이 끝나면 못 보냄
+    await assertSucceeds(getDocs(collection(admin(), "angelGifts")));
+  });
+});

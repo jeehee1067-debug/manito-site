@@ -41,7 +41,7 @@ service cloud.firestore {
     // 게시된 규칙의 버전 확인용. 운영 화면이 이 경로를 읽어 보고, 거부되면 "콘솔의 규칙이 예전 것"이라고 알려 준다.
     // 화면이 쓰는 경로·값의 모양을 바꿀 때 src/lib/constants.js의 RULES_VERSION과 같이 올린다.
     match /rulesVersion/{v} {
-      allow get: if isAdmin() && v == '20261117';
+      allow get: if isAdmin() && v == '20261118';
     }
 
     // ── 설정 ──────────────────────────────────────────────────────────────
@@ -185,7 +185,10 @@ service cloud.firestore {
     // 내 마니또에게 알려 줄 것: 좋아하는 간식(likes), 못 먹는 음식·알레르기(avoid), 받기 곤란한 것(nope).
     // 본인·내 마니또(나를 맡은 사람)·운영자만 읽는다. 간식 미션에서 알레르기 사고를 막고 선물 고르는 데 쓴다.
     match /prefs/{pid} {
-      allow get: if linked() && (myPid() == pid || myReceiver() == pid);
+      // 나를 맡은 마니또, 그리고 나에게 연결된 수호천사도 읽는다(간식 미션 알레르기 확인)
+      allow get: if linked() && (myPid() == pid || myReceiver() == pid
+        || (exists(/databases/$(database)/documents/angels/$(pid))
+            && get(/databases/$(database)/documents/angels/$(pid)).data.angelPid == myPid()));
       allow read: if isAdmin();
       allow create, update: if linked() && myPid() == pid
         && request.resource.data.keys().hasOnly(['likes', 'avoid', 'nope', 'n'])
@@ -591,6 +594,68 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow create: if linked() && myPid() == pid && phase() == 1 && midGuessOk({});
       allow update: if linked() && myPid() == pid && phase() == 1 && midGuessOk(resource.data);
+    }
+
+    // ── 수호천사 ──────────────────────────────────────────────────────────
+    // 마니또가 미션을 안 해서 받은 게 없는 사람에게, 지원한 참여자를 운영자가 몰래 연결한다(응모권과 연결됨, prizes.js angel*).
+    // 지원: { active, at, n } 본인만 쓰고 본인·운영자만 읽는다. 준비·미션 진행 단계에.
+    match /angelVolunteers/{pid} {
+      allow get: if linked() && myPid() == pid;
+      allow read: if isAdmin();
+      allow create, update: if linked() && myPid() == pid && phase() <= 1
+        && request.resource.data.keys().hasOnly(['active', 'at', 'n'])
+        && request.resource.data.active is bool
+        && request.resource.data.at == request.time
+        && bumped();
+    }
+    // 연결: angels/{받는사람} = { angelPid, at }. 운영자가 미션 진행 단계에. 지원 중인 참여자만, 받는 사람 본인·그 사람의 마니또는 안 된다.
+    // 수호천사 미션이 한 번이라도 오면 바꾸거나 풀 수 없다(누구에게 응모권을 줄지 흔들리지 않게).
+    function angelOk(r) {
+      let a = request.resource.data.angelPid;
+      return request.resource.data.keys().hasOnly(['angelPid', 'at'])
+        && a is string && a != r
+        && get(/databases/$(database)/documents/angelVolunteers/$(a)).data.active == true
+        && get(/databases/$(database)/documents/assignments/$(a)).data.receiverPid != r
+        && request.resource.data.at == request.time;
+    }
+    function noAngelGiftYet(r) {
+      return !exists(/databases/$(database)/documents/angelGifts/$(r + '_1'))
+        && !exists(/databases/$(database)/documents/angelGifts/$(r + '_2'));
+    }
+    match /angels/{receiverPid} {
+      allow list: if linked() && resource.data.angelPid == myPid();
+      allow read: if isAdmin();
+      allow create: if isAdmin() && phase() == 1 && angelOk(receiverPid);
+      allow update: if isAdmin() && phase() == 1 && angelOk(receiverPid) && noAngelGiftYet(receiverPid);
+      allow delete: if isAdmin() && phase() == 1 && noAngelGiftYet(receiverPid);
+    }
+    // 수호천사 미션: angelGifts/{받는사람}_{1|2} = { receiverPid, k, text(한 것), message, createdAt } — 보낸 사람 정보는 없다.
+    // 받는 사람이 확인하면 { confirmed: true, review, confirmedAt }가 더해진다(한 번만). 미션 진행 단계에만.
+    function myAngelFor(r) {
+      return exists(/databases/$(database)/documents/angels/$(r))
+        && get(/databases/$(database)/documents/angels/$(r)).data.angelPid == myPid();
+    }
+    match /angelGifts/{id} {
+      allow list: if linked() && resource.data.receiverPid == myPid();
+      allow get: if linked() && (id.split('_')[0] == myPid() || myAngelFor(id.split('_')[0]));
+      allow read, delete: if isAdmin();
+      allow create: if linked() && phase() == 1
+        && request.resource.data.keys().hasOnly(['receiverPid', 'k', 'text', 'message', 'createdAt'])
+        && request.resource.data.receiverPid is string
+        && myAngelFor(request.resource.data.receiverPid)
+        && request.resource.data.k in [1, 2]
+        && id == request.resource.data.receiverPid + '_' + string(request.resource.data.k)
+        && shortStr(request.resource.data.text, 100) && request.resource.data.text.trim().size() >= 2
+        && shortStr(request.resource.data.message, 500)
+        && request.resource.data.createdAt == request.time;
+      allow update: if linked() && phase() == 1
+        && resource.data.receiverPid == myPid()
+        && resource.data.get('confirmed', false) == false
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['confirmed', 'review', 'confirmedAt'])
+        && request.resource.data.confirmed == true
+        && request.resource.data.review is string
+        && request.resource.data.review.trim().size() >= 10 && request.resource.data.review.size() <= 500
+        && request.resource.data.confirmedAt == request.time;
     }
 
     // 받는 사람 → 내 마니또 익명 한마디: { receiverPid, slot, message, createdAt }, 문서 ID "받는사람_주차"라 주차마다 한 번(고칠 수 없음).

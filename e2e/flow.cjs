@@ -230,7 +230,7 @@ const step = (s) => console.log("▶", s);
   {
     const page = users["다라"];
     await tab(page, "규칙");
-    await panel(page, "응모권 받는 법 (최대 14장)").waitFor();
+    await panel(page, "응모권 받는 법 (최대 16장)").waitFor();
     await panel(page, "파트 대항전").getByText("같은 파트끼리는 마니또가 되지 않아요.").waitFor();
     await panel(page, "응모권 받는 법").getByText("마지막 집계에서 미션 완수율 1위").waitFor();
     await panel(page, "상품과 추첨").getByText("자기 파트 카드는 안 보여요").waitFor();

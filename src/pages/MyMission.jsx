@@ -24,7 +24,7 @@ function cardDeck(pid, slot, level, remoteOnly) {
 }
 
 export default function MyMission() {
-  const { myPid, nameOf, config, byPid, inbox, fromReceiver } = useApp();
+  const { myPid, nameOf, config, byPid, inbox, fromReceiver, angelInbox } = useApp();
   const [assignment, setAssignment] = useState(undefined);
   const [codes, setCodes] = useState(null);
   const [missions, setMissions] = useState({});
@@ -33,6 +33,8 @@ export default function MyMission() {
   const inboxSlots = inbox.filter((d) => d.kind !== "note").map((d) => d.slot); // 내 마니또가 완료를 알린 주차(App이 구독)
   const [mine, setMine] = useState(null); // 내가 받는 사람으로서 입력한 인증(null = 불러오는 중)
   const [extra, setExtra] = useState({}); // 이번 주 할 일에 쓰는 것: 내 취향 칸, 이번 주 추측, 투표 여부
+  const [angelTodo, setAngelTodo] = useState(0); // 내가 수호천사로 연결된 사람 수(아래 AngelCard와 같은 질의라 한 번만 읽는다)
+  useEffect(() => onSnapshot(query(collection(db, "angels"), where("angelPid", "==", myPid)), (s) => setAngelTodo(s.size), () => setAngelTodo(0)), [myPid]);
   const [shown, setShown] = useState(false); // 대상 이름을 보이는지(기본은 가림)
   useEffect(() => {
     if (!shown) return undefined;
@@ -92,7 +94,8 @@ export default function MyMission() {
   const remote = Boolean(myLoc && theirLoc && myLoc !== theirLoc);
   // 인증 목록이 오기 전에는 "인증 안 한 미션"으로 세지 않는다(잠깐 잘못 보이지 않게)
   const pending = mine ? [...new Set(inboxSlots)].filter((slot) => !mine.some((r) => r.slot === slot)) : [];
-  const myEntries = Math.min(TICKET_RULES.maxReceiverEntries, (mine || []).filter((r) => !r.voided).length);
+  // 인증 입력: 내가 인증한 미션 + 확인한 수호천사 미션(scoring.js와 같은 기준, 최대 3)
+  const myEntries = Math.min(TICKET_RULES.maxReceiverEntries, (mine || []).filter((r) => !r.voided).length + angelInbox.filter((g) => g.confirmed).length);
 
   // 가려 둔 동안에는 화면 어디에도 대상 이름을 쓰지 않는다
   // 존칭까지 붙인 이름("홍길동님"). 가려 둔 동안에는 "내 대상".
@@ -111,6 +114,8 @@ export default function MyMission() {
   }
   if (config.phase === PHASE.GUESSING && !progress.unknown && !progress.guessed) todo.push({ text: "최종 지목하기 (마지막 단서: 마니또의 파트 공개)", href: "#detective" });
   if (config.phase === PHASE.VOTING && extra.voted === false) todo.push({ text: "베스트 마니또 투표하기", href: "#vote" });
+  if (running && angelInbox.some((g) => !g.confirmed)) todo.push({ text: "수호천사가 보낸 것 확인하기", href: "#detective" });
+  if (running && angelTodo > 0) todo.push({ text: "수호천사 미션 하기 (이 화면 아래 '수호천사 미션')", href: null });
 
   return (
     <>
@@ -180,6 +185,7 @@ export default function MyMission() {
       ))}
 
       <TicketSummary codes={codes} missions={missions} entries={myEntries} />
+      <AngelCard />
     </>
   );
 }
@@ -441,6 +447,116 @@ function MoreNotes({ slot, myPid, receiverPid, receiverName, code, sent, showCod
       )}
       {msg.text && <p className={msg.type === "error" ? "error small" : "note small"} role="status">{msg.text}</p>}
     </div>
+  );
+}
+
+// 수호천사: 응모권을 더 받고 싶은 사람이 지원하면, 운영진이 마니또에게 아무것도 받지 못한 사람에게 몰래 연결한다.
+// 연결되면 그 사람에게 미션을 2번까지 하고 "완료 알리기". 그 사람이 확인하면 1건당 응모권 +1(최대 2).
+function AngelCard() {
+  const { myPid, config } = useApp();
+  const [vol, setVol] = useState(undefined); // 지원 중인지
+  const [targets, setTargets] = useState([]); // 내가 수호천사로 연결된 받는 사람
+  const [msg, setMsg] = useState("");
+  useEffect(() => onSnapshot(doc(db, "angelVolunteers", myPid), (s) => setVol(s.exists() && s.data().active), () => setVol(false)), [myPid]);
+  useEffect(() => onSnapshot(query(collection(db, "angels"), where("angelPid", "==", myPid)), (s) => setTargets(s.docs.map((d) => d.id)), () => setTargets([])), [myPid]);
+  if (vol === undefined) return null;
+  const canApply = config.phase <= PHASE.RUNNING;
+  if (!canApply && targets.length === 0) return null;
+  async function toggle() {
+    setMsg("");
+    try {
+      await setDoc(doc(db, "angelVolunteers", myPid), { active: !vol, at: serverTimestamp(), ...bump() }, { merge: true });
+      setMsg(vol ? "지원을 취소했어요." : "지원했어요. 도움이 필요한 사람이 생기면 운영진이 연결해 드려요(연결되면 여기에 수호천사 미션이 생겨요).");
+    } catch {
+      setMsg("지금은 바꿀 수 없어요.");
+    }
+  }
+  const R = TICKET_RULES;
+  return (
+    <>
+      {targets.map((r) => <AngelMission key={r} receiverPid={r} />)}
+      {canApply && targets.length === 0 && (
+        <Panel title="수호천사 지원 (응모권을 더 받고 싶다면)">
+          <p className="small">
+            마니또가 미션을 안 해서 아무것도 받지 못한 사람이 있으면, 운영진이 지원자 중 한 명을 그 사람의 <b>수호천사</b>로 몰래 연결해요.
+            연결되면 그 사람에게 미션을 {R.maxAngel}번까지 해 주고, 그 사람이 확인할 때마다 응모권 +{R.angelPerMission}장(최대 {R.maxAngel}장)을 받아요.
+            도움이 필요한 사람이 없으면 연결되지 않을 수도 있어요. 내 마니또 미션은 그대로 해 주세요.
+          </p>
+          <button className={vol ? "pk-btn sm" : "pk-btn gold sm"} onClick={toggle}>{vol ? "지원 취소" : "수호천사 지원하기"}</button>
+          {vol && <p className="small note">지원 중이에요. 연결되면 여기에 "수호천사 미션"이 생겨요.</p>}
+          {msg && <p className="small" role="status">{msg}</p>}
+        </Panel>
+      )}
+    </>
+  );
+}
+
+function AngelMission({ receiverPid }) {
+  const { nameOf, config } = useApp();
+  const [shown, setShown] = useState(false);
+  const [gifts, setGifts] = useState({}); // { 1: 문서 | null, 2: 문서 | null }
+  const [text, setText] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (!shown) return undefined;
+    const t = setTimeout(() => setShown(false), SHOW_MS);
+    return () => clearTimeout(t);
+  }, [shown]);
+  useEffect(() => {
+    const offs = [1, 2].map((k) => onSnapshot(doc(db, "angelGifts", `${receiverPid}_${k}`), (s) => setGifts((g) => ({ ...g, [k]: s.exists() ? s.data() : null })), () => {}));
+    return () => offs.forEach((o) => o());
+  }, [receiverPid]);
+  const name = shown ? `${nameOf(receiverPid)}님` : "도와줄 사람";
+  const next = [1, 2].find((k) => gifts[k] === null);
+  const running = config.phase === PHASE.RUNNING;
+  async function send(e) {
+    e.preventDefault();
+    if (text.trim().length < 2) return setError("무엇을 했는지 2자 이상 적어 주세요.");
+    setBusy(true);
+    setError("");
+    try {
+      await setDoc(doc(db, "angelGifts", `${receiverPid}_${next}`), { receiverPid, k: next, text: text.trim(), message: message.trim(), createdAt: serverTimestamp() });
+      setText(""); setMessage("");
+    } catch {
+      setError("보내지 못했어요. 미션 진행 기간인지 확인해 주세요.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <>
+      <Panel title="수호천사 미션">
+        <p className="small">
+          마니또에게 아무것도 받지 못한 사람이에요. 몰래 챙겨 주고 아래에 "완료 알리기"를 눌러 주세요. 그 사람에게는 "수호천사가 보낸 것"으로 가고(누구인지는 몰라요),
+          확인되면 응모권 +{TICKET_RULES.angelPerMission}장이에요. 송년회에서 수호천사로 소개돼요.
+        </p>
+        <p>
+          <span className={shown ? "target-name sm" : "target-name sm masked"}>{shown ? nameOf(receiverPid) : "● ● ●"}</span>{" "}
+          <button type="button" className="pk-btn sm" aria-pressed={shown} onClick={() => setShown(!shown)}>{shown ? "가리기" : "이름 보기"}</button>
+        </p>
+        {[1, 2].map((k) => gifts[k] && (
+          <p key={k} className="small">{k}번: {gifts[k].text} — {gifts[k].confirmed ? `확인됨 ("${gifts[k].review}")` : "확인 기다리는 중"}</p>
+        ))}
+        {running && next && (
+          <form className="stack" onSubmit={send}>
+            <label>
+              <span className="panel-label">{next}번째로 한 것</span>
+              <input className="pk-input" maxLength={100} value={text} onChange={(e) => setText(e.target.value)} placeholder="예: 책상에 귤 두 개 두기" />
+            </label>
+            <label>
+              <span className="panel-label">쪽지 (선택, 익명으로 전달)</span>
+              <textarea className="pk-input" rows={2} maxLength={500} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="예: 오늘 하루도 힘내세요!" />
+            </label>
+            <button className="pk-btn main sm" disabled={busy}>수호천사 미션 완료 알리기</button>
+          </form>
+        )}
+        {!next && <p className="small muted">수호천사 미션 2번을 모두 했어요. 고마워요!</p>}
+        {error && <p className="error small" role="alert">{error}</p>}
+      </Panel>
+      <TargetPrefs receiverPid={receiverPid} targetName={name} />
+    </>
   );
 }
 

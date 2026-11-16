@@ -128,8 +128,9 @@ export default function Reveal() {
                 내 응모권 {mine.total}장: 미션 {mine.mission} + 카드 {mine.card ?? mine.hard ?? 0} + 인증 입력 {mine.entries}
                 {mine.comp > 0 && ` + 못 받은 주차 보상 ${mine.comp}`} + 은신 {mine.hidden} + 정답 지목 {mine.guess}
                 {mine.partBonus > 0 && ` + 우승 파트 ${mine.partBonus}`}
+                {mine.angel > 0 && ` + 수호천사 ${mine.angel}`}
                 {mine.assumed > 0 && ` (대상 불참·운영진 확인으로 인정된 미션 ${mine.assumed}건 포함, 인정된 미션에는 카드 추가분 없음)`}
-                {mine.total === 0 && mine.mission + (mine.card ?? mine.hard ?? 0) + mine.entries + mine.hidden + mine.guess + (mine.comp || 0) + (mine.partBonus || 0) > 0 && " · 수상 제외 또는 중도 이탈로 0장 처리됐어요"}
+                {mine.total === 0 && mine.mission + (mine.card ?? mine.hard ?? 0) + mine.entries + mine.hidden + mine.guess + (mine.comp || 0) + (mine.partBonus || 0) + (mine.angel || 0) > 0 && " · 수상 제외 또는 중도 이탈로 0장 처리됐어요"}
               </p>
             )}
           </div>
@@ -208,6 +209,9 @@ export default function Reveal() {
             )}
             {shown.has("detective") && quickest && (
               <li><strong>가장 먼저 알아챈 사람</strong> {quickest.pids.map(nameOf).join(", ")} <span className="small">({quickest.week}주차부터 계속 맞힘)</span></li>
+            )}
+            {shown.has("angels") && (r.angels || []).length > 0 && (
+              <li><strong>숨은 수호천사</strong> {r.angels.map((a) => `${nameOf(a.angelPid)} → ${nameOf(a.receiverPid)}`).join(", ")}</li>
             )}
             {shown.has("likesTop") && r.likesTop && (
               <li><strong>가장 많은 공감을 받은 후기</strong> {nameOf(r.likesTop.receiverPid)} <span className="small">(♥ {r.likesTop.likes})</span></li>
@@ -354,6 +358,7 @@ function Slide({ r, slide, nameOf, pairCount }) {
             {s.reviews != null && <span><b>{s.reviews}</b>개의 후기</span>}
             {s.likes != null && <span><b>{s.likes}</b>번의 공감</span>}
             {s.toManito != null && <span><b>{s.toManito}</b>번의 "마니또에게 한마디"</span>}
+            {s.angelMissions > 0 && <span><b>{s.angelMissions}</b>번의 수호천사 미션</span>}
           </div>
         </div>
       );
@@ -433,6 +438,22 @@ function Slide({ r, slide, nameOf, pairCount }) {
         </div>
       );
     }
+    case "angels":
+      return (
+        <div className="pres-center wide">
+          <p className="pres-kicker">마니또가 바빴던 사람들을 몰래 챙긴</p>
+          <h2 className="pres-h2">숨은 수호천사</h2>
+          <div className="pres-row">
+            {r.angels.map((a) => (
+              <span key={a.receiverPid} className="pres-person pop">
+                <Avatar pid={a.angelPid} size={100} />
+                <b>{nameOf(a.angelPid)}</b>
+                <span className="small">→ {nameOf(a.receiverPid)}님에게 미션 {a.done}건</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      );
     case "likesTop":
       return (
         <div className="pres-center">
