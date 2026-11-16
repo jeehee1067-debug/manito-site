@@ -191,7 +191,7 @@ function ReportBox({ myPid, slot, phase }) {
     ];
     return () => offs.forEach((o) => o());
   }, [rid]);
-  const canReport = phase >= PHASE.RUNNING && phase <= PHASE.VOTING; // 미션 마감 뒤에도 집계 전까지는 알릴 수 있다
+  const canReport = phase >= PHASE.RUNNING && phase <= PHASE.CLOSED; // 미션 마감 뒤에도 집계 전까지는 알릴 수 있다
 
   async function report() {
     setError("");

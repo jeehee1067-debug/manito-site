@@ -107,19 +107,9 @@ const val = (v) => v.stringValue ?? (v.integerValue !== undefined ? Number(v.int
   console.log("  확인창:", dialogs.find((d) => d.includes("중도 이탈로 표시")).split("\n").filter(Boolean).slice(0, 4).join(" / "));
   console.log("  중도 이탈 칩:", (await panel(admin, "중도 이탈").locator(".name-chips").innerText()).replace(/\n/g, " "));
 
-  step("지목(아무도 안 함) → 투표 → 집계 → 공개");
-  await advance("최종 지목"); await advance("투표");
-  // 투표 카드: 수상 대상이 아닌 마니또(가입 안 한 자차, 중도 이탈 사아)는 카드를 만들지 않는다
-  await admin.getByRole("button", { name: "투표 카드 만들기" }).click();
-  await panel(admin, "투표 카드").getByText("투표 카드 3장을 만들었어요. 수상 대상이 아닌 마니또 2명(가입 안 함·중도 이탈·수상 제외)은 뺐어요.").waitFor();
-  assert.equal(await panel(admin, "투표 카드").locator("li.row-item").count(), 3);
-  {
-    const owners = (await rest("cardOwners?pageSize=50")).documents.map((d) => d.fields.giverPid.stringValue);
-    const rosterNow = (await rest("roster?pageSize=50")).documents;
-    const nameByPid = Object.fromEntries(rosterNow.map((d) => [d.name.split("/").pop(), d.fields.name.stringValue]));
-    assert.deepEqual(owners.map((x) => nameByPid[x]).sort(), ["가나", "다라", "마바"]);
-    console.log("  투표 카드 3장(가나·다라·마바). 자차(가입 안 함)·사아(중도 이탈)의 카드는 없음");
-  }
+  step("지목(아무도 안 함) → 마감 → 집계 → 공개");
+  await advance("최종 지목"); await advance("마감");
+  assert.equal(await panel(admin, "투표 카드").count(), 0, "투표는 없앴다: 운영 화면에 투표 카드 패널이 없다");
   await advance("집계");
   const roster = (await rest("roster?pageSize=50")).documents;
   const pidOf = Object.fromEntries(roster.map((d) => [d.fields.name.stringValue, d.name.split("/").pop()]));
@@ -144,7 +134,7 @@ const val = (v) => v.stringValue ?? (v.integerValue !== undefined ? Number(v.int
     console.log(`    파트 순위(저장): ${board.map((x) => `${x.part} ${x.done}/${x.max}${x.winner ? " 우승" : ""}`).join(", ")} → 손계산 ${norm(board) === norm(boardWant) ? "일치" : "불일치 " + JSON.stringify(boardWant)}`);
     ok = ok && norm(board) === norm(boardWant);
     for (const p of ALL) {
-      const mission = credited(p), hidden = credited(p) >= 1 ? 2 : 0, entries = redeemedDoc(p) ? 1 : 0;
+      const mission = credited(p), hidden = credited(p) >= 3 ? 2 : 0, entries = redeemedDoc(p) ? 1 : 0; // 은신은 미션 3건이 모두 인정돼야(여기서는 1주차만 해서 모두 0)
       const missed = 3 - delivered(giverOf[p]) + (delivered(giverOf[p]) && missing.has(p) ? 1 : 0); // 안 보낸 주차 + '못 받음'으로 확인된 주차
       const comp = credited(p) >= 1 ? Math.min(3 - entries, missed) : 0;
       const assumed = delivered(p) && credit.has(target[p]) && !redeemedDoc(target[p]) ? 1 : 0;
@@ -194,9 +184,6 @@ const val = (v) => v.stringValue ?? (v.integerValue !== undefined ? Number(v.int
   await advance("공개");
   assert.equal(tickets[pidOf["자차"]], 0); assert.equal(tickets[pidOf["사아"]], 0);
   assert.equal(detail[pidOf["마바"]].hidden, 0, "아무것도 안 한 사람은 은신 없음");
-  const best = val(res.bestManito) ?? res.bestManito.arrayValue.values?.map((v) => val(v)) ?? [];
-  const bestPids = (res.bestManito.arrayValue.values || []).map((v) => v.mapValue.fields.pid.stringValue);
-  assert.ok(!bestPids.includes(pidOf["자차"]) && !bestPids.includes(pidOf["사아"]), "불참자는 베스트 마니또에서 제외");
 
   step("결과 화면 (발표 화면 없이 '모두 공개')");
   await tab(admin, "결과");
@@ -210,15 +197,27 @@ const val = (v) => v.stringValue ?? (v.integerValue !== undefined ? Number(v.int
     console.log(`  ${name}:`, (await page.locator(".target .small").innerText()).replace(/\s+/g, " "));
   }
   await tab(admin, "결과");
-  for (const seed of ["11", "22", "33", "44"]) {
-    await panel(admin, "추첨").locator(".seed-input").first().fill(seed);
-    await panel(admin, "추첨").getByRole("button", { name: "추첨하기" }).first().click();
-    await panel(admin, "추첨").getByText(`현장에서 정한 숫자: ${seed}`).waitFor();
-  }
-  const winners = await panel(admin, "추첨").locator(".winner span").allInnerTexts();
+  // 추첨: 숫자 하나로 1·2·4·5·6등을 한 번에. 불참(가입 안 함·중도 이탈)은 응모권 0장이라 2등(응모권 최다)에도 추첨에도 없다
+  const prize = panel(admin, "추첨·시상");
+  await prize.locator(".seed-input").fill("11");
+  await prize.getByRole("button", { name: "추첨하기" }).click();
+  await prize.getByText("현장에서 정한 숫자: 11").waitFor();
+  const winners = (await prize.locator(".winner").allInnerTexts()).map((t) => t.trim().split("\n")[0].trim());
   assert.ok(winners.length > 0, "당첨자가 있어야 한다");
+  assert.equal(new Set(winners).size, winners.length, "한 사람은 하나만");
   assert.ok(!winners.includes("자차") && !winners.includes("사아"), "0장인 사람은 당첨되지 않음");
-  console.log("  추첨 당첨자(자차·사아 없음 확인):", [...new Set(winners)].join(", "));
+  const rawDraws = (await rest("results/public")).fields.draws.mapValue.fields;
+  const won = (k) => (rawDraws[k].mapValue.fields.winners.arrayValue.values || []).map((x) => x.stringValue);
+  assert.deepEqual(Object.keys(rawDraws).sort(), ["best", "grand", "t4", "t5", "t6"]);
+  const withTickets = ALL.filter((n) => tickets[pidOf[n]] > 0);
+  assert.equal(winners.length, withTickets.length, "응모권이 있는 사람은(5명 이하라) 모두 큰 상부터 채워진다");
+  assert.equal(won("grand").length, 1);
+  assert.equal(won("best").length, Math.min(3, withTickets.length - 1), "2등은 1등을 뺀 응모권 최다 순");
+  assert.ok(![...won("grand"), ...won("best")].some((pid) => pid === pidOf["자차"] || pid === pidOf["사아"]), "불참자는 1·2등에 없다");
+  await prize.getByRole("button", { name: "추첨 검증" }).click();
+  const lines = await prize.locator("ul.plain li").allInnerTexts();
+  assert.ok(lines.length === 5 && lines.every((t) => t.includes("다시 계산한 결과와 같아요")), lines.join(" | "));
+  console.log("  추첨 당첨자(자차·사아 없음, 중복 없음, 검증 통과):", winners.join(", "));
   await browser.close();
   console.log("\n콘솔 오류", errors.length, "건"); errors.slice(0, 8).forEach((e) => console.log("  ", e));
   console.log("완료");

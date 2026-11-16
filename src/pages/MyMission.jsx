@@ -32,7 +32,7 @@ export default function MyMission() {
   const [nudge, setNudge] = useState(false);
   const inboxSlots = inbox.filter((d) => d.kind !== "note").map((d) => d.slot); // 내 마니또가 완료를 알린 주차(App이 구독)
   const [mine, setMine] = useState(null); // 내가 받는 사람으로서 입력한 인증(null = 불러오는 중)
-  const [extra, setExtra] = useState({}); // 이번 주 할 일에 쓰는 것: 내 취향 칸, 이번 주 추측, 투표 여부
+  const [extra, setExtra] = useState({}); // 이번 주 할 일에 쓰는 것: 내 취향 칸, 이번 주 추측
   const [angelTodo, setAngelTodo] = useState(0); // 내가 수호천사로 연결된 사람 수(아래 AngelCard와 같은 질의라 한 번만 읽는다)
   useEffect(() => onSnapshot(query(collection(db, "angels"), where("angelPid", "==", myPid)), (s) => setAngelTodo(s.size), () => setAngelTodo(0)), [myPid]);
   const [shown, setShown] = useState(false); // 대상 이름을 보이는지(기본은 가림)
@@ -48,7 +48,6 @@ export default function MyMission() {
     const get = (path, key, pick) => getDoc(doc(db, ...path)).then((s) => setExtra((x) => ({ ...x, [key]: pick(s) }))).catch(() => setExtra((x) => ({ ...x, [key]: null })));
     get(["prefs", myPid], "prefs", (s) => s.exists());
     if (config.phase === PHASE.RUNNING) get(["midGuesses", myPid], "mid", (s) => (s.exists() ? s.data().guesses || {} : {}));
-    if (config.phase === PHASE.VOTING) get(["votes", myPid], "voted", (s) => s.exists() && (s.data().cardIds || []).length > 0);
   }, [myPid, config.phase, config.week]);
 
   useEffect(() => {
@@ -113,7 +112,6 @@ export default function MyMission() {
     if (extra.mid && !extra.mid[week]) todo.push({ text: `${week}주차 추측 남기기 (용의자 보드)`, href: "#detective" });
   }
   if (config.phase === PHASE.GUESSING && !progress.unknown && !progress.guessed) todo.push({ text: "최종 지목하기 (마지막 단서: 마니또의 파트 공개)", href: "#detective" });
-  if (config.phase === PHASE.VOTING && extra.voted === false) todo.push({ text: "베스트 마니또 투표하기", href: "#vote" });
   if (running && angelInbox.some((g) => !g.confirmed)) todo.push({ text: "수호천사가 보낸 것 확인하기", href: "#detective" });
   if (running && angelTodo > 0) todo.push({ text: "수호천사 미션 하기 (이 화면 아래 '수호천사 미션')", href: null });
 
@@ -579,7 +577,7 @@ function TargetPrefs({ receiverPid, targetName }) {
 }
 
 function TicketSummary({ codes, missions, entries }) {
-  const { myPart } = useApp();
+  const { myPart, config } = useApp();
   const [redeemedSlots, setRedeemedSlots] = useState({});
   useEffect(() => {
     if (!codes) return;
@@ -598,6 +596,12 @@ function TicketSummary({ codes, missions, entries }) {
   const card = Math.min(R.maxCardBonus, Object.entries(redeemedSlots)
     .filter(([, st]) => st === "match")
     .reduce((sum, [slot]) => sum + (R.cardBonus[missions.choices?.[slot]?.level] || 0), 0));
+  // 끝까지 해야 받는 응모권(은신): 주차별로 인증됨 / 인증 대기(완료는 알렸는데 대상이 아직 인증 안 함) / 아직 안 함
+  const slots = Object.keys(codes || {});
+  const waiting = slots.filter((sl) => !redeemedSlots[sl] && missions.done?.[sl]).length;
+  const notDone = slots.filter((sl) => !redeemedSlots[sl] && !missions.done?.[sl]).length;
+  const allMissions = R.hiddenMinMissions >= R.maxMissions;
+  const hiddenNeed = allMissions ? `미션 ${R.maxMissions}건이 모두 인증돼야` : `미션이 ${R.hiddenMinMissions}건 이상 인증돼야`;
 
   return (
     <Panel title="내 응모권 (지금까지)">
@@ -607,11 +611,22 @@ function TicketSummary({ codes, missions, entries }) {
         <li>받는 사람으로서: 인증 입력 {entries} / {R.maxReceiverEntries}</li>
         <li className="muted">
           마지막에 더해지는 것: 끝까지 안 들키면 +{R.hidden}
-          {mission >= R.hiddenMinMissions ? "" : ` (내 미션이 ${R.hiddenMinMissions}건 이상 인증돼야 받을 수 있어요)`}
+          {mission >= R.hiddenMinMissions ? "" : ` (${hiddenNeed} 받을 수 있어요)`}
           {R.hiddenNeedsClues ? "(프로필을 다 채워 단서 6개가 대상에게 가야 해요)" : ""}, 내 마니또를 맞히면 +{R.correctGuess}
           {myPart ? `, 우리 파트가 완수율 1위면 +${R.partBonus}` : ""}
         </li>
       </ul>
+      {config.phase === PHASE.RUNNING && slots.length > 0 && (mission >= R.hiddenMinMissions ? (
+        <p className="note" role="status">미션 {mission}건이 모두 인증됐어요. 끝까지 안 들키면 은신 +{R.hidden}장이에요.</p>
+      ) : (
+        <p className="warn-line" role="status">
+          <b>끝까지 해야 받는 응모권</b> 은신 +{R.hidden}장은 {hiddenNeed} 받아요
+          (지금 인증 {mission}건{waiting > 0 ? `, 인증 대기 ${waiting}건` : ""}{notDone > 0 ? `, 아직 안 한 미션 ${notDone}건` : ""}).
+          {notDone > 0
+            ? ` 여기서 멈추면 남은 미션 ${notDone}장과 은신 ${R.hidden}장, 합쳐서 ${notDone + R.hidden}장을 놓쳐요.`
+            : waiting > 0 ? " 대상이 인증하면 채워져요." : ""}
+        </p>
+      ))}
       <p className="small">
         내 마니또가 미션을 안 보낸 주차(운영진이 "못 받음"으로 확인한 주차 포함)는 마지막에 인증 입력 대신 1장씩 채워져요(내 미션이 {R.compMinMissions}건 이상 인증된 경우).
         카드 추가분은 대상이 직접 인증한 미션에만 붙어요. <a href="#rules">규칙 전체 보기</a>
