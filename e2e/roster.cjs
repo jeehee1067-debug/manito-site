@@ -140,6 +140,43 @@ const step = (t) => console.log("▶", t);
     console.log("  받는 사람 3명(BCC 주소 '; '로), 본문에 가입 링크(?join)·인증 메일 보낸 사람, mailto(나에게 + BCC, 긴 본문은 빼고 짧으면 넣음), 링크로 열면 '처음 가입' 탭");
   }
 
+  step("배정 미리 보기: 실제 명단으로 여러 번 돌려 보고 결과만 보여 준다(저장 안 함), 비슷한 파트 이름 경고");
+  {
+    const assignPanel = H.panel(admin, "2. 마니또 배정");
+    await assignPanel.getByRole("button", { name: "미리 보기 (저장 안 함)" }).click();
+    const box = assignPanel.getByRole("status", { name: "배정 미리 보기" });
+    await box.getByText("배정을 300번 돌려 봤어요(저장하지 않았어요).").waitFor();
+    await box.getByText("문제없어요.").waitFor();
+    await box.getByText("같은 파트 짝: 0쌍").waitFor();
+    await box.getByText(/자기 자신·맞마니또: 없음/).waitFor();
+    assert.equal(Object.keys(await H.readDoc("meta/assignment")).length, 0, "미리 보기는 아무것도 저장하지 않는다");
+    assert.equal(Object.keys(await H.readDoc("assignments/p001")).length, 0);
+    // 같은 파트를 띄어쓰기만 다르게 적으면 알려 준다
+    await row("자차").getByRole("button", { name: "수정" }).click();
+    await rosterPanel().locator("tr.editing").getByLabel("파트").fill("가 파트");
+    await rosterPanel().locator("tr.editing").getByRole("button", { name: "저장" }).click();
+    await admin.getByText("자차님 정보를 저장했어요.").waitFor();
+    await assignPanel.getByRole("button", { name: "미리 보기 (저장 안 함)" }).click();
+    await box.getByText(/띄어쓰기·대소문자만 다른 파트 이름: "가 파트", "가파트"|띄어쓰기·대소문자만 다른 파트 이름: "가파트", "가 파트"/).waitFor();
+    await box.getByText("아래를 확인해 주세요.").waitFor();
+    console.log("  미리 보기 300번: 같은 파트 0쌍·맞마니또 없음·저장 없음 / '가파트'와 '가 파트'를 다른 이름으로 적으면 경고");
+
+    // 파트 이름 한꺼번에 바꾸기: "가 파트"를 "가파트"로 → 두 파트가 한 파트로 합쳐진다(PFA·VSEM을 "PFA/VSEM"으로 합치는 것과 같다)
+    const form = assignPanel.getByRole("form", { name: "파트 이름 한꺼번에 바꾸기" });
+    await form.getByLabel("바꿀 파트").selectOption("가 파트");
+    await form.getByLabel("새 파트 이름").fill("가파트");
+    await form.getByRole("button", { name: "바꾸기" }).click();
+    await admin.getByText('"가 파트" 1명의 파트를 "가파트"(으)로 바꿨어요. 두 파트가 한 파트로 합쳐졌어요.').waitFor();
+    assert.ok(dialogs.some((d) => d.includes("합쳐져 한 파트가 돼요")), "합쳐질 때 확인창에 알린다");
+    const jacha = (await Promise.all(["p001", "p002", "p003", "p004"].map((id) => H.readDoc(`roster/${id}`)))).find((d) => d.name === "자차");
+    assert.equal(jacha.part, "가파트");
+    await assignPanel.getByText(/파트: 가파트 2명 · 다파트 1명/).waitFor();
+    await assignPanel.getByRole("button", { name: "미리 보기 (저장 안 함)" }).click();
+    await box.getByText(/같은 파트 짝: 1쌍 \(가장 큰 파트가 2명으로 전체의 절반을 넘어서 피할 수 없어요\)/).waitFor();
+    assert.equal(await box.getByText(/띄어쓰기·대소문자만 다른/).count(), 0);
+    console.log("  파트 합치기: '가 파트' → '가파트'(2명) → 미리 보기에 '절반을 넘어 같은 파트 1쌍은 피할 수 없음'");
+  }
+
   await browser.close();
   console.log("완료");
 })().catch((e) => { console.error("실패:", e.message); process.exit(1); });

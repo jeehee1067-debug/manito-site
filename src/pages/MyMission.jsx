@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { collection, doc, getDoc, increment, onSnapshot, query, serverTimestamp, setDoc, where, writeBatch } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp, Loading } from "../App.jsx";
-import { EXTRA_NOTES_MAX, LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT, SCHEDULE, SPEND_GUIDE_WON, scheduleLabel, todayYmd } from "../lib/constants.js";
+import { DROP_TIP, EXTRA_NOTES_MAX, LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT, SCHEDULE, SPEND_GUIDE_WON, scheduleLabel, todayYmd } from "../lib/constants.js";
 import { DEAL_COUNT, dealCards } from "../lib/cards.js";
 import { syncClues } from "../lib/sync.js";
 import { Avatar, Dialogue, Panel } from "../ui.jsx";
@@ -17,6 +17,7 @@ const SHOW_MS = 60 * 1000;
 const LEVELS = ["easy", "normal", "hard"];
 const ALL_CARDS = Object.values(MISSION_CARDS).flat();
 const isCostCard = (cardId) => Boolean(ALL_CARDS.find((c) => c.id === cardId)?.cost);
+const isRealCard = (cardId) => Boolean(ALL_CARDS.find((c) => c.id === cardId)?.real);
 
 // 난이도 고르기 화면에 적는 한 줄 설명(규칙 탭 "미션 카드 난이도"와 같은 기준)
 const LEVEL_HINT = { easy: "사이트 쪽지 한 통", normal: "공들여 지어 쓰는 쪽지, 또는 간단한 실물", hard: "직접 만든 것 · 선물 · 3일 연속 · 알아내 맞히기" };
@@ -347,6 +348,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
                 비용 카드 미션이 인증되면 응모권 {TICKET_RULES.costBonus}장을 더 받아요(3주 동안 한 번만. 여러 번 해도 {TICKET_RULES.costBonus}장이에요).
                 {dealCards(myPid, slot, level, remote, taken).some((c) => c.cost) && " 두 장 중 한 장은 돈이 드는 카드, 한 장은 돈이 안 드는 카드예요."}
               </p>
+              {dealCards(myPid, slot, level, remote, taken).some((c) => c.real) && <p className="small"><b>꿀팁</b> {DROP_TIP}</p>}
               <div className="cards dealt">
                 {dealCards(myPid, slot, level, remote, taken).map((c) => (
                   <button key={c.id} type="button" className={`card level-${c.level}`} onClick={() => choose(c)}>
@@ -387,6 +389,9 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
                 </button>
               )}
             </div>
+          )}
+          {hasCard && isRealCard(choice.cardId) && (
+            <Dialogue speaker="꿀팁" tone="gold"><p>{DROP_TIP}</p></Dialogue>
           )}
           {hasCard && redeemed && <p className="small">{receiverName}이 이미 인증해서 카드를 바꿀 수 없어요. 완료 알리기를 눌러 주세요. 그래야 대상이 고른 카드를 보고 확인해서 카드 추가분이 붙어요.</p>}
           <div className="code-tag" aria-label="인증 코드">
