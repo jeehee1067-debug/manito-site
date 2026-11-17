@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { collection, doc, getDoc, increment, onSnapshot, query, serverTimestamp, setDoc, where, writeBatch } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp, Loading } from "../App.jsx";
-import { DROP_TIP, EXTRA_NOTES_MAX, LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT, SCHEDULE, SPEND_GUIDE_WON, scheduleLabel, todayYmd } from "../lib/constants.js";
+import { DROP_TIP, DROP_TIP_SHORT, EXTRA_NOTES_MAX, LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT, SCHEDULE, SPEND_GUIDE_WON, scheduleLabel, todayYmd } from "../lib/constants.js";
 import { DEAL_COUNT, dealCards } from "../lib/cards.js";
 import { syncClues } from "../lib/sync.js";
 import { Avatar, Dialogue, Panel } from "../ui.jsx";
@@ -335,6 +335,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
                   </button>
                 ))}
               </div>
+              <p className="tip-line"><span className="tip-tag">꿀팁</span>{DROP_TIP_SHORT}</p>
             </>
           )}
           {level && level !== "praise" && (
@@ -348,7 +349,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
                 비용 카드 미션이 인증되면 응모권 {TICKET_RULES.costBonus}장을 더 받아요(3주 동안 한 번만. 여러 번 해도 {TICKET_RULES.costBonus}장이에요).
                 {dealCards(myPid, slot, level, remote, taken).some((c) => c.cost) && " 두 장 중 한 장은 돈이 드는 카드, 한 장은 돈이 안 드는 카드예요."}
               </p>
-              {dealCards(myPid, slot, level, remote, taken).some((c) => c.real) && <p className="small"><b>꿀팁</b> {DROP_TIP}</p>}
+              {dealCards(myPid, slot, level, remote, taken).some((c) => c.real) && <p className="tip-line"><span className="tip-tag">꿀팁</span>{DROP_TIP_SHORT}</p>}
               <div className="cards dealt">
                 {dealCards(myPid, slot, level, remote, taken).map((c) => (
                   <button key={c.id} type="button" className={`card level-${c.level}`} onClick={() => choose(c)}>
@@ -409,7 +410,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
           <label>
             <span className="panel-label">{isPraise ? `${receiverName}에게 보내는 칭찬 (익명)` : "쪽지 (선택, 익명으로 전달)"}</span>
             <textarea className="pk-input" rows={3} maxLength={500} value={message} onChange={(e) => setMessage(e.target.value)}
-              placeholder={isPraise ? "올해 고마웠던 점, 멋있었던 순간" : "예: 오늘 책상 서랍을 확인해 보세요"} />
+              placeholder={isPraise ? "올해 고마웠던 점, 멋있었던 순간" : "예: 분석실 신발장 맨 위 칸을 확인해 보세요"} />
           </label>
           {!isPraise && (
             <label className="check">
@@ -438,7 +439,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
               : verdict === "received" ? "운영진이 전달된 것으로 확인했어요. 미션으로 인정돼요(카드 추가분은 직접 인증된 경우에만 있어요)."
                 : verdict === "missing" ? "운영진이 전달되지 않은 것으로 확인했어요. 이 주차는 미션으로 인정되지 않아요."
                   : isPraise ? `칭찬 카드가 전달됐어요. 미션으로 인정돼요(${receiverName}이 인증하면 ${receiverName}도 응모권을 받아요).${hasCard ? ` 고른 카드의 추가분은 ${receiverName}이 인증하면서 카드와 같다고 확인해야 붙어요.` : ""}`
-                    : `${receiverName}의 인증을 기다리는 중이에요.`}
+                    : `${receiverName}의 인증을 기다리는 중이에요. 인증은 지난 주차도 최종 지목이 마감될 때까지 늦게 할 수 있고, ${receiverName}의 화면에도 인증해 달라는 알림이 계속 떠요. 며칠이 지나도 그대로면 운영진에게 알려 주세요. 운영진이 확인해서 미션으로 인정할 수 있어요(카드 추가분은 대상이 직접 인증해야 붙어요).`}
           </p>
           {!redeemed && !verdict && reported && (
             <Dialogue speaker="알림" tone="warn">
