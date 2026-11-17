@@ -83,7 +83,7 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 ## 로그인
 
 - "운영자·공동 운영자 계정 만들기" 버튼은 주소에 `?setup`이 있을 때만 보인다. 운영자가 없으면 첫 운영자가 되고, 이미 있으면 계정만 만들어져 "연결 전" 화면(`Claim.jsx`)으로 간다. 그 화면에 나오는 **계정 번호(uid)** 를 운영자가 운영 탭 "공동 운영자"에 넣어 지정한다(`config.admins`, 메모는 `config.adminNotes`).
-- **Knox ID(회사 메일 아이디) + 새 비밀번호**(Firebase Authentication). 화면에서는 아이디를 "Knox ID"라고 부른다(사용자가 정함). 로그인·가입 화면에서 아이디만 적으면 `MAIL_DOMAIN`(`constants.js`)을 붙이고, `@`가 있으면 그대로 쓴다(`account.js` `toEmail`. 운영자 계정이나 초대 코드로 가입한 다른 메일). 가입하면 인증 메일(`sendEmailVerification`)이 가고, 링크를 누르면 명단의 이름과 연결된다(위 "가입·연결"). 비밀번호 찾기는 `sendPasswordResetEmail`. 도메인이 공개 저장소의 코드에 들어 있다(사용자가 정함).
+- **Knox ID(회사 메일 아이디) + 새 비밀번호**(Firebase Authentication). 화면에서는 아이디를 "Knox ID"라고 부른다(사용자가 정함). 로그인·가입 화면에서 아이디만 적으면 `MAIL_DOMAIN`(`constants.js`)을 붙이고, `@`가 있으면 그대로 쓴다(`account.js` `toEmail`. 운영자 계정이나 초대 코드로 가입한 다른 메일). 가입하면 인증 메일(`sendEmailVerification`)이 가고, 링크를 누르면 명단의 이름과 연결된다(위 "가입·연결"). **인증 메일은 "연결 전" 화면(`Claim.jsx`)이 열릴 때 스스로 보낸다**(`account.js` `ensureVerifyMail`: 인증 전 계정이고 이 기기에서 최근 10분 안에 보낸 기록(`localStorage` `manito:verifySent:{uid}`)이 없을 때. 실패하면 한 번 더 해 보고, 그래도 안 되면 이유를 화면에 보인다. `?setup`으로 들어온 계정에는 보내지 않는다). 예전에는 가입할 때만 보내고 실패를 삼켜서, 첫 발송이 실패했거나 이미 만든 계정으로 로그인한 사람은 "다시 보내기"를 눌러야 메일이 왔다(실제로 받은 문의). 비밀번호 찾기는 `sendPasswordResetEmail`. 도메인이 공개 저장소의 코드에 들어 있다(사용자가 정함).
 - 메일 주소는 `users/{uid}.email`에만(본인·운영자만 읽음, 규칙이 `request.auth.token.email`과 같은지 확인). 운영 화면 "연결된 메일"과 "연결 해제"(명단 연결 풀기 + `users` 문서 삭제 + 초대 코드 새로 발급)에 쓴다.
 - `App`은 로그인 상태만 보고, 로그인한 사람의 구독·화면은 `Session`(key = uid)에 있다. 사람이 바뀌면 통째로 새로 만들어진다.
 - 가입·운영자 계정 비밀번호는 8자 이상, 글자+숫자(`validatePassword`, 화면에서만). "로그인 유지"는 기본 꺼짐(기기마다 `localStorage` `manito:keep`에 기억).
