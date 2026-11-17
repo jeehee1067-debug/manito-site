@@ -423,25 +423,29 @@ test("미션 카드: 난이도마다 돈이 안 드는 카드가 2장 이상(다
   assert.ok(MISSION_CARDS.easy.every((c) => !c.cost && c.remote));
 });
 
-test("미션 카드: 삼행시 쪽지는 보통 카드, 3일 연속 쪽지는 도전 카드", () => {
-  const find = (re) => Object.entries(MISSION_CARDS).flatMap(([level, list]) => list.filter((c) => re.test(c.text)).map((c) => ({ level, ...c })));
-  const poem = find(/삼행시 쪽지/);
-  assert.deepEqual(poem.map((c) => [c.level, c.remote, Boolean(c.cost)]), [["normal", true, false]]);
+test("미션 카드: 난이도 기준(쪽지만으로 끝나는 도전은 3일 연속·알아내 맞혀 보기뿐), 손편지 없음, 알아내기는 방법 자유", () => {
+  const all = Object.entries(MISSION_CARDS).flatMap(([level, list]) => list.map((c) => ({ level, ...c })));
+  const find = (re) => all.filter((c) => re.test(c.text));
+  assert.deepEqual(find(/삼행시 쪽지/).map((c) => [c.level, c.remote, Boolean(c.cost)]), [["normal", true, false]]);
   assert.deepEqual(find(/3일 연속/).map((c) => c.level), ["hard"]);
-  // 쪽지만으로 끝나는 카드는 보통까지(3일 연속 한 장만 예외). 도전은 직접 전달·만든 것·여러 날.
-  const noteOnlyHard = MISSION_CARDS.hard.filter((c) => /쪽지/.test(c.text) && !/손편지|손카드/.test(c.text));
-  assert.deepEqual(noteOnlyHard.map((c) => c.id), find(/3일 연속/).map((c) => c.id));
-  assert.deepEqual(find(/몰래 알아내/).map((c) => c.level).filter((l) => l !== "normal"), [], "몰래 알아내기는 보통 카드");
-  assert.deepEqual(find(/서랍|가방|이상형/), [], "남의 서랍·가방, 이상형 묻기는 카드에 넣지 않는다");
-  assert.deepEqual(find(/^손편지 써서/).map((c) => c.level), ["hard"]);
-  const ids = Object.values(MISSION_CARDS).flat().map((c) => c.id);
+  // 쪽지만으로 끝나는(실물이 아닌) 도전 카드는 3일 연속과 "알아내 맞혀 보기"(guess, 틀리면 추가분 없음)뿐
+  const noteOnlyHard = MISSION_CARDS.hard.filter((c) => !c.real);
+  assert.ok(noteOnlyHard.every((c) => /3일 연속/.test(c.text) || (c.guess && /맞혀 보기/.test(c.text) && /틀리면 카드 추가분 없음/.test(c.text))), noteOnlyHard.map((c) => c.id).join());
+  // 알아내기 카드: 모두 도전, 방법은 자유("직접 묻지 않기" 같은 제한 없음)
+  const guesses = all.filter((c) => c.guess);
+  assert.ok(guesses.length >= 5 && guesses.every((c) => c.level === "hard" && /방법은 자유/.test(c.text)));
+  assert.deepEqual(find(/직접 묻지 않기|몰래 알아내/), []);
+  assert.deepEqual(find(/서랍|가방|이상형|손편지|편지/), [], "남의 서랍·가방, 이상형, 긴 편지는 넣지 않는다");
+  assert.ok(all.filter((c) => c.cost).every((c) => c.real), "돈이 드는 카드는 모두 실물");
+  assert.ok(MISSION_CARDS.easy.every((c) => !c.real && !c.cost && !c.guess));
+  const ids = all.map((c) => c.id);
   assert.equal(new Set(ids).size, ids.length, "카드 번호 중복 없음");
 });
 
-test("카드 뽑기: 난이도를 고르면 두 장, 사람·주차마다 고정, 돈이 드는 카드만 나오지 않음, 한 장은 실물 카드, 모든 카드가 누군가에게 나옴", () => {
+test("카드 뽑기: 두 장, 사람·주차마다 고정, 보통·도전은 비용 카드 한 장 + 무비용 한 장, 모든 카드가 누군가에게 나옴", () => {
   const seen = { easy: new Set(), normal: new Set(), hard: new Set() };
   for (let i = 1; i <= 54; i++) {
-    for (const slot of [1, 2]) {
+    for (const slot of [1, 2, 3]) {
       for (const level of ["easy", "normal", "hard"]) {
         for (const remote of [false, true]) {
           const hand = dealCards(`p${i}`, slot, level, remote);
@@ -449,6 +453,9 @@ test("카드 뽑기: 난이도를 고르면 두 장, 사람·주차마다 고정
           assert.equal(new Set(hand.map((c) => c.id)).size, DEAL_COUNT, "서로 다른 카드");
           assert.ok(hand.every((c) => c.level === level && MISSION_CARDS[level].some((m) => m.id === c.id && m.text === c.text)));
           assert.ok(hand.some((c) => !c.cost), "무비용 카드가 한 장은 있다");
+          // 돈이 드는 카드가 있는 묶음(보통·도전, 다른 근무지는 도전만)에서는 꼭 한 장(사용자가 정함: 모두에게 비용 카드가 나오게)
+          const hasCost = MISSION_CARDS[level].some((m) => m.cost && (!remote || m.remote));
+          assert.equal(hand.filter((c) => c.cost).length, hasCost ? 1 : 0, `${level}${remote ? " 원격" : ""}: 비용 카드 한 장`);
           // 실물 카드가 있는 묶음(보통·도전, 다른 근무지는 도전만)에서는 한 장이 꼭 실물이다
           const hasReal = MISSION_CARDS[level].some((m) => m.real && (!remote || m.remote));
           assert.equal(hand.some((c) => c.real), hasReal, `${level}${remote ? " 원격" : ""}: 실물 카드`);
@@ -459,12 +466,20 @@ test("카드 뽑기: 난이도를 고르면 두 장, 사람·주차마다 고정
       }
     }
   }
-  for (const [level, cards] of Object.entries(MISSION_CARDS)) assert.equal(seen[level].size, cards.length, `${level}: 54명·2주차에 모든 카드가 한 번은 나온다`);
-  // 실물 표시: 쉬움에는 없고, 보통은 간식·음료·포스트잇, 도전은 3일 연속 쪽지만 빼고 전부
-  assert.ok(MISSION_CARDS.easy.every((c) => !c.real));
-  assert.deepEqual(MISSION_CARDS.normal.filter((c) => c.real).map((c) => c.id), ["n1", "n2", "n3"]);
-  assert.deepEqual(MISSION_CARDS.hard.filter((c) => !c.real).map((c) => c.id), ["h5"]);
-  assert.ok(MISSION_CARDS.normal.filter((c) => c.real).some((c) => !c.cost), "보통의 실물 카드에 무비용 카드가 있다");
+  for (const [level, cards] of Object.entries(MISSION_CARDS)) assert.equal(seen[level].size, cards.length, `${level}: 54명·3주에 모든 카드가 한 번은 나온다`);
+  assert.ok(MISSION_CARDS.normal.some((c) => c.real && !c.cost), "보통에 돈이 안 드는 실물 카드가 있다");
+  assert.ok(MISSION_CARDS.hard.some((c) => c.real && !c.cost), "도전에 돈이 안 드는 실물 카드가 있다");
+  // 다른 주차에 고른 카드는 다시 나오지 않는다(비용 카드 한 장 + 무비용 한 장은 그대로)
+  for (let i = 1; i <= 54; i++) {
+    for (const level of ["normal", "hard"]) {
+      const first = dealCards(`p${i}`, 1, level);
+      const taken = first.map((c) => c.id); // 두 장 다 이미 했다고 쳐도
+      const next = dealCards(`p${i}`, 2, level, false, taken);
+      assert.ok(next.every((c) => !taken.includes(c.id)), `${level}: 이미 고른 카드가 또 나옴`);
+      assert.equal(next.filter((c) => c.cost).length, 1);
+      assert.equal(next.length, DEAL_COUNT);
+    }
+  }
   // 주차가 다르면 다른 카드가 나오는 사람이 있다(매주 같은 카드만 나오지 않는다)
   assert.ok(Array.from({ length: 54 }, (_, i) => `p${i + 1}`).some((p) => dealCards(p, 1, "normal")[0].id !== dealCards(p, 2, "normal")[0].id));
 });
@@ -959,7 +974,7 @@ test("카드 추가분: 받는 사람이 카드를 보고 '같아요'라고 한 
   assert.deepEqual([unseen.A.mission, unseen.A.card], [2, 2]);
 });
 
-test("카드 추가분: 쉬움 0, 보통 +1, 도전 +2, 칭찬 카드 0, 합계 최대 4. 난이도는 카드 목록과 대조한다", () => {
+test("카드 추가분: 쉬움 0, 보통 +1, 도전 +2, 칭찬만 0, 3주차 카드도 붙어 합계 최대 6. 난이도는 카드 목록과 대조한다", () => {
   const people = ["A", "B", "C"].map((pid) => ({ pid }));
   const red = (slots) => Object.fromEntries(slots.map((s) => [`A${s}`, { receiverPid: "B", slot: s, voided: false, cardMatch: true }]));
   const run = (choices) => computeTickets({
@@ -970,8 +985,12 @@ test("카드 추가분: 쉬움 0, 보통 +1, 도전 +2, 칭찬 카드 0, 합계 
   assert.equal(run({ 1: EASY_CARD, 2: pickCard("easy", 1), 3: PRAISE }).card, 0);
   assert.equal(run({ 1: NORMAL, 2: EASY_CARD, 3: PRAISE }).card, 1);
   assert.equal(run({ 1: NORMAL, 2: HARD, 3: PRAISE }).card, 3);
-  const best = run({ 1: HARD, 2: pickCard("hard", 1), 3: PRAISE });
-  assert.deepEqual([best.mission, best.card, best.total], [3, 4, 7 + 2]); // 미션 3 + 카드 4 + 은신 2
+  const two = run({ 1: HARD, 2: pickCard("hard", 1), 3: PRAISE });
+  assert.deepEqual([two.mission, two.card, two.total], [3, 4, 7 + 2]); // 미션 3 + 카드 4 + 은신 2
+  // 3주차: 칭찬 한 줄과 함께 고른 도전 카드도 대상이 카드와 같다고 확인하면 붙는다
+  const best = run({ 1: HARD, 2: pickCard("hard", 1), 3: pickCard("hard", 2) });
+  assert.deepEqual([best.mission, best.card], [3, 6]);
+  assert.equal(TICKET_RULES.maxCardBonus, 3 * TICKET_RULES.cardBonus.hard);
   assert.equal(run({}).card, 0); // 카드를 고르지 않은 채 인증된 미션
   // 위조: 쉬운 카드 번호에 "도전"이라고 적거나, 도전 카드 번호에 쉬운 카드 글을 적거나, 목록에 없는 번호는 추가분이 없다
   assert.equal(cardLevel(HARD), "hard");

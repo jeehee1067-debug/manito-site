@@ -10,6 +10,11 @@ import { normalizeCode } from "../lib/random.js";
 import { bump } from "../lib/writes.js";
 import { TICKET_RULES } from "../config/prizes.js";
 
+// 고른 카드가 실린 알림: 1·2주차 완료 알림(mission), 그리고 3주차 칭찬과 함께 카드를 고른 경우의 칭찬 알림(praise)
+const carriesCard = (it) => (it.kind === "mission" || it.kind === "praise") && it.card;
+// "알아내 맞혀 보기" 카드(constants.js guess)는 맞혔을 때만 "카드와 같다"로 확인한다
+const isGuessCard = (card) => /맞혀 보기|좋아하는 게 아니면/.test(card?.text || "");
+
 const CARD_BONUS = TICKET_RULES.cardBonus; // 카드 추가 응모권(보통·도전만)
 
 export default function Detective() {
@@ -247,7 +252,7 @@ function CodeEntry({ myPid, items }) {
     getDoc(doc(db, "codes", typed)).then((s) => alive && setSlotOf(s.exists() ? s.data().slot : null)).catch(() => {});
     return () => { alive = false; };
   }, [typed]);
-  const card = slotOf ? items.find((it) => it.kind === "mission" && it.slot === slotOf && it.card)?.card : null;
+  const card = slotOf ? items.find((it) => carriesCard(it) && it.slot === slotOf)?.card : null;
 
   async function submit(e) {
     e.preventDefault();
@@ -305,6 +310,7 @@ function CodeEntry({ myPid, items }) {
               <input type="checkbox" checked={cardMatch} onChange={(e) => setCardMatch(e.target.checked)} />
               받은 것이 이 카드 내용과 같아요 (다르면 체크를 풀어 주세요. 보통·도전 카드일 때 마니또의 추가 응모권에 영향이 있어요)
             </label>
+            {isGuessCard(card) && <p className="small"><b>알아내 맞혀 보기 카드예요.</b> 마니또가 맞혔을 때만 체크해 주세요(틀렸으면 체크를 풀어 주세요).</p>}
           </div>
         )}
         {msg.text && <p className={msg.type === "error" ? "error" : "note"} role="status">{msg.text}</p>}
@@ -327,7 +333,7 @@ function MyRedemptions({ myPid, items }) {
   // 완료 알림보다 먼저 인증해서 카드를 못 보고 인증한 미션: 알림이 온 뒤 그 카드를 보여 주고 한 번 확인받는다.
   // 추가 응모권이 있는 카드(보통·도전)만 묻는다. 확인이 없으면 마니또의 카드 추가분이 붙지 않는다(scoring.js).
   const cardToCheck = (r) => (r.cardMatch === undefined && !r.voided
-    ? items.find((it) => it.kind === "mission" && it.slot === r.slot && it.card && CARD_BONUS[it.card.level] > 0)?.card
+    ? items.find((it) => carriesCard(it) && it.slot === r.slot && CARD_BONUS[it.card.level] > 0)?.card
     : null) || null;
 
   if (!rows.length) return null;
@@ -370,7 +376,7 @@ function CardCheck({ code, slot, card }) {
       <p className="small">
         <b>{slot}주차 카드 확인</b> 인증한 뒤에 마니또의 완료 알림이 왔어요. 마니또가 고른 카드: <b>{LEVEL_LABEL[card.level] || card.level}</b> · {card.text}
       </p>
-      <p className="small">받은 것이 이 카드 내용과 같았나요? (같았다고 해야 마니또가 카드 추가 응모권을 받아요. 한 번만 고를 수 있어요)</p>
+      <p className="small">받은 것이 이 카드 내용과 같았나요? (같았다고 해야 마니또가 카드 추가 응모권을 받아요. 한 번만 고를 수 있어요){isGuessCard(card) ? " 알아내 맞혀 보기 카드는 맞혔을 때만 \"같았어요\"를 눌러 주세요." : ""}</p>
       <span className="inline">
         <button type="button" className="pk-btn" disabled={busy} onClick={() => answer(true)}>카드와 같았어요</button>
         <button type="button" className="pk-btn" disabled={busy} onClick={() => answer(false)}>카드와 달랐어요</button>
