@@ -321,6 +321,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
             <>
               <p className="small">
                 이번 주 {LEVEL_LABEL[level]} 카드예요. 하나를 골라 주세요. 카드는 사람·주차마다 다르게 나오고, 다시 뽑을 수는 없어요.
+                {level !== "easy" && !remote && " 두 장 중 한 장은 실물을 전달하는 카드예요."}
               </p>
               <p className="small">
                 <span className="cost-tag">소액 비용</span> 표시는 간식·음료처럼 내 돈이 드는 카드예요. 건당 {SPEND_GUIDE_WON.toLocaleString()}원 이하를 권장해요.

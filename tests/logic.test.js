@@ -438,7 +438,7 @@ test("미션 카드: 삼행시 쪽지는 보통 카드, 3일 연속 쪽지는 �
   assert.equal(new Set(ids).size, ids.length, "카드 번호 중복 없음");
 });
 
-test("카드 뽑기: 난이도를 고르면 두 장, 사람·주차마다 고정, 돈이 드는 카드만 나오지 않음, 모든 카드가 누군가에게 나옴", () => {
+test("카드 뽑기: 난이도를 고르면 두 장, 사람·주차마다 고정, 돈이 드는 카드만 나오지 않음, 한 장은 실물 카드, 모든 카드가 누군가에게 나옴", () => {
   const seen = { easy: new Set(), normal: new Set(), hard: new Set() };
   for (let i = 1; i <= 54; i++) {
     for (const slot of [1, 2]) {
@@ -449,6 +449,9 @@ test("카드 뽑기: 난이도를 고르면 두 장, 사람·주차마다 고정
           assert.equal(new Set(hand.map((c) => c.id)).size, DEAL_COUNT, "서로 다른 카드");
           assert.ok(hand.every((c) => c.level === level && MISSION_CARDS[level].some((m) => m.id === c.id && m.text === c.text)));
           assert.ok(hand.some((c) => !c.cost), "무비용 카드가 한 장은 있다");
+          // 실물 카드가 있는 묶음(보통·도전, 다른 근무지는 도전만)에서는 한 장이 꼭 실물이다
+          const hasReal = MISSION_CARDS[level].some((m) => m.real && (!remote || m.remote));
+          assert.equal(hand.some((c) => c.real), hasReal, `${level}${remote ? " 원격" : ""}: 실물 카드`);
           if (remote) assert.ok(hand.every((c) => c.remote), "다른 근무지면 원격 카드만");
           assert.deepEqual(dealCards(`p${i}`, slot, level, remote), hand, "다시 불러도 같은 카드");
           if (!remote) hand.forEach((c) => seen[level].add(c.id));
@@ -457,6 +460,11 @@ test("카드 뽑기: 난이도를 고르면 두 장, 사람·주차마다 고정
     }
   }
   for (const [level, cards] of Object.entries(MISSION_CARDS)) assert.equal(seen[level].size, cards.length, `${level}: 54명·2주차에 모든 카드가 한 번은 나온다`);
+  // 실물 표시: 쉬움에는 없고, 보통은 간식·음료·포스트잇, 도전은 3일 연속 쪽지만 빼고 전부
+  assert.ok(MISSION_CARDS.easy.every((c) => !c.real));
+  assert.deepEqual(MISSION_CARDS.normal.filter((c) => c.real).map((c) => c.id), ["n1", "n2", "n3"]);
+  assert.deepEqual(MISSION_CARDS.hard.filter((c) => !c.real).map((c) => c.id), ["h5"]);
+  assert.ok(MISSION_CARDS.normal.filter((c) => c.real).some((c) => !c.cost), "보통의 실물 카드에 무비용 카드가 있다");
   // 주차가 다르면 다른 카드가 나오는 사람이 있다(매주 같은 카드만 나오지 않는다)
   assert.ok(Array.from({ length: 54 }, (_, i) => `p${i + 1}`).some((p) => dealCards(p, 1, "normal")[0].id !== dealCards(p, 2, "normal")[0].id));
 });

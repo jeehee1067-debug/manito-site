@@ -88,7 +88,13 @@ async function tokenOf(email) {
     const feedPanel = H.panel(r, "익명 피드");
     await mod.getByRole("button", { name: "피드에서 가리기" }).click();
     await mod.locator("span.small.muted", { hasText: "· 피드에서 가림" }).waitFor();
-    const fd = (await (await fetch(`${FS}/feed?pageSize=10`, { headers: owner })).json()).documents[0];
+    // 화면의 "가림" 표시는 저장이 서버에 닿기 전에도 뜬다. 서버의 글이 비워질 때까지 잠깐 기다린다.
+    let fd;
+    for (let k = 0; k < 25; k++) {
+      fd = (await (await fetch(`${FS}/feed?pageSize=10`, { headers: owner })).json()).documents[0];
+      if (fd.fields.hidden?.booleanValue) break;
+      await r.waitForTimeout(200);
+    }
     const fid = fd.name.split("/").pop();
     assert.equal(fd.fields.review.stringValue, "");
     assert.equal(fd.fields.hidden.booleanValue, true);
