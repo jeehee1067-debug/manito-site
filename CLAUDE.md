@@ -88,6 +88,7 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 - `App`은 로그인 상태만 보고, 로그인한 사람의 구독·화면은 `Session`(key = uid)에 있다. 사람이 바뀌면 통째로 새로 만들어진다.
 - 가입·운영자 계정 비밀번호는 8자 이상, 글자+숫자(`validatePassword`, 화면에서만). "로그인 유지"는 기본 꺼짐(기기마다 `localStorage` `manito:keep`에 기억).
 - **명단 저장**(운영 화면 `Setup`): "명단에 추가"를 누르면 바로 저장되고 따로 저장 버튼은 없다. 한 명씩 고치기는 명단 표의 "수정"(이름·파트·아이디, `saveEdit`. 아이디는 처음 운영자만). Firestore는 서버가 받기 전에도 화면에 바로 보여 주므로, **서버가 받은 뒤에만 "추가했어요"라고 한다**(`trySave`: 거부되거나 12초 안에 답이 없으면 이유를 보인다 — 예전 규칙, 처음 운영자 아님, 사내망에서 연결 막힘(`?longpoll` 안내)). 아직 서버에 저장되지 않은 변경이 있으면 명단 표 위에 표시한다(`roster.pending`). 예전에는 실패를 알리지 않아 "넣었는데 새로 고치니 사라졌다"는 문의가 있었다. 명단 추가·수정 패널은 준비 단계(phase 0)에만 보인다.
+- **가입 안내 메일**(운영 화면 `InviteMail.jsx`, 준비 단계와 미션 진행 중 가입 안 한 사람이 있을 때): 사이트는 서버가 없어 메일을 직접 보내지 못한다. **운영자의 회사 메일에서** 보내도록 받는 사람(명단의 아이디, 기본은 아직 가입 안 한 사람, 숨은 참조 BCC)·제목·본문을 채운 `mailto:`를 열거나 칸마다 복사한다(`src/lib/inviteMail.js`). 본문까지 넣은 주소가 2000자를 넘으면(한글 본문은 거의 항상) 받는 사람·제목만 넣어 열고 본문은 복사해 붙여 넣게 한다. 본문의 가입 링크는 `?join`이고, 이 주소로 열면 로그인 화면이 "처음 가입" 탭으로 열린다(`Login.jsx` `JOIN`). 초대 코드는 넣지 않는다(메일 인증으로 연결). Firebase가 보내는 메일(인증 링크 방식)을 쓰지 않은 이유: 보낸 사람이 `noreply@프로젝트ID.firebaseapp.com`이고(첫 인증 메일이 늦게 온 적이 있다) 무료 요금제에 하루 발송 한도가 있다.
 - 화면 가리기: 내 미션의 대상 이름·캐릭터는 기본으로 가리고 60초 보기, 운영 화면 짝 현황은 접힘, 초대 코드·메일은 "보기"를 눌러야 보임.
 - App Check는 `src/firebase.config.js`의 `appCheckSiteKey`가 있을 때만 켜진다(에뮬레이터 제외). 제공자는 `appCheckProvider`(기본 `"enterprise"` = reCAPTCHA Enterprise, `"v3"`도 가능). 사내망에서 reCAPTCHA가 열리는지 확인하기 전에는 콘솔에서 적용(enforce)을 켜지 말 것(README "App Check").
 - 내 `users` 문서는 서버 저장이 확인된 스냅샷만 반영한다(`hasPendingWrites` 무시). 가입 직후 로컬 스냅샷으로 화면을 열면 규칙이 아직 "연결 전"으로 보고 내 배정 읽기를 거부한다(실제로 재현된 버그).
@@ -155,6 +156,7 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 | `src/lib/roster.js` | 참여자 화면용 명단 요약(`public/roster`, 이름·근무지·파트). 운영 화면(`Admin.jsx`)이 명단과 다르면 다시 씀. 명단 입력 한 줄 읽기(`parseRosterLine`: 이름, 파트, 아이디 → 메일) |
 | `src/pages/Rules.jsx` | 참여자용 규칙 안내(숫자는 `prizes.js`·`constants.js`에서) |
 | `src/pages/PartBoard.jsx` | 파트 순위 탭(운영자가 발표한 `public/board`만 읽음) |
+| `src/pages/InviteMail.jsx`, `src/lib/inviteMail.js` | 운영 화면 "가입 안내 메일": 받는 사람(`inviteRecipients`)·본문(`inviteMessage`)·가입 링크(`joinUrl`, `?join`)·메일 앱 주소(`mailtoHref`) |
 | `src/pages/Claim.jsx` | "연결 전" 화면: 회사 메일 인증 확인(`claimWithMail`, 창으로 돌아오면 스스로 확인), 초대 코드 연결(예비), 공동 운영자로 지정받을 계정의 계정 번호 |
 | `src/pages/Feed.jsx` | 익명 피드(`feed` 문서만 읽음) |
 | `src/pages/Admin.jsx` | 운영 화면: 단계, 명단·배정, 주차·단서, 짝 현황(`Pairs`), 받은 게 없어요·집계 전 확인(`Unresolved`), 수호천사 연결(`Angels`), 인증 검토(`Moderation`), 쪽지 검토(`NotesReview`), 쓰기 횟수(`WriteCounts`), 집계·검산, 공동 운영자, 규칙 버전 경고(`RulesCheck`) |

@@ -11,10 +11,12 @@ import { Garland, Gifts, XMAS_LEADERS, XmasTree } from "../xmas.jsx";
 //    거기 나오는 계정 번호를 운영자에게 알려 주면 공동 운영자로 지정받을 수 있다.
 // 운영자·공동 운영자는 참여하지 않는 계정이다(초대 코드로 명단에 연결할 수 없다).
 const SHOW_SETUP = new URLSearchParams(window.location.search).has("setup");
+// 가입 안내 메일의 링크(?join, lib/inviteMail.js)로 열면 "처음 가입" 탭으로 연다.
+const JOIN = new URLSearchParams(window.location.search).has("join");
 
 // mode: login 로그인 / signup 처음 가입 / reset 비밀번호 찾기 / bootstrap 첫 운영자 설정
 export default function Login({ bootstrap = false }) {
-  const [mode, setMode] = useState(bootstrap ? "bootstrap" : "login");
+  const [mode, setMode] = useState(bootstrap ? "bootstrap" : JOIN ? "signup" : "login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [invite, setInvite] = useState("");

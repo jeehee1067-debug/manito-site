@@ -173,6 +173,8 @@ textarea.pk-input { resize: vertical; line-height: 1.6; }
 }
 .pk-btn:active { transform: translateY(4px); box-shadow: none; }
 .pk-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+a.pk-btn { display: block; box-sizing: border-box; text-align: center; text-decoration: none; }
+a.pk-btn.disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
 .pk-btn.main { background: var(--blue); color: #fff; }
 .pk-btn.gold { background: var(--gold); }
 .pk-btn.red { background: var(--red); color: #fff; }
