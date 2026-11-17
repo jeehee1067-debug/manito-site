@@ -95,6 +95,51 @@ const step = (t) => console.log("▶", t);
     console.log("  연결이 막힘 → 화면에는 보이지만 '아직 저장되지 않았어요'와 저장 전 표시 → 새로 고치면 없음 → 연결이 돌아온 뒤 다시 넣으면 저장됨");
   }
 
+  step("가입 안내 메일: 받는 사람·본문·가입 링크, 메일 앱으로 열기 주소, 링크로 열면 '처음 가입' 탭");
+  {
+    errors.length = 0; // 바로 앞 단계에서 일부러 막은 저장 요청의 오류(예상된 것)는 빼고 센다
+    const mail = H.panel(admin, "가입 안내 메일");
+    await mail.waitFor();
+    assert.match(await mail.locator("h2").innerText(), /받는 사람 3명/);
+    const to = await mail.getByLabel("받는 사람 주소").inputValue();
+    assert.equal(to, "dara.new@samsung.com; gana.kim@samsung.com; jacha.jung@samsung.com");
+    const body = await mail.getByLabel("메일 본문").inputValue();
+    const link = H.BASE + "?join";
+    assert.ok(body.includes(`가입 링크: ${link}`), body);
+    assert.match(body, /보낸 사람: noreply@[a-z0-9-]+\.firebaseapp\.com/, "인증 메일 보낸 사람 안내");
+    assert.ok(!body.includes("초대 코드"));
+    // 본문까지 넣으면 주소가 길어서 받는 사람·제목만 넣어 연다(본문은 복사해 붙여 넣기)
+    const openBtn = mail.getByRole("link", { name: /메일 앱으로 열기/ });
+    assert.equal(await openBtn.innerText(), "메일 앱으로 열기 (받는 사람·제목)");
+    const href = await openBtn.getAttribute("href");
+    assert.ok(href.startsWith("mailto:admin%40example.com?bcc=dara.new%40samsung.com,gana.kim%40samsung.com,jacha.jung%40samsung.com&subject="), href);
+    assert.ok(!href.includes("body="), "긴 본문은 주소에 넣지 않는다");
+    await mail.getByText("본문은 길어서 넣지 않고 열어요.").waitFor();
+    // 본문을 짧게 고치면 본문까지 넣어 연다. 되돌리기로 처음 문구가 된다
+    await mail.getByLabel("메일 본문").fill(`가입해 주세요: ${link}`);
+    assert.equal(await openBtn.innerText(), "메일 앱으로 열기");
+    assert.ok((await openBtn.getAttribute("href")).includes(`body=${encodeURIComponent("가입해 주세요: " + link)}`));
+    await mail.getByRole("button", { name: "처음 문구로 되돌리기" }).click();
+    assert.equal(await mail.getByLabel("메일 본문").inputValue(), body);
+    // 명단 전원 / 가입 안 한 사람(지금은 모두 가입 전이라 같다)
+    await mail.getByRole("button", { name: "명단 전원" }).click();
+    assert.match(await mail.locator("h2").innerText(), /받는 사람 3명/);
+    // 링크로 열면 "처음 가입" 탭이 바로 열린다
+    const guest = await H.maker(browser, errors, dialogs)("메일 받은 사람");
+    await guest.goto(link);
+    await guest.getByRole("tab", { name: "처음 가입" }).waitFor();
+    assert.equal(await guest.getByRole("tab", { name: "처음 가입" }).getAttribute("aria-selected"), "true");
+    await guest.getByRole("button", { name: "가입하기" }).waitFor();
+    await guest.close();
+    // 링크 없이 열면 그대로 로그인 탭
+    const plain = await H.maker(browser, errors, dialogs)("그냥 연 사람");
+    await plain.goto(H.BASE);
+    assert.equal(await plain.getByRole("tab", { name: "로그인" }).getAttribute("aria-selected"), "true");
+    await plain.close();
+    assert.equal(errors.length, 0, errors.join("\n"));
+    console.log("  받는 사람 3명(BCC 주소 '; '로), 본문에 가입 링크(?join)·인증 메일 보낸 사람, mailto(나에게 + BCC, 긴 본문은 빼고 짧으면 넣음), 링크로 열면 '처음 가입' 탭");
+  }
+
   await browser.close();
   console.log("완료");
 })().catch((e) => { console.error("실패:", e.message); process.exit(1); });

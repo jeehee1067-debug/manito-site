@@ -1077,3 +1077,25 @@ test("발표 화면: 수호천사가 있으면 명탐정 다음에 '숨은 수�
   assert.equal(ids[ids.indexOf("detective") + 1], "angels");
   assert.ok(!buildSlides({ ...r, angels: [] }, (x) => x).some((x) => x.id === "angels"));
 });
+
+test("가입 안내 메일: 받는 사람(가입 안 한 사람·아이디 있는 사람), 본문의 가입 링크, mailto 주소", async () => {
+  const { inviteRecipients, inviteMessage, mailtoHref, joinUrl } = await import("../src/lib/inviteMail.js");
+  const roster = [
+    { pid: "p1", name: "가", email: "b.kim@samsung.com", uid: null },
+    { pid: "p2", name: "나", email: "a.lee@samsung.com", uid: "u2" },
+    { pid: "p3", name: "다", email: null, uid: null },
+    { pid: "p4", name: "라", email: "c.park@samsung.com" },
+  ];
+  assert.deepEqual(inviteRecipients(roster), { emails: ["b.kim@samsung.com", "c.park@samsung.com"], noEmail: ["다"] });
+  assert.deepEqual(inviteRecipients(roster, { onlyNotJoined: false }).emails, ["a.lee@samsung.com", "b.kim@samsung.com", "c.park@samsung.com"]);
+  const url = joinUrl("https://example.web.app", "/");
+  assert.equal(url, "https://example.web.app/?join");
+  const { subject, body } = inviteMessage({ url, senderHost: "demo.firebaseapp.com" });
+  assert.ok(subject.includes("가입"));
+  assert.ok(body.includes(url) && body.includes("noreply@demo.firebaseapp.com"));
+  assert.ok(!/초대 코드/.test(body), "본문에 초대 코드는 넣지 않는다");
+  const href = mailtoHref({ to: "me@samsung.com", bcc: ["b.kim@samsung.com", "c.park@samsung.com"], subject: "제목", body: "줄1\n줄2" });
+  assert.ok(href.startsWith("mailto:me%40samsung.com?bcc=b.kim%40samsung.com,c.park%40samsung.com&subject="));
+  assert.ok(href.includes("body=%EC%A4%841%0D%0A%EC%A4%842"), "줄바꿈은 %0D%0A");
+  assert.ok(href.indexOf("bcc=") < href.indexOf("subject=") && href.indexOf("subject=") < href.indexOf("body="), "잘려도 받는 사람이 먼저 남게");
+});

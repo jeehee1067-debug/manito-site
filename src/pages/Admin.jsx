@@ -12,6 +12,7 @@ import { computeTickets, missionLikes, noticedWeeks, partStandings, rankReviews,
 import { angelQueue, angelQueueStatus, matchAngels, needyReceivers } from "../lib/angels.js";
 import { PRIZES, TICKET_RULES as R } from "../config/prizes.js";
 import { parseRosterLine, rosterSummary, sameSummary } from "../lib/roster.js";
+import InviteMail from "./InviteMail.jsx";
 
 // Firestore 배치는 500건 제한이라 나눠서 커밋한다.
 async function commitInChunks(ops) {
@@ -641,6 +642,8 @@ function Setup() {
           </table>
         </div>
       </Panel>
+
+      {loaded && <InviteMail roster={roster} />}
     </>
   );
 }
@@ -796,6 +799,9 @@ function Running() {
           </table>
         </div>
       </Panel>
+
+      {/* 미션 시작 뒤에도 가입할 수 있다: 아직 가입 안 한 사람이 있으면 안내 메일을 다시 보낼 수 있게 */}
+      {roster.some((r) => !r.uid) && <InviteMail roster={roster} />}
     </>
   );
 }
