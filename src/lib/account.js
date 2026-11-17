@@ -57,18 +57,58 @@ export async function resetPassword(email) {
   return sendPasswordResetEmail(auth, toEmail(email));
 }
 
-// 인증 메일 보내기(가입 직후, 그리고 "다시 보내기"). 이미 인증한 계정이면 아무것도 하지 않는다.
-export async function sendVerifyMail() {
-  const u = auth.currentUser;
-  if (!u || u.emailVerified) return;
+// 인증 메일을 마지막으로 보낸 시각(이 기기에서, 계정마다). "연결 전" 화면이 열릴 때 스스로 보낼지 정하는 데 쓴다.
+// 저장소를 못 쓰는 브라우저(시크릿 창 등)에서는 이 탭이 열려 있는 동안만 기억한다.
+const sentMem = {};
+const sentKey = (uid) => `manito:verifySent:${uid}`;
+export function verifyMailSentAt(uid) {
   try {
-    // 인증을 마친 화면에 "계속" 버튼이 나와 이 사이트로 돌아올 수 있게 주소를 같이 보낸다
-    await sendEmailVerification(u, { url: window.location.origin + window.location.pathname });
-  } catch (err) {
-    // 사이트 주소가 Firebase의 승인된 도메인에 없으면 거부된다: 돌아오는 주소 없이 보낸다
-    if (!String(err?.code || "").includes("continue-uri")) throw err;
-    await sendEmailVerification(u);
+    return Number(window.localStorage.getItem(sentKey(uid))) || sentMem[uid] || 0;
+  } catch {
+    return sentMem[uid] || 0;
   }
+}
+function markVerifyMailSent(uid) {
+  sentMem[uid] = Date.now();
+  try {
+    window.localStorage.setItem(sentKey(uid), String(sentMem[uid]));
+  } catch {
+    /* 저장소를 못 쓰면 메모리에만 */
+  }
+}
+
+// 인증 메일 보내기. 이미 인증한 계정이면 아무것도 하지 않는다.
+// 같은 계정으로 보내는 중이면 그 요청을 같이 기다린다(두 통이 나가거나 "너무 잦은 요청"으로 거부되지 않게).
+let sending = null;
+export function sendVerifyMail() {
+  const u = auth.currentUser;
+  if (!u || u.emailVerified) return Promise.resolve();
+  if (sending && sending.uid === u.uid) return sending.promise;
+  const promise = (async () => {
+    try {
+      // 인증을 마친 화면에 "계속" 버튼이 나와 이 사이트로 돌아올 수 있게 주소를 같이 보낸다
+      await sendEmailVerification(u, { url: window.location.origin + window.location.pathname });
+    } catch (err) {
+      // 사이트 주소가 Firebase의 승인된 도메인에 없으면 거부된다: 돌아오는 주소 없이 보낸다
+      if (!String(err?.code || "").includes("continue-uri")) throw err;
+      await sendEmailVerification(u);
+    }
+    markVerifyMailSent(u.uid);
+  })().finally(() => { sending = null; });
+  sending = { uid: u.uid, promise };
+  return promise;
+}
+
+// "연결 전" 화면이 열릴 때 부른다: 인증 전 계정이고 최근에 보낸 기록이 없으면 인증 메일을 보낸다.
+// 가입 직후뿐 아니라, 예전에 만든 계정으로 로그인했을 때도 메일이 가게 한다(로그인만으로는 메일이 가지 않는다 — 실제로 "메일이 안 온다"는 문의가 있었다).
+// 반환: "verified"(이미 인증) | "recent"(최근에 보냄, 다시 보내지 않음) | "sent"(지금 보냄). 보내지 못하면 오류를 던진다.
+export const VERIFY_AUTO_RESEND_MS = 10 * 60 * 1000;
+export async function ensureVerifyMail() {
+  const u = auth.currentUser;
+  if (!u || u.emailVerified) return "verified";
+  if (!sending && Date.now() - verifyMailSentAt(u.uid) < VERIFY_AUTO_RESEND_MS) return "recent";
+  await sendVerifyMail();
+  return "sent";
 }
 
 // 메일 인증으로 명단의 내 이름과 계정을 연결한다(초대 코드 없이).

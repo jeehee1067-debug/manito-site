@@ -44,10 +44,11 @@ export default function Login({ bootstrap = false }) {
         const bad = validateEmail(email) || validatePassword(password);
         if (bad) throw new Error(bad);
         await signup(email, password, keep);
-        // 회사 메일로 인증 메일을 보낸다. 다음 화면("연결 전")에서 인증을 확인하면 명단의 내 이름과 자동으로 연결된다.
-        // 메일이 안 오는 경우를 위해 초대 코드를 받은 사람은 여기서 바로 연결할 수도 있다(예비).
-        await sendVerifyMail().catch(() => {});
+        // 초대 코드를 받은 사람은 여기서 바로 연결한다(메일 인증 없이).
+        // 코드가 없으면 다음 화면("연결 전", Claim.jsx)이 인증 메일을 보내고 결과를 보여 준다.
+        // 여기서도 먼저 보내 둔다(실패해도 다음 화면이 다시 보내고, 못 보내면 이유를 보여 준다).
         if (invite.trim()) await claimWithInvite(invite);
+        else sendVerifyMail().catch(() => {});
       } else if (mode === "reset") {
         const bad = validateEmail(email);
         if (bad) throw new Error(bad);

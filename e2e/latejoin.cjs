@@ -67,6 +67,7 @@ const H = require("./helpers.cjs");
     const p = await mk(LATE); u[LATE] = p;
     await p.goto(H.BASE);
     await p.getByRole("tab", { name: "처음 가입" }).click();
+    const mail0 = await H.verifyMailCount("late3@samsung.com"); // 에뮬레이터에 남아 있던 예전 메일은 빼고 센다
     await p.getByPlaceholder("Knox ID").fill("Late3"); // 대문자로 적어도 소문자 주소가 된다
     await p.getByText("late3@samsung.com로 인증 메일이 가요.").waitFor();
     await p.locator('input[type="password"]').fill("secret123");
@@ -74,6 +75,26 @@ const H = require("./helpers.cjs");
     const verify = H.panel(p, "회사 메일 인증");
     await verify.getByText("late3@samsung.com").waitFor();
     assert.equal(await p.locator("nav.tabs").count(), 0, "인증 전에는 메뉴가 없다(아무것도 읽을 수 없다)");
+    // 가입하면 아무것도 누르지 않아도 인증 메일이 한 통 나가고, 화면이 보낸 시각을 보여 준다
+    await verify.getByText(/로 인증 메일을 보냈어요\(\d{2}:\d{2}\)/).waitFor();
+    assert.equal((await H.verifyMailCount("late3@samsung.com")) - mail0, 1, "가입 직후 인증 메일 한 통");
+    // 새로 고쳐도 다시 보내지 않는다(최근에 보낸 기록이 있다)
+    await p.reload();
+    await verify.getByText(/로 인증 메일을 보냈어요\(\d{2}:\d{2}\)/).waitFor();
+    await p.waitForTimeout(1500);
+    assert.equal((await H.verifyMailCount("late3@samsung.com")) - mail0, 1, "새로 고쳐도 한 통 그대로");
+    // 다른 기기에서 그 계정으로 로그인하면(보낸 기록이 없는 기기) 인증 메일이 스스로 다시 나간다
+    {
+      const other = await mk("사아(다른 기기)");
+      await other.goto(H.BASE);
+      await other.getByPlaceholder("Knox ID").fill("late3");
+      await other.locator('input[type="password"]').fill("secret123");
+      await other.getByRole("button", { name: "로그인", exact: true }).click();
+      await H.panel(other, "회사 메일 인증").getByText(/로 인증 메일을 보냈어요\(\d{2}:\d{2}\)/).waitFor();
+      assert.equal((await H.verifyMailCount("late3@samsung.com")) - mail0, 2, "인증 전 계정으로 로그인하면 메일이 다시 나간다");
+      await other.close();
+    }
+    console.log("  가입 직후 인증 메일 1통(누르지 않아도) → 새로 고침에는 그대로 → 다른 기기에서 로그인하면 스스로 다시 보냄");
     await verify.getByRole("button", { name: "인증했어요 · 연결하기" }).click();
     await verify.getByText("아직 메일 인증 전이에요").waitFor(); // 링크를 누르기 전에는 연결되지 않는다
     await verify.getByRole("button", { name: "인증 메일 다시 보내기" }).click();

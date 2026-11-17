@@ -70,6 +70,11 @@ const readDoc = async (path) => { const d = await (await fetch(`${FS}/${path}`, 
 // 수상자 계산에 들어가는 값(results/public에서)
 const prizeInput = async () => { const r = await readDoc("results/public"); return { tickets: r.tickets || {}, tieBreak: r.tieBreak || {}, reviews: r.reviewRank || [], draws: r.draws || {} }; };
 
+// 그 주소로 나간 인증 메일 수(에뮬레이터)
+async function verifyMailCount(email) {
+  const list = (await (await fetch(`http://127.0.0.1:9099/emulator/v1/projects/${P}/oobCodes`)).json()).oobCodes || [];
+  return list.filter((c) => c.email === email && c.requestType === "VERIFY_EMAIL").length;
+}
 // 인증 메일의 링크 누르기(에뮬레이터): 그 주소로 온 가장 최근 인증 링크를 연다
 async function verifyMail(email) {
   const list = (await (await fetch(`http://127.0.0.1:9099/emulator/v1/projects/${P}/oobCodes`)).json()).oobCodes || [];
@@ -145,4 +150,4 @@ async function pickCard(slot, level, nth = 0) {
   await slot.locator(`.dealt .card.level-${level}`).nth(nth).click();
   await slot.locator(".chosen").waitFor();
 }
-module.exports = { pickCard, readTarget, showSecrets, BASE, P, panel, tab, reset, maker, setupAdmin, inviteCodes, signup, fillProfile, answersFor, readDoc, prizeInput, verifyMail, runAwards };
+module.exports = { verifyMailCount, pickCard, readTarget, showSecrets, BASE, P, panel, tab, reset, maker, setupAdmin, inviteCodes, signup, fillProfile, answersFor, readDoc, prizeInput, verifyMail, runAwards };
