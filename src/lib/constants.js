@@ -86,6 +86,7 @@ export const RULES_VERSION = "20261120";
 
 // remote: 다른 근무지에 있는 대상에게도 할 수 있는 미션인지.
 // 대상이 다른 근무지면 remote 카드만 제시한다. 쉬움 카드는 모두 사이트 쪽지로 하는 무비용 미션.
+// real: 실물을 전달하는 카드(쪽지만으로 끝나지 않는 것). 보통·도전에서 나오는 두 장 중 한 장은 항상 실물 카드다(lib/cards.js).
 // cost: 간식·음료·선물처럼 본인 돈이 드는 카드. 카드에 "소액 비용"으로 표시한다. 난이도를 고르면 두 장이 나오는데(lib/cards.js dealCards) 돈이 드는 카드만 나오지는 않는다
 // (각 난이도에 무비용 카드가 원격용 포함 2장 이상 있어야 한다. tests/logic.test.js가 확인).
 // 난이도 기준(같은 응모권이면 같은 수고가 되게 맞춘 것. 카드를 더할 때 이 기준으로 넣는다):
@@ -105,9 +106,9 @@ export const MISSION_CARDS = {
   ],
   normal: [
     // 간단한 실물
-    { id: "n1", cost: true, remote: false, text: "대상 책상 위에 간식 하나 몰래 두기" },
-    { id: "n2", cost: true, remote: false, text: "대상 자리에 음료 한 잔 두기" },
-    { id: "n3", remote: false, text: "응원 문구를 쓴 포스트잇 붙여두기" },
+    { id: "n1", real: true, cost: true, remote: false, text: "대상 책상 위에 간식 하나 몰래 두기" },
+    { id: "n2", real: true, cost: true, remote: false, text: "대상 자리에 음료 한 잔 두기" },
+    { id: "n3", real: true, remote: false, text: "응원 문구를 쓴 포스트잇 붙여두기" },
     // 공들인 쪽지
     { id: "n4", remote: true, text: "대상만을 위한 노래 3곡 플레이리스트 쪽지 보내기" },
     { id: "n5", remote: true, text: "대상의 하루를 응원하는 짧은 시 쪽지 보내기" },
@@ -123,15 +124,15 @@ export const MISSION_CARDS = {
   ],
   hard: [
     // 손으로 쓰거나 만든 것을 직접 전달
-    { id: "h1", remote: false, text: "손편지 써서 몰래 전달하기" },
-    { id: "h2", remote: false, text: "대상에 대한 O/X 퀴즈 3문제를 손카드로 만들어 전달하기 (예: '○○님은 민트초코를 좋아한다')" },
-    { id: "h3", remote: false, text: "종이접기 등 직접 만든 소품 전달하기" },
-    { id: "h4", cost: true, remote: false, text: "대상에게 필요할 것 같은 작은 물건을 골라 선물하기 (5천원 이하면 충분해요)" },
+    { id: "h1", real: true, remote: false, text: "손편지 써서 몰래 전달하기" },
+    { id: "h2", real: true, remote: false, text: "대상에 대한 O/X 퀴즈 3문제를 손카드로 만들어 전달하기 (예: '○○님은 민트초코를 좋아한다')" },
+    { id: "h3", real: true, remote: false, text: "종이접기 등 직접 만든 소품 전달하기" },
+    { id: "h4", real: true, cost: true, remote: false, text: "대상에게 필요할 것 같은 작은 물건을 골라 선물하기 (5천원 이하면 충분해요)" },
     // 여러 날
     { id: "h5", remote: true, text: "3일 연속 매일 다른 응원 쪽지 보내기 (첫날 완료를 알린 뒤 '쪽지 더 보내기'로 이어서)" },
     // 공범: 전달을 부탁하는 한 사람에게만 알린다(규칙 탭 "지켜 주세요"의 예외). 다른 근무지 대상에게 실물을 보내는 방법
-    { id: "h6", cost: true, remote: true, text: "동료를 공범으로 섭외해 간식을 대신 전달하게 하기 (인증 코드 메모를 함께, 공범에게도 비밀 유지 부탁)" },
-    { id: "h7", remote: true, text: "손편지를 써서 동료(공범)에게 대신 전달을 부탁하기 (인증 코드 메모를 함께, 공범에게도 비밀 유지 부탁)" },
+    { id: "h6", real: true, cost: true, remote: true, text: "동료를 공범으로 섭외해 간식을 대신 전달하게 하기 (인증 코드 메모를 함께, 공범에게도 비밀 유지 부탁)" },
+    { id: "h7", real: true, remote: true, text: "손편지를 써서 동료(공범)에게 대신 전달을 부탁하기 (인증 코드 메모를 함께, 공범에게도 비밀 유지 부탁)" },
   ],
 };
 
