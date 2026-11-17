@@ -19,8 +19,17 @@ const ALL_CARDS = Object.values(MISSION_CARDS).flat();
 const isCostCard = (cardId) => Boolean(ALL_CARDS.find((c) => c.id === cardId)?.cost);
 
 // 난이도 고르기 화면에 적는 한 줄 설명(규칙 탭 "미션 카드 난이도"와 같은 기준)
-const LEVEL_HINT = { easy: "사이트 쪽지 한 통", normal: "공들인 쪽지 또는 간단한 실물", hard: "직접 전달 · 만든 것 · 여러 날" };
-const stars = (level) => <span className="card-stars" aria-hidden="true">{"★".repeat(LEVELS.indexOf(level) + 1)}<i>{"★".repeat(2 - LEVELS.indexOf(level))}</i></span>;
+const LEVEL_HINT = { easy: "사이트 쪽지 한 통", normal: "공들여 지어 쓰는 쪽지, 또는 간단한 실물", hard: "직접 만든 것 · 선물 · 3일 연속 · 알아내 맞히기" };
+// 3주차: 칭찬 한 줄은 모두 보내고, 원하면 보통·도전 카드를 하나 더 한다("칭찬만"이 쉬움 몫. 보안 규칙도 같은 세 가지만 받는다)
+const PRAISE_LEVELS = ["praise", "normal", "hard"];
+const PRAISE_CARD = { cardId: "praise", level: "praise", text: "올해의 칭찬 한 줄" };
+const PRAISE_HINT = { praise: "올해의 칭찬 한 줄만 보내기", normal: "칭찬 한 줄 + 보통 카드 미션", hard: "칭찬 한 줄 + 도전 카드 미션" };
+const levelLabel = (lv) => (lv === "praise" ? "칭찬만" : LEVEL_LABEL[lv]);
+const starLevel = (lv) => (lv === "praise" ? "easy" : lv);
+const stars = (lv) => {
+  const k = LEVELS.indexOf(starLevel(lv));
+  return <span className="card-stars" aria-hidden="true">{"★".repeat(k + 1)}<i>{"★".repeat(2 - k)}</i></span>;
+};
 
 export default function MyMission() {
   const { myPid, nameOf, config, byPid, inbox, fromReceiver, angelInbox } = useApp();
@@ -106,7 +115,7 @@ export default function MyMission() {
   if (!progress.unknown && !progress.profileDone) todo.push({ text: "내 프로필 6문항 채우기 (단서가 돼요. 안 채우면 은신 응모권 없음)", href: "#profile" });
   if (extra.prefs === false) todo.push({ text: "내 마니또에게 알려 줄 것(좋아하는 간식, 못 먹는 음식) 적기", href: "#profile" });
   if (running) {
-    if (!missions.done?.[week]) todo.push({ text: week === PRAISE_SLOT ? `${week}주차 칭찬 카드 보내기` : missions.choices?.[week] ? `${week}주차 미션 하고 "완료 알리기"` : `${week}주차 미션 카드 고르기`, href: null });
+    if (!missions.done?.[week]) todo.push({ text: week === PRAISE_SLOT ? `${week}주차 칭찬 한 줄 보내기(원하면 카드 미션도)` : missions.choices?.[week] ? `${week}주차 미션 하고 "완료 알리기"` : `${week}주차 미션 카드 고르기`, href: null });
     if (pending.length > 0) todo.push({ text: `받은 미션 ${pending.length}건 인증하기`, href: "#detective" });
     if (extra.mid && !extra.mid[week]) todo.push({ text: `${week}주차 추측 남기기 (용의자 보드)`, href: "#detective" });
   }
@@ -200,6 +209,7 @@ export default function MyMission() {
           open={running && slot <= config.week}
           phase={config.phase}
           remote={remote}
+          taken={Object.entries(missions.choices || {}).filter(([s, c]) => Number(s) !== slot && c?.cardId).map(([, c]) => c.cardId)}
         />
       ))}
 
@@ -209,7 +219,7 @@ export default function MyMission() {
   );
 }
 
-function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, notes, allDone, open, phase, remote }) {
+function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, notes, allDone, open, phase, remote, taken = [] }) {
   const [message, setMessage] = useState("");
   const [includeCode, setIncludeCode] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -260,22 +270,22 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
   async function complete(e) {
     e.preventDefault();
     setError("");
-    if (isPraise && message.trim().length < 10) return setError("칭찬 카드는 10자 이상 써 주세요.");
+    if (isPraise && message.trim().length < 10) return setError("칭찬 한 줄은 10자 이상 써 주세요.");
     setBusy(true);
     try {
       // 완료 알림(문서 ID = 받는사람_주차, 주차마다 한 번)과 완료 표시를 한 묶음으로 쓴다. 보안 규칙이 둘이 같이 있을 때만 받는다.
       const next = { ...allDone, [slot]: true };
       const update = { done: { [slot]: true }, ...bump() };
-      if (isPraise) update.choices = { [slot]: { cardId: "praise", level: "praise", text: "올해의 칭찬 한 줄" } };
+      if (isPraise && !hasCard) update.choices = { [slot]: PRAISE_CARD };
       const batch = writeBatch(db);
-      // 1·2주차 알림에는 고른 카드(난이도·내용)를 같이 보낸다. 대상이 받은 것과 맞는지 확인하고, 다르면 카드 추가분이 빠진다.
+      // 알림에는 고른 카드(난이도·내용)를 같이 보낸다(3주차는 칭찬과 함께 카드를 골랐을 때). 대상이 받은 것과 맞는지 확인하고, 다르면 카드 추가분이 빠진다.
       batch.set(doc(db, "deliveries", `${receiverPid}_${slot}`), {
         receiverPid,
         slot,
         kind: isPraise ? "praise" : "mission",
         message: message.trim(),
         code: includeCode || isPraise ? code : null,
-        ...(isPraise ? {} : { card: { level: choice.level, text: choice.text } }),
+        ...(hasCard ? { card: { level: choice.level, text: choice.text } } : {}),
         createdAt: serverTimestamp(),
       });
       batch.set(doc(db, "giverMissions", myPid), update, { merge: true });
@@ -290,46 +300,55 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
   }
 
   const title = isPraise ? "3주차 공통 미션: 올해의 칭찬 한 줄" : `${slot}주차 미션`;
+  const hasCard = Boolean(choice && choice.level !== "praise"); // 고른 미션 카드(3주차는 칭찬과 함께 고른 보통·도전 카드)
+  const praiseOnly = isPraise && !hasCard && (level === "praise" || choice?.level === "praise");
+  const picking = open && !done && !hasCard && !praiseOnly;
+  const levels = isPraise ? PRAISE_LEVELS : LEVELS;
+  const hint = (lv) => (isPraise ? PRAISE_HINT[lv] : LEVEL_HINT[lv]);
 
   return (
     <Panel title={title + (done ? " ✔" : "")} className={open || done ? "" : "locked"}>
       {!open && !done && <p className="muted">{phase < PHASE.RUNNING ? "미션 진행이 시작되면 열려요." : `${slot}주차에 열려요.`}</p>}
 
-      {open && !done && !isPraise && !choice && (
+      {picking && (
         <>
           {!level && (
             <>
               <p className="small">
-                먼저 난이도를 골라 주세요. 고르면 그 난이도의 카드 {DEAL_COUNT}장이 나오고, 그중 하나를 고르면 돼요.
-                대상이 인증하면 보통은 응모권 {TICKET_RULES.cardBonus.normal}장, 도전은 {TICKET_RULES.cardBonus.hard}장을 더 받아요.
+                {isPraise
+                  ? <>3주차에는 모두 <b>올해의 칭찬 한 줄</b>을 보내요(익명, 송년회 칭찬 벽에 나와요). 원하면 보통·도전 카드 미션을 하나 더 해서 응모권을 더 받을 수 있어요. </>
+                  : <>먼저 난이도를 골라 주세요. </>}
+                고르면 그 난이도의 카드 {DEAL_COUNT}장이 나오고, 그중 하나를 고르면 돼요.
+                대상이 인증하면서 받은 것이 카드와 같다고 확인하면 보통은 응모권 {TICKET_RULES.cardBonus.normal}장, 도전은 {TICKET_RULES.cardBonus.hard}장을 더 받아요.
+                보통·도전에는 돈이 드는 카드가 한 장 나와요(그 미션이 인증되면 비용 카드 +{TICKET_RULES.costBonus}, 3주 동안 한 번만).
               </p>
               <div className="cards">
-                {LEVELS.map((lv) => (
-                  <button key={lv} type="button" className={`card level-pick level-${lv}`} onClick={() => setLevel(lv)}>
+                {levels.map((lv) => (
+                  <button key={lv} type="button" className={`card level-pick level-${starLevel(lv)}`} onClick={() => setLevel(lv)}>
                     <span className="card-head">
-                      <span className="card-level">{LEVEL_LABEL[lv]}</span>
+                      <span className="card-level">{levelLabel(lv)}</span>
                       {stars(lv)}
                       <span className="card-reward">응모권 +{1 + (TICKET_RULES.cardBonus[lv] || 0)}</span>
                     </span>
-                    <span className="card-text">{LEVEL_HINT[lv]}</span>
+                    <span className="card-text">{hint(lv)}</span>
                   </button>
                 ))}
               </div>
             </>
           )}
-          {level && (
+          {level && level !== "praise" && (
             <>
               <p className="small">
                 이번 주 {LEVEL_LABEL[level]} 카드예요. 하나를 골라 주세요. 카드는 사람·주차마다 다르게 나오고, 다시 뽑을 수는 없어요.
-                {level !== "easy" && !remote && " 두 장 중 한 장은 실물을 전달하는 카드예요."}
+                {isPraise && " 칭찬 한 줄은 카드와 함께 보내요."}
               </p>
               <p className="small">
                 <span className="cost-tag">소액 비용</span> 표시는 간식·음료처럼 내 돈이 드는 카드예요. 건당 {SPEND_GUIDE_WON.toLocaleString()}원 이하를 권장해요.
                 비용 카드 미션이 인증되면 응모권 {TICKET_RULES.costBonus}장을 더 받아요(3주 동안 한 번만. 여러 번 해도 {TICKET_RULES.costBonus}장이에요).
-                돈이 드는 카드만 나오는 일은 없어요.
+                {dealCards(myPid, slot, level, remote, taken).some((c) => c.cost) && " 두 장 중 한 장은 돈이 드는 카드, 한 장은 돈이 안 드는 카드예요."}
               </p>
               <div className="cards dealt">
-                {dealCards(myPid, slot, level, remote).map((c) => (
+                {dealCards(myPid, slot, level, remote, taken).map((c) => (
                   <button key={c.id} type="button" className={`card level-${c.level}`} onClick={() => choose(c)}>
                     <span className="card-head">
                       <span className="card-level">{LEVEL_LABEL[c.level]}</span>
@@ -348,9 +367,14 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
         </>
       )}
 
-      {(choice || isPraise) && open && !done && (
+      {(hasCard || praiseOnly) && open && !done && (
         <form className="stack" onSubmit={complete}>
-          {!isPraise && (
+          {praiseOnly && !choice && (
+            <p className="small">
+              칭찬 한 줄만 보내요. <button type="button" className="text-btn" onClick={() => setLevel(null)}>카드도 고르기</button>
+            </p>
+          )}
+          {hasCard && (
             <div className="chosen">
               <span className={`badge level-${choice.level}`}>{LEVEL_LABEL[choice.level]}</span>
               <span>{choice.text}</span>
@@ -364,16 +388,18 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
               )}
             </div>
           )}
-          {!isPraise && redeemed && <p className="small">{receiverName}이 이미 인증해서 카드를 바꿀 수 없어요. 완료 알리기를 눌러 주세요. 그래야 대상이 고른 카드를 보고 확인해서 카드 추가분이 붙어요.</p>}
+          {hasCard && redeemed && <p className="small">{receiverName}이 이미 인증해서 카드를 바꿀 수 없어요. 완료 알리기를 눌러 주세요. 그래야 대상이 고른 카드를 보고 확인해서 카드 추가분이 붙어요.</p>}
           <div className="code-tag" aria-label="인증 코드">
             <span>인증 코드</span>
             <strong>{code || "----"}</strong>
           </div>
           <p className="small">
             {isPraise
-              ? "칭찬 카드는 사이트 쪽지로 전달되고, 인증 코드도 함께 보내져요."
+              ? hasCard
+                ? "칭찬 한 줄은 사이트 쪽지로 전달되고, 인증 코드도 함께 보내져요. 고른 카드 미션도 해 주세요(실물이면 이 코드를 메모에 적어 함께 두면 좋아요)."
+                : "칭찬 카드는 사이트 쪽지로 전달되고, 인증 코드도 함께 보내져요."
               : "실물 미션이면 이 코드를 메모에 적어 함께 두면 좋아요. 아래에서 코드를 쪽지로도 함께 보내면 메모를 잃어버려도 인증할 수 있어요."}
-            {!isPraise && " 고른 카드 내용은 대상에게 같이 보여요(받은 것이 카드와 다르면 카드 추가분이 빠져요). 미션을 하면 바로 완료 알리기를 눌러 주세요. 대상이 알림보다 먼저 인증하면 카드를 한 번 더 확인해야 추가분이 붙어요."}
+            {hasCard && " 고른 카드 내용은 대상에게 같이 보여요(받은 것이 카드와 다르면 카드 추가분이 빠져요). 미션을 하면 바로 완료 알리기를 눌러 주세요. 대상이 알림보다 먼저 인증하면 카드를 한 번 더 확인해야 추가분이 붙어요."}
           </p>
           <label>
             <span className="panel-label">{isPraise ? `${receiverName}에게 보내는 칭찬 (익명)` : "쪽지 (선택, 익명으로 전달)"}</span>
@@ -387,7 +413,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
             </label>
           )}
           {error && <p className="error" role="alert">{error}</p>}
-          <button className="pk-btn main" disabled={busy}>{isPraise ? "칭찬 카드 보내기" : "미션 완료 알리기"}</button>
+          <button className="pk-btn main" disabled={busy}>{isPraise ? (hasCard ? "칭찬 보내고 미션 완료 알리기" : "칭찬 카드 보내기") : "미션 완료 알리기"}</button>
         </form>
       )}
 
@@ -406,7 +432,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
                 : `${receiverName}이 인증했어요.`
               : verdict === "received" ? "운영진이 전달된 것으로 확인했어요. 미션으로 인정돼요(카드 추가분은 직접 인증된 경우에만 있어요)."
                 : verdict === "missing" ? "운영진이 전달되지 않은 것으로 확인했어요. 이 주차는 미션으로 인정되지 않아요."
-                  : isPraise ? `칭찬 카드가 전달됐어요. 미션으로 인정돼요(${receiverName}이 인증하면 ${receiverName}도 응모권을 받아요).`
+                  : isPraise ? `칭찬 카드가 전달됐어요. 미션으로 인정돼요(${receiverName}이 인증하면 ${receiverName}도 응모권을 받아요).${hasCard ? ` 고른 카드의 추가분은 ${receiverName}이 인증하면서 카드와 같다고 확인해야 붙어요.` : ""}`
                     : `${receiverName}의 인증을 기다리는 중이에요.`}
           </p>
           {!redeemed && !verdict && reported && (

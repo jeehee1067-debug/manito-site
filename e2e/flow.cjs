@@ -230,7 +230,7 @@ const step = (s) => console.log("▶", s);
   {
     const page = users["다라"];
     await tab(page, "규칙");
-    await panel(page, "응모권 받는 법 (최대 15장, 수호천사는 +2장)").waitFor();
+    await panel(page, "응모권 받는 법 (최대 17장, 수호천사는 +2장)").waitFor();
     await panel(page, "파트 대항전").getByText("같은 파트끼리는 마니또가 되지 않아요.").waitFor();
     await panel(page, "응모권 받는 법").getByText("마지막 집계에서 미션 완수율 1위").waitFor();
     await panel(page, "응모권 받는 법").getByText("끝까지 해야 받는 것이 있어요.").waitFor();
@@ -274,7 +274,8 @@ const step = (s) => console.log("▶", s);
       const free = await slot.locator(".dealt .card:not(:has(.cost-tag))").count();
       assert.equal(texts.length, 2, `${level} 카드는 두 장`);
       assert.equal(new Set(texts).size, 2);
-      assert.ok(free >= 1, "돈이 안 드는 카드가 한 장은 있다");
+      assert.equal(free, 1, "돈이 안 드는 카드 한 장");
+      assert.equal(texts.length - free, 1, "돈이 드는 카드 한 장(모두에게 비용 카드가 나오게)");
       assert.equal(await slot.getByRole("button", { name: /다른 .* 카드 보기/ }).count(), 0, "다시 뽑는 버튼은 없다");
       await slot.getByRole("button", { name: "난이도 다시 고르기" }).click();
       await slot.locator(".level-pick").first().waitFor();
@@ -333,7 +334,7 @@ const step = (s) => console.log("▶", s);
   {
     const g = users["가나"];
     const t = panel(g, "내 응모권");
-    await t.getByText("마니또로서: 인증된 미션 1 / 3 + 카드 추가분 2 / 4(보통 +1, 도전 +2)").waitFor();
+    await t.getByText("마니또로서: 인증된 미션 1 / 3 + 카드 추가분 2 / 6(보통 +1, 도전 +2)").waitFor();
     await t.getByText("받는 사람으로서: 인증 입력 1 / 3").waitFor();
     await t.getByText("우리 파트가 완수율 1위면 +1").waitFor();
     await t.getByText(`비용 카드 ${ganaCost} / 1`).waitFor();
@@ -659,27 +660,39 @@ const step = (s) => console.log("▶", s);
   }
   console.log("  단서: 각자 자기 마니또가 고른 답 1·2번만 보이고, 나머지와 파트 단서는 잠김");
 
-  step("3주차 칭찬 카드 (다라)");
+  step("3주차 (다라): 칭찬 한 줄 + 도전 카드(돈 안 드는 쪽) → 대상이 카드와 같다고 인증 → 카드 추가분 +2");
   await panel(admin, "주차").getByRole("button", { name: "3주차" }).click();
+  let daraHard = "";
   {
     const g = users["다라"];
     await tab(g, "추리 보드");
     await tab(g, "내 미션");
     const slot = panel(g, "3주차 공통 미션");
+    // 3주차 고르기: 칭찬만 / 칭찬 + 보통 / 칭찬 + 도전
+    await slot.locator(".level-pick").first().waitFor();
+    assert.deepEqual((await slot.locator(".level-pick .card-level").allInnerTexts()), ["칭찬만", "보통", "도전"]);
+    assert.deepEqual((await slot.locator(".level-pick .card-reward").allInnerTexts()), ["응모권 +1", "응모권 +2", "응모권 +3"]);
+    await slot.locator(".level-pick.level-hard").click();
+    await slot.locator(".dealt .card:not(:has(.cost-tag))").click();
+    daraHard = (await slot.locator(".chosen span").nth(1).innerText()).trim();
     await slot.locator("textarea").fill("올해 늘 웃으며 도와줘서 정말 고마웠어요!");
-    await slot.getByRole("button", { name: "칭찬 카드 보내기" }).click();
+    await slot.getByRole("button", { name: "칭찬 보내고 미션 완료 알리기" }).click();
     await panel(g, "3주차 공통 미션: 올해의 칭찬 한 줄 ✔").waitFor();
     const r = users[target["다라"]];
     await tab(r, "피드");
     await tab(r, "추리 보드");
     const inbox = panel(r, "마니또에게서 온 것");
     await inbox.locator(".dialogue.gold strong.mono").waitFor();
+    await inbox.getByText(`마니또가 고른 카드: 도전 · ${daraHard}`).waitFor();
     const code = await inbox.locator(".dialogue.gold strong.mono").innerText();
     const entry = panel(r, "인증하기");
     await entry.getByPlaceholder("K7Q2").fill(code);
+    await entry.locator(".card-check").getByText(daraHard).waitFor(); // 3주차도 고른 카드를 보고 확인한다
+    assert.ok(await entry.getByRole("checkbox", { name: /받은 것이 이 카드 내용과 같아요/ }).isChecked());
     await entry.locator("textarea").fill("칭찬 카드 받고 눈물 날 뻔했어요. 고마워요!");
     await entry.getByRole("button", { name: "인증하기" }).click();
     await r.getByText("인증했어요. 응모권 1장이 쌓였어요.").waitFor();
+    console.log(`  다라 3주차: 칭찬 + 도전 카드("${daraHard}") → 대상이 카드를 보고 같다고 인증`);
   }
 
   step("파트 순위는 다시 발표하기 전까지 그대로 → '파트 순위만 다시 발표' 후 바뀜");
@@ -703,6 +716,7 @@ const step = (s) => console.log("▶", s);
     await tab(g, "추리 보드");
     await tab(g, "내 미션");
     const slot = panel(g, "3주차 공통 미션");
+    await slot.locator(".level-pick.level-easy").click(); // 칭찬만
     await slot.locator("textarea").fill("늘 먼저 인사해 줘서 고마웠어요. 내년에도 잘 부탁해요!");
     await slot.getByRole("button", { name: "칭찬 카드 보내기" }).click();
     await panel(g, "3주차 공통 미션: 올해의 칭찬 한 줄 ✔").waitFor();
@@ -1013,7 +1027,7 @@ const step = (s) => console.log("▶", s);
   // 인증·인정된 미션 수
   const redeemed = Object.fromEntries(PEOPLE.map((p) => [p.name, realSlots[p.name].length + (confirmed[p.name] || []).length]));
   assert.deepEqual(redeemed, { 가나: 2, 다라: 2, 마바: 2, 사아: 1, 자차: 1, 카타: 1 });
-  const cardBonus = { 가나: 2 }; // 가나 1주차 도전 카드(직접 인증) +2, 나머지는 쉬움 카드
+  const cardBonus = { 가나: 2, 다라: 2 }; // 가나 1주차 도전 카드, 다라 3주차 칭찬과 함께 고른 도전 카드(둘 다 직접 인증) +2. 나머지는 쉬움 카드·칭찬만
   // 파트 대항전 최종: 인증된 미션 합 ÷ (인원 × 3)
   const finalBoard = PARTS.map((part) => {
     const mem = PEOPLE.filter((p) => p.part === part);

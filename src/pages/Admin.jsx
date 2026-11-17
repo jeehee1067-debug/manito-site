@@ -878,6 +878,9 @@ function Moderation() {
   const { nameOf } = useApp();
   const roster = useFullRoster() || [];
   const feed = useColl("feed") || {};
+  const deliveries = useColl("deliveries") || {};
+  // 카드 확인이 의미 있는 인증: 1·2주차, 그리고 3주차 칭찬과 함께 보통·도전 카드를 고른 것(칭찬 알림에 card가 있다)
+  const cardSlot = (r) => r.slot !== PRAISE_SLOT || Boolean(deliveries[`${r.receiverPid}_${r.slot}`]?.card);
   const [items, setItems] = useState([]);
   useEffect(() => onSnapshot(collection(db, "redemptions"), (s) =>
     setItems(s.docs.map((d) => ({ code: d.id, ...d.data() })).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)))
@@ -944,13 +947,13 @@ function Moderation() {
                 <p>{r.review}</p>
                 {f?.thanks && <p className="small">감사 답장: {f.thanks}</p>}
                 <span className="small muted">
-                  {nameOf(r.receiverPid)} · {r.slot}주차{f?.hidden ? " · 피드에서 가림" : ""}{r.cardMatch === false ? " · 카드와 다름" : r.cardMatch === undefined && r.slot !== PRAISE_SLOT ? " · 카드 확인 전" : ""}
+                  {nameOf(r.receiverPid)} · {r.slot}주차{f?.hidden ? " · 피드에서 가림" : ""}{r.cardMatch === false ? " · 카드와 다름" : r.cardMatch === undefined && cardSlot(r) ? " · 카드 확인 전" : ""}
                 </span>
                 <span className="inline">
                   <button className="text-btn" onClick={() => toggleVoid(r)}>{r.voided ? "무효 취소" : "무효 처리"}</button>
                   {f && <button className="text-btn" onClick={() => toggleHide(r)}>{f.hidden ? "피드에 다시 보이기" : "피드에서 가리기"}</button>}
                   {f?.thanks && <button className="text-btn" onClick={() => removeThanks(r)}>답장 지우기</button>}
-                  {r.cardMatch !== true && r.slot !== PRAISE_SLOT && <button className="text-btn" onClick={() => setCardSame(r)}>카드와 같다고 고치기</button>}
+                  {r.cardMatch !== true && cardSlot(r) && <button className="text-btn" onClick={() => setCardSame(r)}>카드와 같다고 고치기</button>}
                 </span>
               </li>
             );

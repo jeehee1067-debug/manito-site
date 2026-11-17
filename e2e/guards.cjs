@@ -161,7 +161,7 @@ async function tokenOf(email) {
     assert.equal((await redDoc()).cardMatch, undefined, "카드를 못 보고 한 인증에는 cardMatch가 없다");
     // 마니또 화면: 미션은 인증됐지만 카드 추가분은 0, 완료 알리기를 누르라는 안내
     const tk = H.panel(g, "내 응모권 (지금까지)");
-    await tk.getByText(/인증된 미션 1 \/ 3 \+ 카드 추가분 0 \/ 4/).waitFor();
+    await tk.getByText(/인증된 미션 1 \/ 3 \+ 카드 추가분 0 \/ 6/).waitFor();
     await tk.getByText(/카드 확인 대기/).waitFor();
     await tk.getByText(/1주차 "미션 완료 알리기"를 눌러 주세요/).waitFor();
     await slot.getByText(/이미 인증해서 카드를 바꿀 수 없어요\. 완료 알리기를 눌러 주세요/).waitFor();
@@ -180,7 +180,7 @@ async function tokenOf(email) {
     await check.getByRole("button", { name: "카드와 같았어요" }).click();
     await check.waitFor({ state: "detached" });
     assert.equal((await redDoc()).cardMatch.booleanValue, true);
-    await tk.getByText(/인증된 미션 1 \/ 3 \+ 카드 추가분 2 \/ 4/).waitFor();
+    await tk.getByText(/인증된 미션 1 \/ 3 \+ 카드 추가분 2 \/ 6/).waitFor();
     assert.equal(await tk.getByText(/카드 확인 대기/).count(), 0);
     await mod.locator("span.small.muted", { hasText: "· 카드 확인 전" }).waitFor({ state: "detached" });
     await H.tab(r, "내 미션");

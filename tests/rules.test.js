@@ -715,10 +715,38 @@ describe("5. 미션 슬롯: 완료한 슬롯의 난이도는 못 바꾸고, 열�
     await assertFails(gm({ choices: { 2: card("hard") } })); // 문서가 있을 때(update)
   });
 
-  test("3주차 칭찬 슬롯에는 칭찬 카드만 들어간다", async () => {
-    await assertFails(gm({ choices: { 3: card("hard") } }));
-    await assertFails(sendMission(p("p001"), 3, { gm: { done: { 3: true }, choices: { 3: card("hard") }, n: N } }));
+  // 3주차(MyMission.jsx complete): 칭찬 한 줄은 모두 보내고, 원하면 보통·도전 카드를 같이 골라 카드 추가분을 받는다.
+  // 칭찬 알림(kind praise)에는 고른 카드(난이도·글)가 같이 있어야 한다(받는 사람이 카드를 보고 확인). 칭찬만이면 카드 없음.
+  const sendPraise = (db, { choice = praise, card: c, message = "올해 정말 고마웠어요!" } = {}) => {
+    const b = writeBatch(db);
+    b.set(doc(db, "deliveries", "p002_3"), { receiverPid: "p002", slot: 3, kind: "praise", message, code: null, createdAt: serverTimestamp(), ...(c ? { card: c } : {}) });
+    b.set(doc(db, "giverMissions", "p001"), { done: { 3: true }, choices: { 3: choice }, n: N }, { merge: true });
+    return b.commit();
+  };
+  const asDelivery = (c) => ({ level: c.level, text: c.text });
+
+  test("3주차: 칭찬만, 또는 칭찬과 함께 보통·도전 카드(쉬움은 없음). 알림의 카드는 고른 카드와 같아야 한다", async () => {
+    await assertFails(gm({ choices: { 3: card("easy") } })); // 3주차 쉬움 = 칭찬만
+    await assertSucceeds(gm({ choices: { 3: card("hard") } }));
+    await assertSucceeds(gm({ choices: { 3: null } }));
+    await assertSucceeds(gm({ choices: { 3: card("normal") } }));
+    await assertFails(sendPraise(p("p001"), { choice: card("hard") })); // 도전 카드를 골랐는데 알림에 카드가 없음
+    await assertFails(sendPraise(p("p001"), { choice: card("hard"), card: { level: "hard", text: "다른 글" } })); // 카드 글이 다름
+    await assertFails(sendPraise(p("p001"), { choice: card("hard"), card: asDelivery(card("hard")), message: "짧아요" })); // 칭찬은 10자 이상
+    await assertFails(sendPraise(p("p001"), { choice: praise, card: asDelivery(card("hard")) })); // 칭찬만인데 카드를 붙임
+    await assertSucceeds(sendPraise(p("p001"), { choice: card("hard"), card: asDelivery(card("hard")) }));
+    // 완료한 뒤에는 다른 카드로 못 바꾼다(칭찬만으로 내리는 것은 추가분이 없어 된다)
+    await assertFails(gm({ choices: { 3: card("normal") } }));
+    await assertFails(gm({ choices: { 3: null } }));
+    await assertSucceeds(gm({ choices: { 3: praise } }));
+  });
+
+  test("3주차: 칭찬만 보내기(예전과 같음), 코드가 먼저 인증된 뒤에는 도전 카드를 새로 넣을 수 없다", async () => {
     await assertSucceeds(sendMission(p("p001"), 3));
+    await seed({ week: 3 });
+    await put("redemptions/A3A3", { receiverPid: "p002", slot: 3, review: review20, voided: false, feedId: feedIdOf("A3A3") });
+    await assertFails(gm({ choices: { 3: card("hard") } }));
+    await assertSucceeds(sendPraise(p("p001"))); // 칭찬만은 된다
   });
 
   test("남의 giverMissions는 못 쓴다", async () => {
@@ -1062,7 +1090,7 @@ describe("앱 흐름: 참여자 화면", () => {
     await assertFails(sendMission(db, 1, { delivery: { slot: "1" } }));
     await assertFails(sendMission(db, 1, { delivery: { extra: "x" } }));
     await setPhase(1, { week: 3 });
-    await assertFails(sendMission(db, 3, { kind: "mission", choice: EASY, gm: { done: { 3: true }, n: N } })); // 3주차는 칭찬 카드만
+    await assertFails(sendMission(db, 3, { kind: "mission", choice: EASY, gm: { done: { 3: true }, n: N } })); // 3주차 알림은 칭찬(kind praise)으로만
     await assertSucceeds(sendMission(db, 2));
     await setPhase(2, { week: 3 });
     await assertFails(sendMission(db, 1));
