@@ -22,6 +22,40 @@ async function commitInChunks(ops) {
   }
 }
 
+// 저장 결과를 정확히 알기 위한 도우미. Firestore는 서버가 받기 전에도 화면에는 바로 보여 준다(그래서 "저장된 줄 알았는데 새로 고치니 없다"가 생긴다).
+// 서버가 받았을 때만 null을 돌려주고, 거부되거나 SAVE_SLOW_MS 안에 답이 없으면 오류를 돌려준다(던지지 않는다).
+const SAVE_SLOW_MS = 12000;
+async function trySave(run) {
+  let timer;
+  const slow = new Promise((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error("slow"), { code: "manito/slow" })), SAVE_SLOW_MS); });
+  try {
+    await Promise.race([run(), slow]);
+    return null;
+  } catch (err) {
+    return err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+// 명단 저장이 안 된 이유를 사람이 고칠 수 있는 말로. 거부됐을 때는 흔한 원인(예전 규칙, 처음 운영자 아님)을 차례로 확인한다.
+async function saveErrorText(err, { isOwner }) {
+  const code = String(err?.code || "");
+  if (code === "manito/slow" || code.includes("unavailable")) {
+    return "아직 저장되지 않았어요. 저장 요청이 서버에 닿지 않고 있어요(화면에 보여도 새로 고치면 사라져요). 사내망에서 연결이 막혔을 수 있어요: 주소 끝에 ?longpoll 을 붙여 다시 열거나, 다른 네트워크(휴대폰 테더링 등)에서 해 보세요.";
+  }
+  if (code.includes("permission-denied")) {
+    // 규칙 버전 확인도 답이 없으면 5초만 기다린다(연결이 나쁠 때 안내가 끝없이 안 나오지 않게)
+    const stale = await Promise.race([
+      getDoc(doc(db, "rulesVersion", RULES_VERSION)).then(() => false, (e) => e?.code === "permission-denied"),
+      new Promise((r) => setTimeout(() => r(false), 5000)),
+    ]);
+    if (stale) return "저장이 거부됐어요. Firebase 콘솔에 게시된 보안 규칙이 예전 것이에요. 저장소의 firestore.rules 내용을 콘솔 → Firestore Database → 규칙에 붙여 넣고 \"게시\"를 누른 뒤 다시 해 주세요.";
+    if (!isOwner) return "저장이 거부됐어요. 명단 추가·삭제와 아이디 고치기는 처음 운영자 계정만 할 수 있어요.";
+    return "저장이 거부됐어요(보안 규칙). 처음 운영자 계정으로 로그인했는지 확인해 주세요.";
+  }
+  return `저장하지 못했어요(${code || err?.message || "알 수 없는 오류"}). 잠시 뒤 다시 해 주세요.`;
+}
+
 const NEXT_PHASE_NOTE = {
   0: "미션 진행을 시작합니다. 시작 후에는 명단 추가·삭제와 재배정을 할 수 없어요.",
   1: "미션 진행을 마감하고 최종 지목을 받습니다. 이후 미션 완료 알리기는 막혀요. 받은 미션 인증은 최종 지목이 마감될 때까지 할 수 있어요(마감 직전에 온 미션을 인증할 시간). 파트 순위도 지금 숫자로 마지막 발표를 해요.",
@@ -67,7 +101,12 @@ function usePairs() {
 // 같은 질의는 Firestore가 하나로 묶어서 여러 곳에서 써도 한 번만 읽는다.
 function useFullRoster() {
   const [rows, setRows] = useState(null);
-  useEffect(() => onSnapshot(collection(db, "roster"), (s) => setRows(s.docs.map((d) => ({ pid: d.id, ...d.data() })))), []);
+  // pending: 화면에는 보이지만 아직 서버가 받지 않은 변경이 있다(includeMetadataChanges는 읽기 수를 늘리지 않는다)
+  useEffect(() => onSnapshot(collection(db, "roster"), { includeMetadataChanges: true }, (s) => {
+    const list = s.docs.map((d) => ({ pid: d.id, ...d.data() }));
+    list.pending = s.metadata.hasPendingWrites;
+    setRows(list);
+  }), []);
   return rows;
 }
 
@@ -352,6 +391,8 @@ function Setup() {
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [siteMode, setSiteMode] = useState("any");
+  const [edit, setEdit] = useState(null); // 고치는 중인 행: { pid, name, part, id }
+  const why = (err) => saveErrorText(err, { isOwner });
 
 
   async function addPeople() {
@@ -378,8 +419,10 @@ function Setup() {
     if (bad.length) return setMsg(`"이름, 파트, 아이디" 순서로 적어 주세요. 아이디는 회사 메일의 @ 앞부분(영문·숫자)이에요: ${bad.join(", ")}`);
     if (dup.length) return setMsg(`같은 아이디가 두 번 있어요(이미 명단에 있거나 입력에 겹침): ${dup.join(", ")}`);
     setBusy(true);
-    await commitInChunks(ops);
+    setMsg("저장하는 중이에요…");
+    const err = await trySave(() => commitInChunks(ops));
     setBusy(false);
+    if (err) return setMsg(await why(err)); // 입력한 내용은 그대로 둔다(다시 누를 수 있게)
     setText("");
     setMsg(`${lines.length}명을 추가했어요.`);
   }
@@ -391,31 +434,37 @@ function Setup() {
     b.delete(doc(db, "roster", r.pid));
     if (invites[r.pid]) b.delete(doc(db, "invites", invites[r.pid]));
     if (r.email) b.delete(doc(db, "mailIndex", r.email));
-    await b.commit();
+    const err = await trySave(() => b.commit());
+    setMsg(err ? await why(err) : `${r.name}님을 명단에서 지웠어요.`);
   }
 
-  // 아이디(회사 메일) 고치기: 명단에 잘못 적었을 때. 메일 인증으로 연결되는 주소가 바뀐다(처음 운영자만, 보안 규칙).
-  async function editEmail(r) {
-    const cur = r.email ? (r.email.endsWith(`@${MAIL_DOMAIN}`) ? r.email.slice(0, -MAIL_DOMAIN.length - 1) : r.email) : "";
-    const next = window.prompt(`${r.name}님의 Knox ID(@ 앞부분). 비우면 메일 인증 없이 초대 코드로만 가입해요.`, cur);
-    if (next === null) return;
-    const { email, bad } = parseRosterLine(`${r.name},,${next}`, MAIL_DOMAIN);
-    if (bad) return setMsg(`아이디는 회사 메일의 @ 앞부분(영문·숫자)으로 적어 주세요: ${bad}`);
-    if (email === (r.email || null)) return;
+  // 한 사람 고치기(명단 표의 "수정"): 이름·파트·아이디. 아이디(회사 메일)를 바꾸면 메일 인증으로 연결되는 주소가 바뀐다
+  // (아이디는 처음 운영자만, 보안 규칙. mailIndex도 같이 고친다). 이름·파트는 공동 운영자도 고칠 수 있다.
+  const startEdit = (r) => { setMsg(""); setEdit({ pid: r.pid, name: r.name || "", part: r.part || "", id: shortId(r.email) }); };
+  async function saveEdit(r) {
+    const name = edit.name.trim();
+    const part = edit.part.trim() || null;
+    if (!name) return setMsg("이름을 적어 주세요.");
+    const { email: parsed, bad } = parseRosterLine(`${name},,${edit.id}`, MAIL_DOMAIN);
+    const email = isOwner ? parsed : r.email || null; // 공동 운영자는 아이디를 바꿀 수 없다
+    if (isOwner && bad) return setMsg(`아이디는 회사 메일의 @ 앞부분(영문·숫자)으로 적어 주세요: ${bad}`);
     if (email && roster.some((x) => x.pid !== r.pid && x.email === email)) return setMsg(`이미 다른 사람이 쓰는 아이디예요: ${email}`);
+    const mailChanged = email !== (r.email || null);
+    const changed = name !== r.name || part !== (r.part || null) || mailChanged;
+    if (!changed) return setEdit(null);
     const b = writeBatch(db);
-    b.update(doc(db, "roster", r.pid), { email });
-    if (r.email) b.delete(doc(db, "mailIndex", r.email));
-    if (email) b.set(doc(db, "mailIndex", email), { personId: r.pid });
-    await b.commit().then(() => setMsg(`${r.name}님의 아이디를 ${email || "(없음)"}로 바꿨어요.${r.uid ? " 이미 연결된 계정은 그대로예요." : ""}`))
-      .catch(() => setMsg("아이디를 바꾸지 못했어요. 처음 운영자 계정인지, 보안 규칙이 최신인지 확인해 주세요."));
-  }
-
-  async function editPart(r) {
-    const next = window.prompt(`${r.name}님의 파트 (비우면 파트 없음)`, r.part || "");
-    if (next === null) return;
-    await updateDoc(doc(db, "roster", r.pid), { part: next.trim() || null });
-    if (config.assignVer) setMsg("파트를 바꿨어요. 이미 배정한 뒤라면 '배정하기'를 다시 눌러야 배정(같은 파트 피하기)과 파트 단서에 반영돼요.");
+    b.update(doc(db, "roster", r.pid), { name, part, ...(mailChanged ? { email } : {}) });
+    if (mailChanged && r.email) b.delete(doc(db, "mailIndex", r.email));
+    if (mailChanged && email) b.set(doc(db, "mailIndex", email), { personId: r.pid });
+    setBusy(true);
+    setMsg("저장하는 중이에요…");
+    const err = await trySave(() => b.commit());
+    setBusy(false);
+    if (err) return setMsg(await why(err));
+    setEdit(null);
+    setMsg(`${name}님 정보를 저장했어요.`
+      + (mailChanged && r.uid ? " 이미 연결된 계정은 그대로예요." : "")
+      + (part !== (r.part || null) && config.assignVer ? " 이미 배정한 뒤라면 '배정하기'를 다시 눌러야 배정(같은 파트 피하기)과 파트 단서에 반영돼요." : ""));
   }
 
   async function assign() {
@@ -508,6 +557,7 @@ function Setup() {
         </p>
         <textarea className="pk-input" rows={6} value={text} onChange={(e) => setText(e.target.value)} placeholder={"홍길동\t공정파트\tgildong.hong\n김철수\t소자파트\tcs.kim"} />
         <button className="pk-btn main" onClick={addPeople} disabled={busy || !loaded || !isOwner}>명단에 추가</button>
+        <p className="small muted">"명단에 추가"를 누르면 바로 저장돼요(따로 저장 버튼은 없어요). 아래 표에 나오고 "○명을 추가했어요"가 뜨면 저장된 거예요. 한 명씩 고치려면 아래 표의 "수정"을 눌러 주세요.</p>
         {!isOwner && <p className="small muted">명단 추가·삭제와 초대 코드는 처음 운영자만 할 수 있어요.</p>}
       </Panel>
 
@@ -537,7 +587,7 @@ function Setup() {
               {parts[0][1] > Math.floor(roster.length / 2) && ` ${parts[0][0]}가 전체의 절반을 넘어서 같은 파트끼리도 일부 짝이 돼요.`}
               {parts.length === 2 && roster.length === parts[0][1] + parts[1][1] && " 파트가 둘뿐이라 마지막 파트 단서는 새 정보가 되지 않아요(처음부터 다른 파트로 정해져 있어요)."}
               {parts.some(([, n]) => n < 6) && " 인원이 적은 파트는 파트 단서만으로 마니또가 거의 드러나요."} 배정한 뒤 파트를 고쳤다면 다시 배정해야 반영돼요.</>
-            : "파트가 입력되지 않았어요. 같은 파트 피하기·파트 단서·파트 순위가 빠져요(명단 표의 파트 칸을 눌러 넣을 수 있어요)."}
+            : "파트가 입력되지 않았어요. 같은 파트 피하기·파트 단서·파트 순위가 빠져요(명단 표의 \"수정\"으로 넣을 수 있어요)."}
         </p>
         <button className="pk-btn main" onClick={assign} disabled={busy || roster.length < 3}>배정하기</button>
       </Panel>
@@ -551,28 +601,42 @@ function Setup() {
         </div>
         <p className="small">
           참여자는 아이디로 가입해 회사 메일의 인증 링크를 누르면 연결돼요. <b>초대 코드는 인증 메일이 오지 않는 사람에게만</b> 본인에게 직접 알려 주세요(예비).
-          아이디가 "없음"인 사람은 초대 코드로만 가입할 수 있어요.
+          아이디가 "없음"인 사람은 초대 코드로만 가입할 수 있어요. 이름·파트·아이디는 줄 끝의 "수정"으로 고쳐요.
         </p>
+        {roster.pending && <p className="error" role="status">⏳ 아직 서버에 저장되지 않은 변경이 있어요. 이 표시가 사라지기 전에 새로 고치면 그 변경은 사라져요.</p>}
         <div className="table-wrap">
           <table className="pk-table">
             <thead><tr><th>이름</th><th>파트</th><th>아이디</th><th>초대 코드</th><th>연결된 메일</th><th></th></tr></thead>
             <tbody>
-              {sorted.map((r) => (
-                <tr key={r.pid}>
-                  <td>{r.name}</td>
-                  <td><button className="text-btn" onClick={() => editPart(r)} title="눌러서 파트 바꾸기">{r.part || "미정"}</button></td>
+              {sorted.map((r) => (edit?.pid === r.pid ? (
+                <tr key={r.pid} className="editing">
+                  <td><input className="pk-input cell" value={edit.name} maxLength={20} onChange={(e) => setEdit({ ...edit, name: e.target.value })} aria-label="이름" /></td>
+                  <td><input className="pk-input cell" value={edit.part} maxLength={20} onChange={(e) => setEdit({ ...edit, part: e.target.value })} placeholder="파트 없음" aria-label="파트" /></td>
                   <td className="mail-id">{isOwner
-                    ? <button className="text-btn" onClick={() => editEmail(r)} title="눌러서 아이디 바꾸기">{shortId(r.email) || "없음"}</button>
+                    ? <input className="pk-input cell mono" value={edit.id} maxLength={60} onChange={(e) => setEdit({ ...edit, id: e.target.value })} placeholder="Knox ID" autoCapitalize="none" autoComplete="off" aria-label="아이디" />
                     : shortId(r.email) || "없음"}</td>
                   <td className="mono">{mask(invites[r.pid], showSecret) || "-"}</td>
                   <td className="email">{r.uid ? mask(emails[r.uid], showSecret) || "연결됨" : "-"}</td>
-                  <td>
+                  <td className="row-actions">
+                    <button className="pk-btn main sm" disabled={busy} onClick={() => saveEdit(r)}>저장</button>
+                    <button className="text-btn" disabled={busy} onClick={() => setEdit(null)}>취소</button>
+                  </td>
+                </tr>
+              ) : (
+                <tr key={r.pid}>
+                  <td>{r.name}</td>
+                  <td>{r.part || "미정"}</td>
+                  <td className="mail-id">{shortId(r.email) || "없음"}</td>
+                  <td className="mono">{mask(invites[r.pid], showSecret) || "-"}</td>
+                  <td className="email">{r.uid ? mask(emails[r.uid], showSecret) || "연결됨" : "-"}</td>
+                  <td className="row-actions">
+                    <button className="text-btn" onClick={() => startEdit(r)}>수정</button>
                     {isOwner && (r.uid
                       ? <button className="text-btn" onClick={async () => { const c = await unlinkPerson(r, invites[r.pid], emails[r.uid]); if (c) setMsg(`${r.name}님 연결을 풀었어요. 새 초대 코드: ${c}`); }}>연결 해제</button>
                       : <button className="text-btn" onClick={() => removePerson(r)}>삭제</button>)}
                   </td>
                 </tr>
-              ))}
+              )))}
             </tbody>
           </table>
         </div>
