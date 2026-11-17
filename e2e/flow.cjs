@@ -267,6 +267,7 @@ const step = (s) => console.log("▶", s);
     // 처음에는 난이도 세 칸만 보이고 카드는 아직 없다
     assert.equal(await slot.locator(".level-pick").count(), 3);
     assert.equal(await slot.locator(".dealt .card").count(), 0);
+    await slot.locator(".tip-line", { hasText: "분석실 신발장" }).waitFor(); // 난이도 고르기 화면의 작은 꿀팁
     await shot(page, "levels");
     const dealt = async (level) => {
       await slot.locator(`.level-pick.level-${level}`).click();
@@ -278,6 +279,7 @@ const step = (s) => console.log("▶", s);
       assert.equal(free, 1, "돈이 안 드는 카드 한 장");
       assert.equal(texts.length - free, 1, "돈이 드는 카드 한 장(모두에게 비용 카드가 나오게)");
       assert.equal(await slot.getByRole("button", { name: /다른 .* 카드 보기/ }).count(), 0, "다시 뽑는 버튼은 없다");
+      assert.equal(await slot.locator(".tip-line", { hasText: "분석실 신발장" }).count(), 1, "카드 두 장 화면의 작은 꿀팁(비용 카드는 실물)");
       await slot.getByRole("button", { name: "난이도 다시 고르기" }).click();
       await slot.locator(".level-pick").first().waitFor();
       return texts;
