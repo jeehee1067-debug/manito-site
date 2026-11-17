@@ -7,7 +7,7 @@ import { useApp } from "../App.jsx";
 import { Panel } from "../ui.jsx";
 import { PHASE, PHASES, CLUE_COUNT, LEVEL_LABEL, MAIL_DOMAIN, PART_HINT_IDX, PRAISE_SLOT, RULES_VERSION } from "../lib/constants.js";
 import { SLOT_STATUS_LABEL, clueAnswers, cluesDoneSet, pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../lib/pairs.js";
-import { assignManito, assignmentMemo, generateCodes, makeInviteCode } from "../lib/assign.js";
+import { assignManito, assignmentMemo, generateCodes, makeInviteCode, previewAssignments } from "../lib/assign.js";
 import { computeTickets, missionLikes, noticedWeeks, partStandings, rankReviews, reviewLikes, weeklyPartBoard } from "../lib/scoring.js";
 import { angelQueue, angelQueueStatus, matchAngels, needyReceivers } from "../lib/angels.js";
 import { PRIZES, TICKET_RULES as R } from "../config/prizes.js";
@@ -392,6 +392,9 @@ function Setup() {
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [siteMode, setSiteMode] = useState("any");
+  const [preview, setPreview] = useState(null); // 배정 미리 보기 결과(저장하지 않음)
+  const [renameFrom, setRenameFrom] = useState(""); // 파트 이름 한꺼번에 바꾸기(두 파트를 한 파트로 합칠 때도)
+  const [renameTo, setRenameTo] = useState("");
   const [edit, setEdit] = useState(null); // 고치는 중인 행: { pid, name, part, id }
   const why = (err) => saveErrorText(err, { isOwner });
 
@@ -437,6 +440,31 @@ function Setup() {
     if (r.email) b.delete(doc(db, "mailIndex", r.email));
     const err = await trySave(() => b.commit());
     setMsg(err ? await why(err) : `${r.name}님을 명단에서 지웠어요.`);
+  }
+
+  // 파트 이름 한꺼번에 바꾸기: 그 파트인 사람 모두의 파트를 새 이름으로. 이미 있는 이름이면 두 파트가 한 파트로 합쳐진다
+  // (예: "PFA"와 "VSEM"을 "PFA/VSEM"으로 — 같은 파트끼리는 짝이 안 되고, 파트 단서·파트 순위도 한 파트로 본다)
+  async function renamePart(e) {
+    e.preventDefault();
+    const from = renameFrom;
+    const to = renameTo.trim();
+    if (!from || !to) return setMsg("바꿀 파트를 고르고 새 이름을 적어 주세요.");
+    if (to === from) return undefined;
+    const targets = roster.filter((r) => (r.part || "").trim() === from);
+    if (!targets.length) return setMsg(`"${from}" 파트인 사람이 없어요.`);
+    const merging = roster.some((r) => (r.part || "").trim() === to);
+    if (!window.confirm(`"${from}" ${targets.length}명의 파트를 "${to}"(으)로 바꿀까요?${merging ? `\n\n이미 있는 "${to}" 파트와 합쳐져 한 파트가 돼요(서로 마니또가 되지 않고, 파트 단서·파트 순위도 한 파트로 봐요).` : ""}`)) return undefined;
+    const ops = targets.map((r) => (b) => b.update(doc(db, "roster", r.pid), { part: to }));
+    setBusy(true);
+    setMsg("저장하는 중이에요…");
+    const err = await trySave(() => commitInChunks(ops));
+    setBusy(false);
+    if (err) return setMsg(await why(err));
+    setRenameFrom("");
+    setRenameTo("");
+    setPreview(null);
+    return setMsg(`"${from}" ${targets.length}명의 파트를 "${to}"(으)로 바꿨어요.${merging ? " 두 파트가 한 파트로 합쳐졌어요." : ""}`
+      + (config.assignVer ? " 이미 배정한 뒤라면 '배정하기'를 다시 눌러야 반영돼요." : ""));
   }
 
   // 한 사람 고치기(명단 표의 "수정"): 이름·파트·아이디. 아이디(회사 메일)를 바꾸면 메일 인증으로 연결되는 주소가 바뀐다
@@ -590,6 +618,21 @@ function Setup() {
               {parts.some(([, n]) => n < 6) && " 인원이 적은 파트는 파트 단서만으로 마니또가 거의 드러나요."} 배정한 뒤 파트를 고쳤다면 다시 배정해야 반영돼요.</>
             : "파트가 입력되지 않았어요. 같은 파트 피하기·파트 단서·파트 순위가 빠져요(명단 표의 \"수정\"으로 넣을 수 있어요)."}
         </p>
+        {parts.length > 0 && (
+          <form className="inline part-rename" onSubmit={renamePart} aria-label="파트 이름 한꺼번에 바꾸기">
+            <span className="small">파트 이름 한꺼번에 바꾸기(두 파트를 한 파트로 합칠 때도):</span>
+            <select className="pk-input" value={renameFrom} onChange={(e) => setRenameFrom(e.target.value)} aria-label="바꿀 파트">
+              <option value="">파트 고르기</option>
+              {parts.map(([name, n]) => <option key={name} value={name}>{name} ({n}명)</option>)}
+            </select>
+            <input className="pk-input" value={renameTo} maxLength={20} onChange={(e) => setRenameTo(e.target.value)} placeholder="새 이름 (예: PFA/VSEM)" aria-label="새 파트 이름" />
+            <button className="pk-btn sm" disabled={busy || !renameFrom || !renameTo.trim()}>바꾸기</button>
+          </form>
+        )}
+        <button className="pk-btn" onClick={() => setPreview(previewAssignments(
+          roster.map((r) => ({ pid: r.pid, part: (r.part || "").trim() || null, loc: r.loc || null })), { runs: 300, siteMode }))}
+          disabled={busy || roster.length < 3}>미리 보기 (저장 안 함)</button>
+        {preview && <AssignPreview p={preview} joined={joined} />}
         <button className="pk-btn main" onClick={assign} disabled={busy || roster.length < 3}>배정하기</button>
       </Panel>
 
@@ -645,6 +688,48 @@ function Setup() {
 
       {loaded && <InviteMail roster={roster} />}
     </>
+  );
+}
+
+// 배정 미리 보기: 실제 명단으로 배정을 여러 번 돌려 본 결과(lib/assign.js previewAssignments). 누가 누구를 맡는지는 보이지 않는다.
+function AssignPreview({ p, joined }) {
+  const parts = Object.entries(p.sizes).sort((a, b) => b[1] - a[1]);
+  const pct = (x, total) => `${Math.round((x / total) * 100)}%`;
+  const ok = p.problems.length === 0 && p.sameMax === 0 && p.similar.length === 0;
+  const poolAfter = parts.length ? [Math.min(...parts.map(([, k]) => k)), Math.max(...parts.map(([, k]) => k))] : null;
+  return (
+    <div className={ok ? "note" : "error"} role="status" aria-label="배정 미리 보기">
+      <p><b>배정을 {p.runs}번 돌려 봤어요(저장하지 않았어요).</b> {ok ? "문제없어요." : "아래를 확인해 주세요."}</p>
+      <ul className="small">
+        <li>명단 {p.n}명(가입 {joined}명, 가입 안 한 사람도 같이 배정돼요). 파트: {parts.map(([name, k]) => `${name} ${k}명`).join(" · ") || "없음"}{p.blank ? ` · 파트 없음 ${p.blank}명` : ""}</li>
+        <li>모두 한 명씩 맡고 한 명에게서 받아요(한 줄로 이어진 원). 자기 자신·맞마니또: {p.problems.length ? `⚠ ${p.problems.join(", ")}` : "없음"}</li>
+        <li>같은 파트 짝: {p.sameMax === 0 ? "0쌍" : p.unavoidable
+          ? `${p.sameMin === p.sameMax ? p.sameMin : `${p.sameMin}~${p.sameMax}`}쌍 (가장 큰 파트가 ${p.largest}명으로 전체의 절반을 넘어서 피할 수 없어요)`
+          : `⚠ ${p.sameMin}~${p.sameMax}쌍`}</li>
+        {p.blank > 0 && <li>파트가 없는 {p.blank}명은 누구와도 짝이 될 수 있어요(명단 표의 "수정"으로 넣어 주세요).</li>}
+        {p.similar.map((names) => <li key={names.join()}>⚠ 띄어쓰기·대소문자만 다른 파트 이름: {names.map((x) => `"${x}"`).join(", ")}. 같은 파트라면 명단 표의 "수정"으로 하나로 맞춰 주세요(지금은 다른 파트로 봐서 같은 파트끼리 짝이 될 수 있어요).</li>)}
+        {parts.length > 1 && (
+          <li>
+            추리 후보: 처음에는 내 파트를 뺀 사람(파트에 따라 {p.n - parts[0][1]}~{p.n - parts[parts.length - 1][1]}명), 최종 지목 때 마니또의 파트가 공개되면 그 파트 사람({poolAfter[0]}~{poolAfter[1]}명).
+          </li>
+        )}
+      </ul>
+      {parts.length > 1 && (
+        <div className="table-wrap">
+          <table className="pk-table">
+            <thead><tr><th>마니또의 파트 ↓ / 대상의 파트 →</th>{parts.map(([name]) => <th key={name}>{name}</th>)}</tr></thead>
+            <tbody>
+              {parts.map(([a]) => {
+                const row = p.flow[a] || {};
+                const total = Object.values(row).reduce((x, y) => x + y, 0) || 1;
+                return <tr key={a}><td>{a}</td>{parts.map(([b]) => <td key={b}>{row[b] ? pct(row[b], total) : "-"}</td>)}</tr>;
+              })}
+            </tbody>
+          </table>
+          <p className="small muted">각 줄: 그 파트 사람이 맡게 되는 대상의 파트 비율({p.runs}번 평균). 대각선(같은 파트)이 "-"이면 같은 파트 짝이 없다는 뜻이에요.</p>
+        </div>
+      )}
+    </div>
   );
 }
 

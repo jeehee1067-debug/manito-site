@@ -382,6 +382,9 @@ a.pk-btn.disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
 .pk-table td.row-actions > * + * { margin-left: 8px; }
 .pk-table tr.editing td { background: #fff8dc; }
 .pk-input.cell { width: 100%; min-width: 6.5em; padding: 4px 6px; font-size: 13px; }
+.part-rename { flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; }
+.part-rename select, .part-rename input { flex: 1 1 9em; }
+.part-rename .pk-btn { width: auto; flex: 0 0 auto; padding: 6px 14px; }
 /* 짝 현황 표: 주차별 상태 */
 .pk-table.pair-table td.st-redeemed { background: #dff3e4; color: #1d6a39; font-weight: 700; }
 .pk-table.pair-table td.st-confirmed { background: #e7f1dc; color: #1d6a39; }

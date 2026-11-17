@@ -130,3 +130,55 @@ export function assignmentMemo(pairs, codesByGiver) {
 export function makeInviteCode(rand = secureRandom) {
   return makeCode(6, rand);
 }
+
+// 배정 미리 보기(운영 화면 "2. 마니또 배정"의 "미리 보기"). 실제 명단으로 배정을 runs번 돌려 보고 결과만 모은다. 아무것도 저장하지 않는다.
+// 누가 누구를 맡는지는 돌려주지 않는다(파트 단위 숫자만).
+// 반환: { n, runs, sizes: {파트: 인원}, blank(파트 없는 사람 수), similar: [[비슷한 파트 이름…]], largest,
+//         unavoidable(한 파트가 절반을 넘어 같은 파트 짝을 피할 수 없음), problems: [깨진 조건], sameMin, sameMax(같은 파트 짝 수),
+//         flow: { 주는 파트: { 받는 파트: 횟수 } } }
+export const looseName = (s) => String(s || "").replace(/\s+/g, "").toLowerCase();
+export function previewAssignments(people, { runs = 200, siteMode = "any", rand = secureRandom } = {}) {
+  const n = people.length;
+  const partOf = Object.fromEntries(people.map((p) => [p.pid, p.part || null]));
+  const sizes = {};
+  for (const p of people) if (p.part) sizes[p.part] = (sizes[p.part] || 0) + 1;
+  const loose = {};
+  for (const name of Object.keys(sizes)) (loose[looseName(name)] ||= []).push(name);
+  const largest = Math.max(0, ...Object.values(sizes));
+  const problems = new Set();
+  let sameMin = Infinity;
+  let sameMax = 0;
+  const flow = {};
+  for (let r = 0; r < runs; r++) {
+    const { pairs } = assignManito(people, { siteMode, rand });
+    const give = new Map();
+    const got = new Map();
+    for (const { giverPid, receiverPid } of pairs) {
+      give.set(giverPid, receiverPid);
+      got.set(receiverPid, (got.get(receiverPid) || 0) + 1);
+    }
+    if (pairs.length !== n || give.size !== n) problems.add("모두가 한 명씩 맡지 않음");
+    if (got.size !== n || [...got.values()].some((c) => c !== 1)) problems.add("한 사람을 두 명이 맡음");
+    if (pairs.some((p) => p.giverPid === p.receiverPid)) problems.add("자기 자신을 맡음");
+    if (n >= 3 && pairs.some((p) => give.get(p.receiverPid) === p.giverPid)) problems.add("서로가 서로를 맡음(맞마니또)");
+    if (siteMode === "any") {
+      let cur = people[0].pid;
+      let steps = 0;
+      do { cur = give.get(cur); steps++; } while (cur !== people[0].pid && steps <= n);
+      if (steps !== n) problems.add("원이 여러 개로 나뉨");
+    }
+    const same = pairs.filter((p) => partOf[p.giverPid] && partOf[p.giverPid] === partOf[p.receiverPid]).length;
+    sameMin = Math.min(sameMin, same);
+    sameMax = Math.max(sameMax, same);
+    for (const p of pairs) {
+      const a = partOf[p.giverPid] || "(파트 없음)";
+      const b = partOf[p.receiverPid] || "(파트 없음)";
+      (flow[a] ||= {})[b] = (flow[a][b] || 0) + 1;
+    }
+  }
+  return {
+    n, runs, sizes, blank: people.filter((p) => !p.part).length,
+    similar: Object.values(loose).filter((a) => a.length > 1),
+    largest, unavoidable: largest * 2 > n, problems: [...problems], sameMin, sameMax, flow,
+  };
+}

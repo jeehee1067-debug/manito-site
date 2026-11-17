@@ -2,7 +2,7 @@ import { useApp } from "../App.jsx";
 import { Panel } from "../ui.jsx";
 import { PRIZES, PRIZES_ANNOUNCED, TICKET_RULES as R } from "../config/prizes.js";
 import { DEAL_COUNT } from "../lib/cards.js";
-import { EXTRA_NOTES_MAX, PROFILE_QUESTIONS, REVIEW_MIN, SCHEDULE, SPEND_GUIDE_WON, clueScheduleText, scheduleLabel, todayYmd } from "../lib/constants.js";
+import { DROP_TIP, EXTRA_NOTES_MAX, PROFILE_QUESTIONS, REVIEW_MIN, SCHEDULE, SPEND_GUIDE_WON, clueScheduleText, scheduleLabel, todayYmd } from "../lib/constants.js";
 
 // 참여자에게 보여 주는 규칙. 숫자는 prizes.js·constants.js에서 가져오므로 그쪽을 바꾸면 여기도 같이 바뀐다.
 // 문장으로 적은 규칙(보상·불참 처리·동점 기준)은 src/lib/scoring.js의 계산과 같아야 한다.
@@ -146,6 +146,7 @@ export default function Rules() {
           <li><b>도전</b>(+{R.cardBonus.hard}장): 직접 만든 것을 몰래 전달하기(상장, 그림, 종이접기, 포스트잇 아트), 선물, 3일 연속 쪽지, 대상에 대해 알아내 맞혀 보기.</li>
           <li>쪽지는 사이트로 보내는 글이에요. 긴 편지는 쓰지 않아도 돼요.</li>
           <li>직접 전달하는 미션은 들킬 위험이 있는 만큼 응모권이 더 많아요. 들키지 않고 전달하는 것까지가 미션이에요.</li>
+          <li><b>꿀팁</b>: {DROP_TIP}</li>
           <li><b>알아내 맞혀 보기</b> 카드는 방법이 자유예요(주변에 묻기, 관찰하기, 본인에게 슬쩍 묻기도 돼요. 대신 들킬 수 있어요). <b>맞혀야</b> 카드 추가분이 붙어요. 맞았는지는 대상이 인증할 때 "카드와 같아요"로 확인해요.</li>
           <li><b>3주차</b>에는 모두 "올해의 칭찬 한 줄"을 보내요(송년회 칭찬 벽에 나와요). 원하면 보통·도전 카드를 하나 더 골라 함께 하면 카드 추가분을 받아요.</li>
         </ul>

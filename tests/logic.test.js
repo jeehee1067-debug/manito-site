@@ -1118,3 +1118,23 @@ test("가입 안내 메일: 받는 사람(가입 안 한 사람·아이디 있�
   assert.ok(href.includes("body=%EC%A4%841%0D%0A%EC%A4%842"), "줄바꿈은 %0D%0A");
   assert.ok(href.indexOf("bcc=") < href.indexOf("subject=") && href.indexOf("subject=") < href.indexOf("body="), "잘려도 받는 사람이 먼저 남게");
 });
+
+test("배정 미리 보기: 저장 없이 여러 번 돌려 조건 확인(같은 파트 0쌍·맞마니또 없음·한 원), 비슷한 파트 이름과 피할 수 없는 경우를 알려 준다", async () => {
+  const { previewAssignments } = await import("../src/lib/assign.js");
+  const mk = (sizes) => Object.entries(sizes).flatMap(([part, k]) => Array.from({ length: k }, (_, i) => ({ pid: `${part}${i}`, part })));
+  const ok = previewAssignments(mk({ EFA1: 16, EFA2: 15, PFA: 12, VSEM: 10 }), { runs: 100 });
+  assert.equal(ok.n, 53);
+  assert.deepEqual(ok.problems, []);
+  assert.deepEqual([ok.sameMin, ok.sameMax, ok.unavoidable], [0, 0, false]);
+  assert.equal(ok.flow.EFA1.EFA1, undefined, "같은 파트로는 가지 않는다");
+  assert.equal(Object.values(ok.flow.EFA1).reduce((a, b) => a + b, 0), 16 * 100);
+  // 한 파트가 절반을 넘으면 같은 파트 짝을 피할 수 없다(되도록 적게)
+  const big = previewAssignments(mk({ A: 30, B: 13, C: 10 }), { runs: 30 });
+  assert.equal(big.unavoidable, true);
+  assert.ok(big.sameMin >= 30 - 23 && big.sameMax <= 30 - 23, `같은 파트 짝은 최소 개수(7)만: ${big.sameMin}~${big.sameMax}`);
+  assert.deepEqual(big.problems, []);
+  // 띄어쓰기·대소문자만 다른 파트 이름(같은 파트를 다르게 적은 것일 수 있다)
+  const typo = previewAssignments([...mk({ EFA1: 5, PFA: 5 }), { pid: "x", part: "efa 1" }], { runs: 5 });
+  assert.deepEqual(typo.similar, [["EFA1", "efa 1"]]);
+  assert.equal(typo.blank, 0);
+});

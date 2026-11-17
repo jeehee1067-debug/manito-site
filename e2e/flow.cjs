@@ -234,6 +234,7 @@ const step = (s) => console.log("▶", s);
     await panel(page, "파트 대항전").getByText("같은 파트끼리는 마니또가 되지 않아요.").waitFor();
     await panel(page, "응모권 받는 법").getByText("마지막 집계에서 미션 완수율 1위").waitFor();
     await panel(page, "응모권 받는 법").getByText("끝까지 해야 받는 것이 있어요.").waitFor();
+    await panel(page, "미션 카드 난이도").getByText(/분석실 신발장을 이용해 보세요/).waitFor();
     await panel(page, "응모권 받는 법").getByText("내 미션 3건이 모두 인증되고").waitFor();
     await panel(page, "상품과 추첨").getByText("한 사람은 하나만 받아요.").waitFor();
     await panel(page, "상품과 추첨").getByText("각자 응모권 수만큼 자기 이름 종이를 통에 넣고 직접 뽑아요").waitFor();
@@ -296,6 +297,13 @@ const step = (s) => console.log("▶", s);
     const slot = panel(page, "1주차 미션");
     await require("./helpers.cjs").pickCard(slot, p.name === "가나" ? "hard" : "easy");
     if (p.name === "가나") ganaCost = (await slot.locator(".chosen .cost-tag").count()) > 0 ? 1 : 0;
+    if (p.name === "가나") {
+      // 실물 카드를 고르면 꿀팁(분석실 신발장)이 보인다. 쪽지만으로 끝나는 카드면 안 보인다
+      const MC = (await import("../src/lib/constants.js")).MISSION_CARDS;
+      const chosenText = (await slot.locator(".chosen span").nth(1).innerText()).trim();
+      const real = Boolean(MC.hard.find((c) => c.text === chosenText)?.real);
+      assert.equal(await slot.getByText(/분석실 신발장을 이용해 보세요/).count(), real ? 1 : 0, `실물(${real}) 카드의 꿀팁`);
+    }
     const box = slot.locator('input[type="checkbox"]');
     if (!(await box.isChecked())) await box.check();
     await slot.locator("textarea").fill(`${p.name}가 보낸 1주차 쪽지`);
