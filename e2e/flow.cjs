@@ -331,8 +331,10 @@ const step = (s) => console.log("▶", s);
       assert.equal(await slot.locator(`.chosen .how-tag.how-${real ? "real" : "site"}`).count(), 1, "고른 카드의 방법 표시");
       await slot.locator(`.how-line.how-${real ? "real" : "site"}`).getByText(real ? "실물을 직접 전달하는 카드예요." : "사이트 쪽지로 하는 카드예요.").waitFor();
     }
+    // "코드 함께 보내기"는 실물 카드에만 있다(사이트 쪽지 카드는 코드가 항상 같이 간다)
     const box = slot.locator('input[type="checkbox"]');
-    if (!(await box.isChecked())) await box.check();
+    if (await box.count()) { if (!(await box.isChecked())) await box.check(); }
+    else await slot.getByText("인증 코드는 쪽지와 함께 자동으로 가요.").waitFor();
     await slot.locator("textarea").fill(`${p.name}가 보낸 1주차 쪽지`);
     await slot.getByRole("button", { name: "미션 완료 알리기" }).click();
     await panel(page, "1주차 미션 ✔").waitFor();
@@ -360,6 +362,21 @@ const step = (s) => console.log("▶", s);
       await entry.getByRole("button", { name: "인증하기" }).click();
       await page.getByText("2주차 코드예요. 2주차가 열리면 인증할 수 있어요.").waitFor();
       console.log("  1주차에 2주차 코드를 넣으면: 2주차 코드예요. 2주차가 열리면 인증할 수 있어요.");
+    }
+    if (p.name === "다라") {
+      // 내 미션 탭의 코드(내가 마니또로서 내 대상에게 주는 코드)를 넣으면 "나에게 온 코드가 아니에요" 대신 그 사실을 알려 준다
+      const own = fields(await readDoc("giverCodes/" + pidOf[p.name])).codes["1"];
+      await entry.getByPlaceholder("K7Q2").fill(own);
+      await entry.getByText("이 코드는 내가 마니또로서 내 대상에게 주는 코드예요").first().waitFor();
+      await entry.locator("textarea").fill("내 미션 탭의 코드를 잘못 넣어 보는 중이에요. 이건 내 코드예요.");
+      await entry.getByRole("button", { name: "인증하기" }).click();
+      await page.waitForTimeout(600);
+      assert.equal(await page.getByText("인증했어요. 응모권 1장이 쌓였어요.").count(), 0, "내 코드로는 인증되지 않는다");
+      // 받은 쪽지의 "이 코드로 인증하기"를 누르면 맞는 코드가 칸에 들어간다
+      await inbox.getByRole("button", { name: "이 코드로 인증하기" }).first().click();
+      await page.waitForFunction((c) => document.querySelector("#code-entry-form input.code-input")?.value === c, code.trim());
+      assert.equal(await entry.getByText("이 코드는 내가 마니또로서 내 대상에게 주는 코드예요").count(), 0, "맞는 코드가 들어가면 경고가 사라진다");
+      console.log("  다라: 내 미션 탭의 코드를 넣으면 '내가 내 대상에게 주는 코드'라고 알려 줌, '이 코드로 인증하기'로 맞는 코드가 들어감");
     }
     await entry.getByPlaceholder("K7Q2").fill(code.toLowerCase());
     await entry.locator("textarea").fill(`${giverOf[p.name]}님 덕분에 오늘 하루가 즐거웠어요. 정말 고마워요!`);
@@ -391,6 +408,7 @@ const step = (s) => console.log("▶", s);
   step("운영 화면 '고른 미션 카드': 카드별 인원(이름 없음)과 사람별 카드");
   {
     await tab(admin, "운영");
+    await admin.getByText(`인증 코드 점검: 정상이에요. 코드 ${N * 3}개가 모두 맞는 대상·주차를 가리켜요.`).waitFor();
     const picks = panel(admin, "고른 미션 카드");
     await picks.locator(".pick-counts").waitFor();
     assert.match(await panel(admin, "고른 미션 카드").locator("h2.panel-title").innerText(), new RegExp(`고른 미션 카드 \\(${N} / ${N}명\\)`));
@@ -625,6 +643,31 @@ const step = (s) => console.log("▶", s);
     await slot.getByRole("button", { name: "미션 완료 알리기" }).click();
     await panel(g, "2주차 미션 ✔").waitFor();
     await panel(g, "2주차 미션 ✔").locator(".chosen .how-tag.how-site").waitFor();
+    // 사이트 쪽지 카드는 코드가 항상 같이 간다
+    const dPath = `deliveries/${pidOf[target["자차"]]}_2`;
+    const sentCode = fields(await readDoc(dPath)).code;
+    assert.equal(typeof sentCode, "string");
+    assert.equal(sentCode.length, 4, "사이트 쪽지 카드의 완료 알림에 코드가 실림");
+    // 예전 화면에서 "코드 함께 보내기"를 끄고 보낸 경우를 흉내 낸다: 받는 사람에게 "코드가 아직 안 왔어요", 운영 화면에 "코드 안 보냄"
+    const docUrl = `${FS}/v1/projects/${PROJECT}/databases/(default)/documents/${dPath}`;
+    const patch = (body, mask) => fetch(`${docUrl}?updateMask.fieldPaths=${mask}`, { method: "PATCH", headers: { Authorization: "Bearer owner", "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    assert.equal((await patch({ fields: {} }, "code")).status, 200);
+    const rr = users[target["자차"]];
+    await tab(rr, "추리 보드");
+    await panel(rr, "마니또에게서 온 것").locator(".warn-line", { hasText: "2주차 인증 코드가 아직 안 왔어요." }).waitFor();
+    await tab(admin, "운영");
+    const picks = panel(admin, "고른 미션 카드");
+    await picks.getByRole("button", { name: "2주차", exact: true }).click();
+    await picks.locator(".warn-text", { hasText: "코드 안 보냄 1" }).waitFor();
+    await picks.getByRole("button", { name: "사람별 보기" }).click();
+    const zRow = (await picks.locator("table").nth(1).locator("tbody tr").allInnerTexts()).map((t) => t.replace(/\s+/g, " ")).find((t) => t.startsWith("자차"));
+    assert.match(zRow, new RegExp(`${sentCode} 코드 안 보냄`), zRow);
+    await picks.getByRole("button", { name: "사람별 가리기" }).click();
+    await picks.getByRole("button", { name: "1주차", exact: true }).click();
+    // 되돌린다(뒤 단계는 코드가 있는 상태로)
+    assert.equal((await patch({ fields: { code: { stringValue: sentCode } } }, "code")).status, 200);
+    await panel(rr, "마니또에게서 온 것").locator(".warn-line", { hasText: "2주차 인증 코드가 아직 안 왔어요." }).waitFor({ state: "detached" });
+    console.log("  코드 없이 보낸 완료 알림: 받는 사람 '코드가 아직 안 왔어요', 운영 화면 '코드 안 보냄 1'과 그 코드");
   }
 
   step("받은 게 없어요: 받는 사람이 신고 → 마니또 화면에 알림 → 운영자가 '못 받음'으로 확인");

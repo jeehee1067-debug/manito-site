@@ -6,7 +6,7 @@ import { db } from "../firebase.js";
 import { useApp } from "../App.jsx";
 import { HowTag, Panel } from "../ui.jsx";
 import { PHASE, PHASES, CARD_HOW, CLUE_COUNT, LEVEL_LABEL, MAIL_DOMAIN, PART_HINT_IDX, PRAISE_SLOT, RULES_VERSION } from "../lib/constants.js";
-import { SLOT_STATUS_LABEL, assignmentHealth, cardPicks, clueAnswers, cluesDoneSet, pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../lib/pairs.js";
+import { SLOT_STATUS_LABEL, assignmentHealth, cardPicks, clueAnswers, codeProblems, cluesDoneSet, pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../lib/pairs.js";
 import { assignManito, assignmentMemo, generateCodes, makeInviteCode, previewAssignments } from "../lib/assign.js";
 import { computeTickets, missionLikes, noticedWeeks, partStandings, rankReviews, reviewLikes, weeklyPartBoard } from "../lib/scoring.js";
 import { angelQueue, angelQueueStatus, matchAngels, needyReceivers } from "../lib/angels.js";
@@ -96,7 +96,9 @@ function usePairs() {
     const delivered = new Set(Object.values(deliveries).filter((d) => d.kind !== "note").map((d) => `${d.receiverPid}_${d.slot}`));
     // 사이트가 전달한 3주차 칭찬 카드(운영자가 가리지 않은 것)는 인증이 없어도 마니또의 미션으로 인정된다
     const autoPraise = new Set(Object.values(deliveries).filter((d) => d.kind === "praise" && !d.hidden).map((d) => `${d.receiverPid}_${d.slot}`));
-    return pairRows({ assignments, giverCodes, missions, redemptions, reports, verdicts, guesses, delivered, autoPraise });
+    // 인증 코드가 실린 완료 알림·쪽지가 간 주차(마니또가 "코드 함께 보내기"를 끄면 대상은 코드가 없어 인증할 수 없다)
+    const codeSent = new Set(Object.values(deliveries).filter((d) => d.code && !d.hidden).map((d) => `${d.receiverPid}_${d.slot}`));
+    return pairRows({ assignments, giverCodes, missions, redemptions, reports, verdicts, guesses, delivered, autoPraise, codeSent });
   }, [ready, assignments, giverCodes, missions, redemptions, reports, verdicts, guesses, deliveries]);
   return { ready, rows, assignments, giverCodes, missions, guesses };
 }
@@ -245,6 +247,7 @@ export default function Admin() {
       <Notice />
 
       {phase >= PHASE.RUNNING && phase <= PHASE.GUESSING && <AssignCheck />}
+      {phase >= PHASE.RUNNING && phase <= PHASE.GUESSING && <CodeCheck />}
       {phase === PHASE.SETUP && <Setup />}
       {phase === PHASE.RUNNING && <Running />}
       {phase === PHASE.GUESSING && <GuessStatus />}
@@ -1650,7 +1653,10 @@ function CardPicks() {
 
   return (
     <Panel title={`고른 미션 카드 (${picked} / ${rows.length}명)`}>
-      <p className="small">주차마다 마니또들이 고른 카드예요. 카드별 인원은 이름 없이 보이고, 누가 골랐는지는 "사람별 보기"를 눌러야 보여요.</p>
+      <p className="small">
+        주차마다 마니또들이 고른 카드예요. 카드별 인원은 이름 없이 보이고, 누가 골랐는지는 "사람별 보기"를 눌러야 보여요.
+        "사람별 보기"의 인증 코드는 대상이 코드를 못 받았을 때 알려 주는 용도예요(코드로는 마니또가 누구인지 알 수 없어요).
+      </p>
       <div className="chip-row" role="group" aria-label="주차 고르기">
         {[1, 2, 3].map((s) => (
           <button key={s} type="button" className={s === slot ? "chip is-on" : "chip"} aria-pressed={s === slot} onClick={() => setSlot(s)}>{s}주차</button>
@@ -1662,6 +1668,7 @@ function CardPicks() {
         <br />
         <span className="how-tag how-site">{CARD_HOW.site.label}</span> <b>{counts.site}</b> · <span className="how-tag how-real">{CARD_HOW.real.label}</span> <b>{counts.real}</b>
         {" "}· 완료 알림 <b>{counts.done}</b> · 인증됨 <b>{counts.redeemed}</b>
+        {counts.noCode > 0 && <><br /><span className="warn-text">코드 안 보냄 <b>{counts.noCode}</b>: 완료를 알렸지만 쪽지에 인증 코드를 넣지 않아 대상이 인증할 수 없어요. "사람별 보기"에서 코드를 확인해 대상에게 알려 주세요.</span></>}
       </p>
       {cards.length === 0 ? <p className="muted">아직 고른 카드가 없어요.</p> : (
         <div className="table-wrap">
@@ -1684,7 +1691,7 @@ function CardPicks() {
       {shown && (
         <div className="table-wrap">
           <table className="pk-table pair-table pick-table">
-            <thead><tr><th>마니또</th><th>대상</th><th>고른 카드</th><th>상태</th></tr></thead>
+            <thead><tr><th>마니또</th><th>대상</th><th>고른 카드</th><th>상태 · 인증 코드</th></tr></thead>
             <tbody>
               {sorted.map((p) => (
                 <tr key={p.giverPid}>
@@ -1693,7 +1700,11 @@ function CardPicks() {
                   <td className="card-cell">
                     {p.level ? <><span className="small">{levelLabel(p.level)}</span> <HowTag card={p} /> {p.text}</> : <span className="muted">아직 안 고름</span>}
                   </td>
-                  <td className={`st-${p.status}`}>{p.status === "none" ? "-" : SLOT_STATUS_LABEL[p.status]}{p.notes > 0 && <span className="small"> +쪽지 {p.notes}</span>}</td>
+                  <td className={`status-cell ${p.noCode ? "st-reported" : `st-${p.status}`}`}>
+                    {p.status === "none" ? "-" : SLOT_STATUS_LABEL[p.status]}{p.notes > 0 && <span className="small"> +쪽지 {p.notes}</span>}
+                    <br /><span className="mono small">{p.code || "----"}</span>
+                    {p.status !== "none" && p.status !== "chosen" && <span className="small"> {p.codeSent ? "쪽지로 보냄" : p.noCode ? "코드 안 보냄" : ""}</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1701,6 +1712,36 @@ function CardPicks() {
         </div>
       )}
     </Panel>
+  );
+}
+
+// 인증 코드 점검(미션 진행·최종 지목): 마니또의 코드마다 codes/{코드}가 맞는 대상·주차를 가리키는지.
+// 어긋나면 대상이 맞는 코드를 넣어도 "나에게 온 코드가 아니에요"가 된다. 보안 규칙상 codes는 준비 단계에만 쓸 수 있어서
+// 미션 중에는 Firebase 콘솔에서 고친다(넣을 값을 보여 준다).
+function CodeCheck() {
+  const { nameOf } = useApp();
+  const assignments = useColl("assignments");
+  const giverCodes = useColl("giverCodes");
+  const codes = useColl("codes");
+  if (!assignments || !giverCodes || !codes) return null;
+  const total = Object.keys(assignments).length * 3;
+  if (!total) return null;
+  const bad = codeProblems(assignments, giverCodes, codes);
+  if (!bad.length) return <p className="note banner" role="status">인증 코드 점검: 정상이에요. 코드 {total}개가 모두 맞는 대상·주차를 가리켜요.</p>;
+  return (
+    <section className="panel warn-panel" role="alert">
+      <p><b>⚠ 인증 코드 점검: {bad.length}개가 어긋나요.</b> 이 코드를 받은 대상은 맞는 코드를 넣어도 "나에게 온 코드가 아니에요"가 떠요.</p>
+      <p className="small">Firebase 콘솔 → Firestore → <span className="mono">codes</span> 컬렉션에서 아래 문서를 만들거나 고쳐 주세요(필드 <span className="mono">receiverPid</span>는 문자열, <span className="mono">slot</span>은 숫자). 고치면 이 경고가 사라져요.</p>
+      <ul className="small">
+        {bad.map((b) => (
+          <li key={`${b.giverPid}_${b.slot}`}>
+            {nameOf(b.giverPid)} → {nameOf(b.receiverPid)} {b.slot}주차: {b.code
+              ? <>문서 ID <span className="mono">{b.code}</span>, receiverPid = <span className="mono">{b.receiverPid}</span>, slot = <span className="mono">{b.slot}</span>{b.problem === "wrong" ? ` (지금은 ${b.got?.receiverPid ?? "?"} · ${b.got?.slot ?? "?"}주차로 돼 있음)` : " (문서 없음)"}</>
+              : "마니또의 코드 자체가 없어요(giverCodes)."}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

@@ -31,10 +31,11 @@ export const SLOT_STATUS_LABEL = {
  * redemptions: { 코드: { voided } }, reports: { "받는사람_주차": { active } }, verdicts: { "받는사람_주차": { verdict } }
  * delivered: Set("받는사람_주차") 완료 알림(deliveries)이 있는 주차. 완료 표시(done)와 같이 "완료를 알린 주차"로 본다.
  * autoPraise: Set("받는사람_주차") 사이트가 전달한 칭찬 카드(운영자가 가리지 않은 것). 인증이 없어도 인정된다.
+ * codeSent: Set("받는사람_주차") 인증 코드가 실린 완료 알림·쪽지가 간 주차(대상이 코드를 받았는지).
  * guesses: { receiverPid: { guessPid } }
  * 반환: [{ giverPid, receiverPid, slots: { 1: { status, level, text, done, notes, code, reported, verdict }, … }, guessPid, correct }]
  */
-export function pairRows({ assignments = {}, giverCodes = {}, missions = {}, redemptions = {}, reports = {}, verdicts = {}, guesses = {}, delivered = new Set(), autoPraise = new Set() }) {
+export function pairRows({ assignments = {}, giverCodes = {}, missions = {}, redemptions = {}, reports = {}, verdicts = {}, guesses = {}, delivered = new Set(), autoPraise = new Set(), codeSent = new Set() }) {
   return Object.entries(assignments).map(([giverPid, a]) => {
     const receiverPid = a.receiverPid;
     const m = missions[giverPid] || {};
@@ -51,7 +52,7 @@ export function pairRows({ assignments = {}, giverCodes = {}, missions = {}, red
       if (red && !red.voided) status = "redeemed";
       else if (red) status = verdict === "received" ? "confirmed" : "voided"; // 무효 처리된 인증: "받았음"으로 확인하면 마니또의 미션은 인정
       else if (done) status = verdict === "received" ? "confirmed" : verdict === "missing" ? "missing" : reported ? "reported" : autoPraise.has(key) ? "auto" : "sent";
-      slots[slot] = { status, level: choice?.level || null, cardId: choice?.cardId || null, text: choice?.text || "", done, notes: m.notes?.[slot] || 0, code, reported, verdict, voided: Boolean(red?.voided) };
+      slots[slot] = { status, level: choice?.level || null, cardId: choice?.cardId || null, text: choice?.text || "", done, notes: m.notes?.[slot] || 0, code, codeSent: codeSent.has(key), reported, verdict, voided: Boolean(red?.voided) };
     }
     const guessPid = guesses[receiverPid]?.guessPid || null;
     return { giverPid, receiverPid, slots, guessPid, correct: guessPid === giverPid };
@@ -140,11 +141,12 @@ export function cluesDoneSet(assignments, clues, ver = 0) {
  * rows: pairRows의 결과. how: "site"(사이트 쪽지) / "real"(실물 전달) / null(칭찬만·안 고름).
  * 반환: { people: [{ giverPid, receiverPid, level, cardId, text, how, status, notes }],
  *         cards: [{ key, level, text, how, picked, done, redeemed }] 고른 사람이 많은 순,
- *         counts: { easy, normal, hard, praise, none, site, real, done, redeemed } }
+ *         counts: { easy, normal, hard, praise, none, site, real, done, redeemed, noCode } }
+ *   noCode = 완료를 알렸는데 코드가 실린 알림·쪽지가 없어 대상이 인증할 수 없는 것(마니또가 "코드 함께 보내기"를 끔).
  *   done = 완료를 알린 것(인증 대기·신고·확인·자동 인정·인증됨·무효 포함), redeemed = 대상이 인증한 것.
  */
 export function cardPicks(rows, slot) {
-  const counts = { easy: 0, normal: 0, hard: 0, praise: 0, none: 0, site: 0, real: 0, done: 0, redeemed: 0 };
+  const counts = { easy: 0, normal: 0, hard: 0, praise: 0, none: 0, site: 0, real: 0, done: 0, redeemed: 0, noCode: 0 };
   const byCard = new Map();
   const people = rows.map((r) => {
     const x = r.slots[slot] || { status: "none" };
@@ -165,9 +167,32 @@ export function cardPicks(rows, slot) {
       if (redeemed) c.redeemed++;
       byCard.set(key, c);
     }
-    return { giverPid: r.giverPid, receiverPid: r.receiverPid, level: x.level || null, cardId: x.cardId || null, text: x.text || "", how, status: x.status, notes: x.notes || 0 };
+    const noCode = done && !redeemed && !x.codeSent && x.status !== "auto";
+    if (noCode) counts.noCode++;
+    return { giverPid: r.giverPid, receiverPid: r.receiverPid, level: x.level || null, cardId: x.cardId || null, text: x.text || "", how, status: x.status, notes: x.notes || 0,
+      code: x.code || null, codeSent: Boolean(x.codeSent), noCode };
   });
   const order = { easy: 0, normal: 1, hard: 2, praise: 3 };
   const cards = [...byCard.values()].sort((a, b) => b.picked - a.picked || (order[a.level] ?? 9) - (order[b.level] ?? 9) || a.text.localeCompare(b.text, "ko"));
   return { people, cards, counts };
+}
+
+/**
+ * 인증 코드 문서 점검: 마니또의 코드(giverCodes)마다 codes/{코드}가 있고 그 대상·주차를 가리키는지.
+ * 받는 사람의 인증 화면은 codes/{코드}를 읽어 "나에게 온 코드"인지 판단하므로, 이 문서가 없거나 어긋나면 맞는 코드를 넣어도
+ * "나에게 온 코드가 아니에요"가 된다.
+ * 반환: [{ giverPid, receiverPid, slot, code, problem: "missing" | "wrong", got }]
+ */
+export function codeProblems(assignments = {}, giverCodes = {}, codes = {}) {
+  const out = [];
+  for (const [giverPid, a] of Object.entries(assignments)) {
+    for (const slot of MISSION_SLOTS) {
+      const code = giverCodes[giverPid]?.codes?.[slot];
+      if (!code) { out.push({ giverPid, receiverPid: a.receiverPid, slot, code: null, problem: "missing", got: null }); continue; }
+      const got = codes[code] || null;
+      if (!got) out.push({ giverPid, receiverPid: a.receiverPid, slot, code, problem: "missing", got: null });
+      else if (got.receiverPid !== a.receiverPid || Number(got.slot) !== slot) out.push({ giverPid, receiverPid: a.receiverPid, slot, code, problem: "wrong", got });
+    }
+  }
+  return out;
 }

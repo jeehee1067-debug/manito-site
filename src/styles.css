@@ -340,7 +340,10 @@ ul.plain.redeem-status li { flex: 0 0 auto; width: auto; margin: 0; }
 .how-line.how-site { border-color: var(--green); }
 .how-line.how-real { border-color: #d9772b; }
 .pick-counts { line-height: 2; }
+.warn-text { color: var(--red); font-weight: 700; }
+.panel.warn-panel { border-color: var(--red); }
 .pk-table.pick-table td.card-cell { text-align: left; white-space: normal; word-break: keep-all; min-width: 11em; }
+.pk-table.pick-table td.status-cell { white-space: normal; word-break: keep-all; min-width: 5.5em; }
 
 /* 역할 낱말: 마니또(챙겨 주는 쪽, 파랑)·대상(받는 쪽, 노랑). ui.jsx Giver·Target·RoleNote, 규칙 탭 "마니또와 대상" */
 .role { display: inline-block; padding: 0 4px; border-radius: 3px; font-weight: 700; line-height: 1.35; white-space: nowrap; }

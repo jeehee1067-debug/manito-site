@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   arrayRemove, arrayUnion, collection, doc, getDoc, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch,
 } from "firebase/firestore";
@@ -20,6 +20,9 @@ const howHint = (card) => (cardHow(card) === "site"
   ? "카드예요: 사이트로 온 쪽지가 곧 미션이에요. 따로 받을 실물은 없어요."
   : "카드예요: 실물이 따로 있어요. 쪽지에 적힌 곳이나 자리 주변을 살펴보세요.");
 
+// 받는 쪽이 자기 미션 탭의 코드(내가 마니또로서 내 대상에게 주는 코드)를 넣었을 때
+const OWN_CODE_MSG = "이 코드는 내가 마니또로서 내 대상에게 주는 코드예요(\"내 미션\" 탭에 보이는 코드). 여기에는 내 마니또가 보낸 쪽지(위 \"마니또에게서 온 것\")에 적힌 코드를 넣어 주세요.";
+
 const CARD_BONUS = TICKET_RULES.cardBonus; // 카드 추가 응모권(보통·도전만)
 
 export default function Detective() {
@@ -36,13 +39,15 @@ export default function Detective() {
   }, [myPid, hintOpen, config.assignVer]);
 
   // 마니또에게서 온 것(완료 알림·쪽지)은 App이 한 번 구독해 둔 것을 쓴다(안 읽은 표시와 같이)
+  // "이 코드로 인증하기": 받은 쪽지의 코드를 인증 칸에 그대로 넣는다(손으로 옮겨 적다 틀리는 일을 막으려고). at은 같은 코드를 다시 눌러도 반응하게
+  const [fill, setFill] = useState(null);
 
   return (
     <>
       <RoleNote as="target" />
-      <Inbox myPid={myPid} items={items} />
+      <Inbox myPid={myPid} items={items} onUseCode={(code) => setFill({ code, at: Date.now() })} />
       <AngelInbox />
-      <CodeEntry myPid={myPid} items={items} />
+      <CodeEntry myPid={myPid} items={items} prefill={fill} />
       <ToManito myPid={myPid} />
       <MyRedemptions myPid={myPid} items={items} />
       <Clues myPid={myPid} partsInUse={partsInUse} hintOpen={hintOpen} hintPart={hintPart} />
@@ -51,7 +56,7 @@ export default function Detective() {
   );
 }
 
-function Inbox({ myPid, items }) {
+function Inbox({ myPid, items, onUseCode }) {
   const { config } = useApp();
   const [mine, setMine] = useState(null); // 내가 입력한 인증 [{ code, slot }]. null = 아직 불러오는 중
   useEffect(() => onSnapshot(query(collection(db, "redemptions"), where("receiverPid", "==", myPid)), (s) =>
@@ -62,6 +67,11 @@ function Inbox({ myPid, items }) {
   // 마니또가 완료를 알렸는데 내가 아직 인증하지 않은 1·2주차(3주차 칭찬 카드는 사이트로 바로 오므로 "받은 게 없어요"가 없다)
   const waiting = [...new Set(items.filter((it) => it.slot !== PRAISE_SLOT).map((it) => it.slot))]
     .filter((slot) => !redeemedSlots.has(slot))
+    .sort((a, b) => a - b);
+  const canRedeem = config.phase === PHASE.RUNNING || config.phase === PHASE.GUESSING;
+  // 완료 알림이 온 주차 중 코드가 실린 것(완료 알림·추가 쪽지)이 하나도 없고 아직 인증하지 않은 주차
+  const noCodeSlots = [...new Set(items.filter((it) => it.kind !== "note").map((it) => it.slot))]
+    .filter((slot) => !redeemedSlots.has(slot) && !items.some((it) => it.slot === slot && it.code && !it.hidden))
     .sort((a, b) => a - b);
   const speaker = (it) => (it.kind === "praise" ? "마니또의 칭찬 카드" : it.kind === "note" ? `마니또 · ${it.slot}주차 쪽지` : `마니또 · ${it.slot}주차`);
 
@@ -79,12 +89,24 @@ function Inbox({ myPid, items }) {
             {it.card && <p className="small">마니또가 고른 카드: {LEVEL_LABEL[it.card.level] || it.card.level} · {it.card.text}</p>}
             {it.card && cardHow(it.card) && <p className="small how-hint"><HowTag card={it.card} /> {howHint(it.card)}</p>}
             {it.code && (
-              <p className="small">인증 코드 <strong className="mono">{it.code}</strong>{redeemedCodes.has(it.code) ? " (인증 완료)" : ""}</p>
+              <p className="small">
+                인증 코드 <strong className="mono">{it.code}</strong>{redeemedCodes.has(it.code) ? " (인증 완료)" : ""}
+                {!redeemedCodes.has(it.code) && mine && canRedeem && (
+                  <> <button type="button" className="text-btn" onClick={() => onUseCode(it.code)}>이 코드로 인증하기</button></>
+                )}
+              </p>
             )}
             {it.message && !it.hidden && <FlagNote id={it.id} />}
           </Dialogue>
         ))}
       </div>
+      {/* 완료 알림은 왔는데 그 주차에 코드가 실린 쪽지가 하나도 없음: 마니또가 "코드 함께 보내기"를 끄고 보냈다(예전 화면은 사이트 쪽지 카드도 끌 수 있었다) */}
+      {mine && canRedeem && noCodeSlots.map((slot) => (
+        <p key={`nc${slot}`} className="warn-line" role="status">
+          <b>{slot}주차 인증 코드가 아직 안 왔어요.</b> 내 마니또가 쪽지에 코드를 넣지 않고 보냈어요. 실물과 함께 둔 메모가 있으면 거기 적힌 코드를 넣어 주세요.
+          없으면 마니또가 "쪽지 더 보내기"로 코드를 보낼 때까지 기다리거나, 운영진에게 알려 주세요(운영진이 코드를 확인해 줄 수 있어요).
+        </p>
+      ))}
       {/* 내 인증 목록이 오기 전에는 띄우지 않는다(이미 인증한 주차에 "받은 게 없어요"가 잠깐 보이지 않게) */}
       {mine && waiting.map((slot) => <ReportBox key={slot} myPid={myPid} slot={slot} phase={config.phase} />)}
     </Panel>
@@ -241,7 +263,7 @@ function ReportBox({ myPid, slot, phase }) {
   );
 }
 
-function CodeEntry({ myPid, items }) {
+function CodeEntry({ myPid, items, prefill }) {
   const { config } = useApp();
   const [code, setCode] = useState("");
   const [review, setReview] = useState("");
@@ -253,6 +275,28 @@ function CodeEntry({ myPid, items }) {
   // 열린 주차를 모두 인증했으면 입력 칸 대신 "인증 완료"를 보인다(같은 조회를 Inbox·MyRedemptions도 써서 읽기는 늘지 않는다).
   const [mine, setMine] = useState(null);
   const [showForm, setShowForm] = useState(false);
+  // 받은 쪽지의 "이 코드로 인증하기": 코드를 넣고 입력 칸을 열어 그쪽으로 옮긴다
+  useEffect(() => {
+    if (!prefill) return;
+    setCode(prefill.code);
+    setShowForm(true);
+    setMsg({ type: "", text: "" });
+    requestAnimationFrame(() => {
+      const el = document.getElementById("code-entry-form");
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      el?.querySelector("textarea")?.focus({ preventScroll: true });
+    });
+  }, [prefill]);
+  // 내가 마니또로서 내 대상에게 주는 코드(내 미션 탭에 크게 보이는 코드)를 여기에 넣는 실수가 있어서, 그 코드면 따로 알려 준다.
+  // 필요할 때만 한 번 읽는다(읽기 수).
+  const ownCodes = useRef(null);
+  async function isOwnCode(c) {
+    if (!ownCodes.current) {
+      ownCodes.current = await getDoc(doc(db, "giverCodes", myPid)).then((s) => Object.values(s.data()?.codes || {})).catch(() => []);
+    }
+    return ownCodes.current.includes(c);
+  }
+  const [own, setOwn] = useState(false);
   useEffect(() => onSnapshot(query(collection(db, "redemptions"), where("receiverPid", "==", myPid)), (s) =>
     setMine(s.docs.map((d) => d.data().slot)), () => setMine([])), [myPid]);
   const openWeeks = Array.from({ length: Math.min(3, Math.max(1, config.week || 1)) }, (_, i) => i + 1);
@@ -266,9 +310,11 @@ function CodeEntry({ myPid, items }) {
   useEffect(() => {
     setSlotOf(null);
     setCardMatch(true);
+    setOwn(false);
     if (typed.length !== 4) return;
     let alive = true;
-    getDoc(doc(db, "codes", typed)).then((s) => alive && setSlotOf(s.exists() ? s.data().slot : null)).catch(() => {});
+    getDoc(doc(db, "codes", typed)).then((s) => alive && setSlotOf(s.exists() ? s.data().slot : null))
+      .catch(() => isOwnCode(typed).then((yes) => alive && setOwn(yes)));
     return () => { alive = false; };
   }, [typed]);
   const card = slotOf ? items.find((it) => carriesCard(it) && it.slot === slotOf)?.card : null;
@@ -282,7 +328,10 @@ function CodeEntry({ myPid, items }) {
     setMsg({ type: "", text: "" });
     try {
       const codeSnap = await getDoc(doc(db, "codes", c)).catch(() => null);
-      if (!codeSnap || !codeSnap.exists()) throw new Error("이 코드는 나에게 온 마니또 코드가 아니에요. 다시 확인해 주세요.");
+      if (!codeSnap || !codeSnap.exists()) {
+        throw new Error(await isOwnCode(c) ? OWN_CODE_MSG
+          : "이 코드는 나에게 온 마니또 코드가 아니에요. 위 \"마니또에게서 온 것\"에 적힌 코드를 그대로 넣어 주세요(\"이 코드로 인증하기\"를 누르면 자동으로 들어가요). 코드에는 0·1·O·I가 없어요.");
+      }
       const slot = codeSnap.data().slot;
       if (slot > (config.week || 1)) throw new Error(`${slot}주차 코드예요. ${slot}주차가 열리면 인증할 수 있어요.`);
       const existing = await getDoc(doc(db, "redemptions", c));
@@ -299,6 +348,7 @@ function CodeEntry({ myPid, items }) {
       await batch.commit();
       setCode("");
       setReview("");
+      setShowForm(false); // 열린 주차를 다 인증했으면 다시 "인증 완료"만 보이게
       setMsg({ type: "ok", text: "인증했어요. 응모권 1장이 쌓였어요." });
     } catch (err) {
       setMsg({ type: "error", text: err.code === "permission-denied" ? "지금은 인증할 수 없어요. 미션 진행 기간이 맞는지 확인하고, 계속 안 되면 운영진에게 알려 주세요." : err.message });
@@ -331,11 +381,13 @@ function CodeEntry({ myPid, items }) {
       {!allDone && doneWeeks.length > 0 && running && (
         <p className="small">{doneWeeks.join("·")}주차는 인증을 마쳤어요 ✔. 아직 인증하지 않은 주차: {leftWeeks.join("·")}주차(마니또의 미션을 받으면 코드를 입력해 주세요).</p>
       )}
-      {(!allDone || showForm) && <form className="stack" onSubmit={submit}>
+      {(!allDone || showForm) && <form className="stack" id="code-entry-form" onSubmit={submit}>
         <label>
           <span className="panel-label">인증 코드</span>
           <input className="pk-input code-input" value={code} maxLength={6} onChange={(e) => setCode(e.target.value)} placeholder="K7Q2" disabled={!running} autoComplete="off" />
         </label>
+        {own && <p className="error" role="alert">{OWN_CODE_MSG}</p>}
+        {!own && <p className="small muted">내 마니또가 보낸 쪽지("마니또에게서 온 것")에 적힌 코드예요. "내 미션" 탭의 코드는 내가 내 대상에게 주는 코드라 여기에 넣지 않아요.</p>}
         <label className="with-counter">
           <span className="panel-label">후기 ({REVIEW_MIN}자 이상, 익명 피드에 올라가요)</span>
           <textarea className="pk-input" rows={3} maxLength={500} value={review} onChange={(e) => setReview(e.target.value)} disabled={!running}
