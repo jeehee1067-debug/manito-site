@@ -45,3 +45,31 @@ export function Dialogue({ speaker, children, tone = "" }) {
     </div>
   );
 }
+
+// 역할 낱말 강조(사용자가 정함: "내가 누군가의 마니또이고 대상도 마니또라는 개념이 헷갈린다").
+// 마니또 = 몰래 챙겨 주는 사람(파랑), 대상 = 마니또가 챙겨 주는 사람(노랑). 화면마다 처음 나오는 곳에 한 번씩 쓴다.
+export function Giver({ children = "마니또" }) {
+  return <b className="role role-giver">{children}</b>;
+}
+export function Target({ children = "대상" }) {
+  return <b className="role role-target">{children}</b>;
+}
+// 탭 맨 위 역할 안내: 내 미션(as="giver")에서는 내가 마니또, 추리 보드(as="target")에서는 내가 대상
+export function RoleNote({ as }) {
+  const giver = as === "giver";
+  return (
+    <div className={`role-note role-note-${as}`} role="note">
+      <p className="role-note-head">이 탭에서 나는 {giver ? <><Giver />예요</> : <><Target />이에요</>}</p>
+      <p className="role-flow" aria-hidden="true">
+        {giver
+          ? <><span className="role-me">나</span><span className="role-arrow">미션 ▶</span><Target>내 대상</Target></>
+          : <><Giver>내 마니또 ?</Giver><span className="role-arrow">미션 ▶</span><span className="role-me">나</span></>}
+      </p>
+      <p className="small">
+        {giver
+          ? <>내 <Target /> 한 사람을 몰래 챙기는 곳이에요. 내가 받은 미션의 인증은 <a href="#detective">추리 보드</a>에서 해요.</>
+          : <>내 <Giver />가 보낸 미션을 받아 인증하고, 그 마니또가 누구인지 추리하는 곳이에요. 내가 할 미션은 <a href="#mission">내 미션</a>에 있어요.</>}
+      </p>
+    </div>
+  );
+}

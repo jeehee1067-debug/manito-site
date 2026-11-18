@@ -4,7 +4,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp } from "../App.jsx";
-import { Avatar, Dialogue, Panel } from "../ui.jsx";
+import { Avatar, Dialogue, Giver, Panel, RoleNote } from "../ui.jsx";
 import { LEVEL_LABEL, PHASE, PRAISE_SLOT, PROFILE_QUESTIONS, REVIEW_MIN, CLUE_COUNT, PART_HINT_IDX, clueScheduleText } from "../lib/constants.js";
 import { normalizeCode } from "../lib/random.js";
 import { bump } from "../lib/writes.js";
@@ -34,6 +34,7 @@ export default function Detective() {
 
   return (
     <>
+      <RoleNote as="target" />
       <Inbox myPid={myPid} items={items} />
       <AngelInbox />
       <CodeEntry myPid={myPid} items={items} />
@@ -61,7 +62,7 @@ function Inbox({ myPid, items }) {
 
   return (
     <Panel title="마니또에게서 온 것">
-      {items.length === 0 && <p className="muted">아직 도착한 게 없어요. 마니또가 미션을 하면 여기에 알림이 와요.</p>}
+      {items.length === 0 && <p className="muted">아직 도착한 게 없어요. 내 <Giver />가 미션을 하면 여기에 알림이 와요.</p>}
       <div className="stack">
         {items.map((it) => (
           <Dialogue key={it.id} speaker={speaker(it)} tone={it.kind === "praise" ? "gold" : ""}>
@@ -153,7 +154,7 @@ function ToManito({ myPid }) {
 
   return (
     <Panel title="마니또에게 한마디">
-      <p className="small">내 마니또에게만 보여요. 주차마다 한 번, 200자까지. 고맙다는 말도, "혹시 ○○파트세요?" 같은 찔러보기도 좋아요. 마니또는 쪽지로 답할 수 있어요.</p>
+      <p className="small"><Giver>내 마니또</Giver>에게만 보여요. 주차마다 한 번, 200자까지. 고맙다는 말도, "혹시 ○○파트세요?" 같은 찔러보기도 좋아요. 마니또는 쪽지로 답할 수 있어요.</p>
       {Object.entries(sent).sort(([a], [b]) => a - b).map(([slot, m]) => (
         <Dialogue key={slot} speaker={`나 → 마니또 · ${slot}주차`}><p>{m}</p></Dialogue>
       ))}
@@ -456,7 +457,7 @@ function Clues({ myPid, partsInUse, hintOpen, hintPart }) {
   return (
     <Panel title={`단서 ${released} / ${CLUE_COUNT}`}>
       <p className="small">
-        내 마니또의 프로필 답변이에요. 매주 금요일 2개씩 공개돼요({clueScheduleText()}).
+        <Giver>내 마니또</Giver>의 프로필 답변이에요. 매주 금요일 2개씩 공개돼요({clueScheduleText()}).
         {partsInUse && " 최종 지목이 열리면 마지막 단서로 마니또의 파트가 공개돼요."}
       </p>
       <ol className="clues">

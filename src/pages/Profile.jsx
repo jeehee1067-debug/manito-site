@@ -5,7 +5,7 @@ import { useApp } from "../App.jsx";
 import { AVATARS, PROFILE_QUESTIONS, clueScheduleText, profileAnswerError } from "../lib/constants.js";
 import { syncClues } from "../lib/sync.js";
 import { bump } from "../lib/writes.js";
-import { Panel, avatarSrc } from "../ui.jsx";
+import { Giver, Panel, Target, avatarSrc } from "../ui.jsx";
 
 export default function Profile() {
   const { myPid, nameOf, avatarOf, user, loadAvatar, setAvatarLocal, config } = useApp();
@@ -75,7 +75,7 @@ export default function Profile() {
 
       <Panel title={`${nameOf(myPid)}님의 프로필`}>
         <p className="small">
-          여기 답한 내용은 내가 마니또로 맡은 사람에게 매주 금요일 2개씩({clueScheduleText()}) 단서로 공개돼요. 그 사람이 나를 추리할 때 쓰는 단서예요.
+          여기 답한 내용은 <Target>내 대상</Target>(내가 마니또로 맡은 사람)에게 매주 금요일 2개씩({clueScheduleText()}) 단서로 공개돼요. 그 사람이 나를 추리할 때 쓰는 단서예요.
           사실대로 답해 주세요. 직접 쓰는 칸에는 이름·직급처럼 바로 알 수 있는 말은 피해 주세요.
           프로필을 다 채워야(단서 6개가 대상에게 가야) 끝까지 안 들켰을 때 은신 응모권을 받아요. 운영진은 단서가 사실인지 확인할 수 있어요.
           {released > 0 && " 이미 공개된 단서는 바꿀 수 없어요."}
@@ -134,7 +134,7 @@ function PrefsForm({ myPid }) {
   }
   return (
     <Panel title="내 마니또에게 알려 줄 것">
-      <p className="small">나를 맡은 마니또만 볼 수 있어요(단서로 공개되지 않아요). 간식 미션에서 알레르기 사고를 막고, 선물 고르는 데 도움이 돼요. 비워 둬도 돼요.</p>
+      <p className="small"><Giver>내 마니또</Giver>(나를 맡은 사람)만 볼 수 있어요(단서로 공개되지 않아요). 간식 미션에서 알레르기 사고를 막고, 선물 고르는 데 도움이 돼요. 비워 둬도 돼요.</p>
       <form className="stack" onSubmit={save}>
         {PREF_FIELDS.map(([key, label, hint]) => (
           <label key={key}>
