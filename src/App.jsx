@@ -127,6 +127,10 @@ const AVATAR_TTL = 10 * 60 * 1000;
 // 설정(config/app)을 읽을 수 없는 계정: 아직 명단에도 운영자 목록에도 없는 "연결 전" 계정(보안 규칙).
 const LOCKED = "locked";
 
+// 탭 → 화면. 화면은 active(지금 보이는지)를 받는다: 숨겨 둔 동안 놓친 값(다른 탭에서 바꾼 것)을 다시 보일 때 읽는 데 쓴다.
+const REMOUNT = new Set(["feed", "reveal"]); // 숨겨 두지 않고 열 때마다 새로 만드는 탭
+const PAGES = { mission: MyMission, detective: Detective, feed: Feed, board: PartBoard, profile: Profile, rules: Rules, reveal: Reveal, admin: Admin };
+
 function Session({ user, logout }) {
   const [config, setConfig] = useState(undefined); // undefined 불러오는 중, null 설정 없음(첫 운영자 설정), LOCKED 연결 전 계정
   const [recheckNo, setRecheckNo] = useState(0); // 공동 운영자로 지정됐는지 다시 확인할 때 올린다
@@ -135,6 +139,8 @@ function Session({ user, logout }) {
   const [avatars, setAvatars] = useState({}); // 화면에 나온 사람만 한 번씩 읽어 둔다 { pid: 번호 | null }
   const asked = useRef(new Map()); // pid → 마지막으로 읽은 시각
   const [tab, setTab] = useHashTab("mission");
+  // 한 번 연 탭(읽기 줄이기: 아래 PAGES 설명)
+  const visited = useRef(new Set());
 
   // 설정은 참여자·운영자만 읽는다. 연결 전 계정은 거부되고(LOCKED) "내 이름 연결" 화면을 본다.
   // 초대 코드로 연결되면(personId가 생기면) 다시 구독한다.
@@ -323,14 +329,20 @@ function Session({ user, logout }) {
 
   let body;
   if (!ctx.myPid && !ctx.isAdmin) body = <Claim />;
-  else if (current === "mission") body = <MyMission />;
-  else if (current === "detective") body = <Detective />;
-  else if (current === "feed") body = <Feed />;
-  else if (current === "board") body = <PartBoard />;
-  else if (current === "profile") body = <Profile />;
-  else if (current === "rules") body = <Rules />;
-  else if (current === "reveal") body = <Reveal />;
-  else if (current === "admin") body = <Admin />;
+  else {
+    // 읽기 줄이기(11/18 실측: 하루 읽기가 무료 한도 5만 건에 거의 닿음): 예전에는 탭을 옮길 때마다 그 화면을 새로 만들어서
+    // 구독을 모두 닫았다가 다시 열었고, 그때마다 서버에서 처음부터 다시 읽었다(내 미션 약 27건, 운영 탭은 54명 기준 약 1,500건).
+    // 이제 한 번 연 탭은 닫지 않고 숨겨 둔다. 구독은 열린 채로 남아 바뀐 문서만 새로 읽는다.
+    // 피드는 들어올 때마다 최근 글을 새로 불러오고(30건, 방금 쓴 답장·공감이 바로 보이게), 결과 탭은 발표 화면이 실제 크기를 재서 그리므로
+    // 이 둘은 예전처럼 열 때마다 새로 만든다.
+    if (current) visited.current.add(current);
+    body = tabs
+      .filter(([k]) => k === current || (!REMOUNT.has(k) && visited.current.has(k)))
+      .map(([k]) => {
+        const Page = PAGES[k];
+        return <div key={k} className="tab-page" hidden={k !== current}><Page active={k === current} /></div>;
+      });
+  }
 
   return (
     <AppCtx.Provider value={ctx}>

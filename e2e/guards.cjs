@@ -6,7 +6,7 @@ const { chromium } = require("playwright");
 const assert = require("node:assert/strict");
 
 // 대상 이름은 기본으로 가려져 있다(내 미션 화면). "이름 보기"를 눌러 읽는다.
-const readTarget = async (p) => { const b = p.locator(".target-toggle"); await b.waitFor(); if ((await b.getAttribute("aria-pressed")) !== "true") await b.click(); return (await p.locator(".target-name").innerText()).trim(); };
+const readTarget = async (p) => { const b = p.locator(".target-toggle:visible"); await b.waitFor(); if ((await b.getAttribute("aria-pressed")) !== "true") await b.click(); return (await p.locator(".target-name:visible").innerText()).trim(); };
 // 운영 화면의 초대 코드·메일은 기본으로 가려져 있다.
 const showSecrets = async (p) => { for (const b of await p.getByRole("button", { name: "초대 코드·메일 보기" }).all()) await b.click(); };
 const H = require("./helpers.cjs");
@@ -35,7 +35,7 @@ async function tokenOf(email) {
   for (const [i, name] of ["가나", "다라", "마바"].entries()) {
     const p = await mk(name); u[name] = p;
     await H.signup(p, inv[name], `g${i}@example.com`);
-    await p.locator(".target-name").waitFor();
+    await p.locator(".target-name:visible").waitFor();
     target[name] = await readTarget(p);
   }
   const giverOf = Object.fromEntries(Object.entries(target).map(([g, r]) => [r, g]));

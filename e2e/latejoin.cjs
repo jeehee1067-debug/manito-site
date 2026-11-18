@@ -28,7 +28,7 @@ const H = require("./helpers.cjs");
   for (const [i, name] of EARLY.entries()) {
     const p = await mk(name); u[name] = p;
     await H.signup(p, inv[name], `late${i}@example.com`);
-    await p.locator(".target-name").waitFor();
+    await p.locator(".target-name:visible").waitFor();
     target[name] = await H.readTarget(p);
   }
   {
@@ -47,7 +47,7 @@ const H = require("./helpers.cjs");
   await admin.locator(".hud-chip", { hasText: "미션 진행" }).waitFor();
   const warn = dialogs.find((d) => d.includes("아직 가입 안 한 사람 1명: 사아"));
   assert.ok(warn && warn.includes("미션이 시작된 뒤에도 가입해 바로 참여할 수 있어요"), warn);
-  for (const name of EARLY) { await u[name].reload(); await u[name].locator(".target-name").waitFor(); }
+  for (const name of EARLY) { await u[name].reload(); await u[name].locator(".target-name:visible").waitFor(); }
   await H.panel(u["가나"], ANGEL_PANEL).getByRole("button", { name: "수호천사 지원하기" }).waitFor();
   console.log("  미션 시작 뒤에는 수호천사 지원 버튼이 열린다");
 
@@ -101,7 +101,7 @@ const H = require("./helpers.cjs");
     await verify.getByText(/인증 메일을 다시 보냈어요|조금 전에 보냈어요/).waitFor();
     await H.verifyMail("late3@samsung.com"); // 메일의 링크 누르기(에뮬레이터)
     await verify.getByRole("button", { name: "인증했어요 · 연결하기" }).click();
-    await p.locator(".target-name").waitFor();
+    await p.locator(".target-name:visible").waitFor();
     await p.locator(".hud-who", { hasText: "사아님" }).waitFor();
     console.log("  사아: 아이디 late3로 가입 → 인증 전에는 연결 안 됨 → 메일의 링크를 누른 뒤 '인증했어요 · 연결하기' → 명단의 사아로 자동 연결(초대 코드 없이)");
     {
@@ -168,7 +168,7 @@ const H = require("./helpers.cjs");
     // 미션(완료 알리기)은 마감됐다: 마니또 화면에 완료 알리기 버튼이 없다
     const g = u[EARLY.find((n) => n !== lateGiver && n !== target[LATE]) || EARLY[0]];
     await g.reload();
-    await g.locator(".target-name").waitFor();
+    await g.locator(".target-name:visible").waitFor();
     assert.equal(await g.getByRole("button", { name: "미션 완료 알리기" }).count(), 0, "미션 마감 뒤에는 완료를 알릴 수 없다");
     console.log(`  최종 지목 단계: ${target[LATE]}이(가) 사아의 미션을 인증함(유예), 완료 알리기는 닫힘`);
     // 지목까지 마감되면 인증도 닫힌다

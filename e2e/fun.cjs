@@ -26,7 +26,7 @@ const step = (s) => console.log("▶", s);
   for (const [i, name] of NAMES.entries()) {
     const p = await mk(name); u[name] = p;
     await H.signup(p, inv[name], `f${i}@example.com`);
-    await p.locator(".target-name").waitFor();
+    await p.locator(".target-name:visible").waitFor();
     target[name] = await H.readTarget(p);
     await H.tab(p, "내 프로필");
     if (i === 0) {
@@ -115,7 +115,7 @@ const step = (s) => console.log("▶", s);
   step("주차별 추측과 인증·공감");
   const guessWeek = async (p, who) => {
     await H.tab(p, "피드"); await H.tab(p, "추리 보드");
-    const sb = p.locator("section.panel", { has: p.locator("h2.panel-title", { hasText: "용의자 보드" }) });
+    const sb = p.locator("section.panel:visible", { has: p.locator("h2.panel-title", { hasText: "용의자 보드" }) });
     await sb.locator("select").first().selectOption({ label: who });
     await sb.getByRole("button", { name: "이번 주 추측 남기기" }).click();
     await sb.getByText(/추측을 남겼어요/).waitFor();
@@ -167,7 +167,7 @@ const step = (s) => console.log("▶", s);
     await volunteer(ANGEL);
     const a = u[ANGEL];
     await H.tab(admin, "운영");
-    const panelOf = (n) => admin.locator("section.panel", { has: admin.locator("h2.panel-title", { hasText: new RegExp(`^수호천사 \\(지원 2명 · 연결 ${n}명`) }) });
+    const panelOf = (n) => admin.locator("section.panel:visible", { has: admin.locator("h2.panel-title", { hasText: new RegExp(`^수호천사 \\(지원 2명 · 연결 ${n}명`) }) });
     const before = panelOf(0);
     await before.waitFor();
     assert.equal(await before.locator("select").count(), 0, "운영 화면에 수호천사를 고르는 칸이 없다");
@@ -240,7 +240,7 @@ const step = (s) => console.log("▶", s);
   {
     const r = u[R];
     await H.tab(r, "피드"); await H.tab(r, "추리 보드");
-    const sb = r.locator("section.panel", { has: r.locator("h2.panel-title", { hasText: "용의자 보드" }) });
+    const sb = r.locator("section.panel:visible", { has: r.locator("h2.panel-title", { hasText: "용의자 보드" }) });
     await sb.locator("select").selectOption({ label: "가나" });
     await sb.getByRole("button", { name: "이 사람으로 지목" }).click();
     await r.getByText("지목했어요.").waitFor();
@@ -300,7 +300,7 @@ const step = (s) => console.log("▶", s);
   {
     const a = u[ANGEL];
     await H.tab(a, "결과");
-    const lineEl = a.locator(".target .small", { hasText: "내 응모권" });
+    const lineEl = a.locator(".target:visible .small", { hasText: "내 응모권" });
     await lineEl.waitFor();
     const line = (await lineEl.innerText()).replace(/\s+/g, " ");
     assert.match(line, /\+ 수호천사 1/, line);
