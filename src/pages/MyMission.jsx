@@ -5,7 +5,7 @@ import { useApp, Loading } from "../App.jsx";
 import { DROP_TIP, DROP_TIP_SHORT, EXTRA_NOTES_MAX, FIRST_CLUE_DATE, PROFILE_DUE, shortDate, LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT, SCHEDULE, SPEND_GUIDE_WON, scheduleLabel, todayYmd } from "../lib/constants.js";
 import { DEAL_COUNT, dealCards } from "../lib/cards.js";
 import { syncClues } from "../lib/sync.js";
-import { Avatar, Dialogue, Panel } from "../ui.jsx";
+import { Avatar, Dialogue, Giver, Panel, RoleNote, Target } from "../ui.jsx";
 import { Icon } from "../icons.jsx";
 import { TICKET_RULES } from "../config/prizes.js";
 import { cardCost, cardLevel } from "../lib/scoring.js";
@@ -91,7 +91,7 @@ export default function MyMission() {
   if (!assignment) {
     return (
       <Panel title="아직 배정 전이에요">
-        <p>운영진이 마니또를 배정하면 여기에 내 대상이 나타나요. 그동안 <a href="#profile">내 프로필</a>에서 캐릭터를 고르고, 6문항에 답하고, "내 마니또에게 알려 줄 것"(알레르기·좋아하는 간식)을 적어 주세요.</p>
+        <p>운영진이 마니또를 배정하면 여기에 <Target>내 대상</Target>(내가 몰래 챙길 사람)이 나타나요. 그동안 <a href="#profile">내 프로필</a>에서 캐릭터를 고르고, 6문항에 답하고, "내 마니또에게 알려 줄 것"(알레르기·좋아하는 간식)을 적어 주세요.</p>
       </Panel>
     );
   }
@@ -139,10 +139,11 @@ export default function MyMission() {
           {nextEvent && <p className="next-event"><Icon name="calendar" size={18} /><span>다음 일정: {scheduleLabel(nextEvent)}</span></p>}
         </Panel>
       )}
+      <RoleNote as="giver" />
       <section className="panel target">
         {shown ? <Avatar pid={receiverPid} size={140} /> : <div className="avatar-mask" aria-hidden="true">?</div>}
         <div>
-          <span className="dialogue-speaker static">내가 몰래 챙길 사람</span>
+          <span className="dialogue-speaker static">내 대상 · 내가 몰래 챙길 사람</span>
           <p className={shown ? "target-name" : "target-name masked"}>{shown ? nameOf(receiverPid) : "● ● ●"}</p>
           {shown && theirLoc && <span className="loc-tag">{theirLoc}</span>}
           <p>
@@ -157,7 +158,7 @@ export default function MyMission() {
 
       {pending.length > 0 && running && (
         <Dialogue speaker="알림" tone="gold">
-          내 마니또가 보낸 미션 {pending.length}건을 아직 인증하지 않았어요. <a href="#detective">추리 보드</a>에서 코드와 후기를 입력하면 나와 마니또 모두 응모권을 받아요.
+          <Giver>내 마니또</Giver>가 보낸 미션 {pending.length}건을 아직 인증하지 않았어요(이건 내가 <Target />으로서 받은 미션이에요). <a href="#detective">추리 보드</a>에서 코드와 후기를 입력하면 나와 마니또 모두 응모권을 받아요.
           찾아봐도 받은 게 없으면 추리 보드에서 "받은 게 없어요"로 알려 주세요.
         </Dialogue>
       )}
@@ -326,7 +327,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
                   ? <>3주차에는 모두 <b>올해의 칭찬 한 줄</b>을 보내요(익명, 송년회 칭찬 벽에 나와요). 원하면 보통·도전 카드 미션을 하나 더 해서 응모권을 더 받을 수 있어요. </>
                   : <>먼저 난이도를 골라 주세요. </>}
                 고르면 그 난이도의 카드 {DEAL_COUNT}장이 나오고, 그중 하나를 고르면 돼요.
-                대상이 인증하면서 받은 것이 카드와 같다고 확인하면 보통은 응모권 {TICKET_RULES.cardBonus.normal}장, 도전은 {TICKET_RULES.cardBonus.hard}장을 더 받아요.
+                내 <Target />이 인증하면서 받은 것이 카드와 같다고 확인하면 보통은 응모권 {TICKET_RULES.cardBonus.normal}장, 도전은 {TICKET_RULES.cardBonus.hard}장을 더 받아요.
                 보통·도전에는 돈이 드는 카드가 한 장 나와요(그 미션이 인증되면 비용 카드 +{TICKET_RULES.costBonus}, 3주 동안 한 번만).
               </p>
               <div className="cards">
@@ -713,8 +714,8 @@ function TicketSummary({ codes, missions, entries }) {
     <Panel title="내 응모권 (지금까지)">
       <p className="ticket-count"><strong>{mission + card + cost + entries}</strong>장</p>
       <ul className="plain tickets">
-        <li>마니또로서: 인증된 미션 {mission} / {R.maxMissions}{praiseSent ? "(전달된 칭찬 카드 포함)" : ""} + 카드 추가분 {card} / {R.maxCardBonus}(보통 +{R.cardBonus.normal}, 도전 +{R.cardBonus.hard}) + 비용 카드 {cost} / {R.costBonus}</li>
-        <li>받는 사람으로서: 인증 입력 {entries} / {R.maxReceiverEntries}</li>
+        <li><Giver>마니또로서</Giver>: 인증된 미션 {mission} / {R.maxMissions}{praiseSent ? "(전달된 칭찬 카드 포함)" : ""} + 카드 추가분 {card} / {R.maxCardBonus}(보통 +{R.cardBonus.normal}, 도전 +{R.cardBonus.hard}) + 비용 카드 {cost} / {R.costBonus}</li>
+        <li><Target>대상으로서</Target>: 인증 입력 {entries} / {R.maxReceiverEntries}</li>
         <li className="muted">
           마지막에 더해지는 것: 끝까지 안 들키면 +{R.hidden}
           {mission >= R.hiddenMinMissions ? "" : ` (${hiddenNeed} 받을 수 있어요)`}
@@ -744,8 +745,8 @@ function TicketSummary({ codes, missions, entries }) {
         </p>
       )}
       <p className="small">
-        내 마니또가 미션을 안 보낸 주차(운영진이 "못 받음"으로 확인한 주차 포함)는 마지막에 인증 입력 대신 1장씩 채워져요(내 미션이 {R.compMinMissions}건 이상 인증된 경우).
-        카드 추가분은 대상이 직접 인증하면서 받은 것이 카드와 같다고 확인한 미션에만 붙어요. <a href="#rules">규칙 전체 보기</a>
+        <Giver>내 마니또</Giver>가 미션을 안 보낸 주차(운영진이 "못 받음"으로 확인한 주차 포함)는 마지막에 인증 입력 대신 1장씩 채워져요(내 미션이 {R.compMinMissions}건 이상 인증된 경우).
+        카드 추가분은 <Target>내 대상</Target>이 직접 인증하면서 받은 것이 카드와 같다고 확인한 미션에만 붙어요. <a href="#rules">규칙 전체 보기</a>
       </p>
     </Panel>
   );

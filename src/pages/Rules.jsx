@@ -1,10 +1,41 @@
 import { useApp } from "../App.jsx";
-import { Panel } from "../ui.jsx";
+import { Giver, Panel, Target } from "../ui.jsx";
 import { PRIZES, PRIZES_ANNOUNCED, TICKET_RULES as R } from "../config/prizes.js";
 import { DEAL_COUNT } from "../lib/cards.js";
 import { DROP_TIP, EXTRA_NOTES_MAX, PROFILE_QUESTIONS, REVIEW_MIN, SCHEDULE, SPEND_GUIDE_WON, clueScheduleText, daysBetween, shortDate, todayYmd } from "../lib/constants.js";
 
-// 일정 타임라인(규칙 탭 맨 위). 지난 일정은 흐리게 ✔, 오늘 일정은 "오늘", 가장 가까운 다음 일정은 "다음 D-n".
+// 낱말 정의(규칙 탭 맨 위. 사용자가 정함: "내가 누군가의 마니또이고 대상도 마니또라는 개념이 헷갈리는 분이 있다").
+// 마니또 = 챙겨 주는 쪽, 대상 = 받는 쪽. 한 사람이 두 역할을 다 한다는 것과 어느 탭이 어느 역할인지를 적는다.
+function Roles() {
+  return (
+    <Panel title="마니또와 대상">
+      <p className="small">이 두 낱말만 먼저 구분해 주세요. 사이트 어디서나 같은 뜻으로 써요.</p>
+      <div className="role-defs">
+        <div className="role-def role-def-giver">
+          <p className="role-def-word"><Giver /></p>
+          <p className="role-def-mean">몰래 챙겨 주는 사람</p>
+          <p className="small">미션을 <b>하는</b> 쪽</p>
+        </div>
+        <div className="role-def role-def-target">
+          <p className="role-def-word"><Target /></p>
+          <p className="role-def-mean">마니또가 챙겨 주는 사람</p>
+          <p className="small">미션을 <b>받는</b> 쪽 ("대상자", "받는 사람"도 같은 말)</p>
+        </div>
+      </div>
+      <p className="role-flow chain" aria-label="내 마니또가 나에게 미션을 하고, 나는 내 대상에게 미션을 해요">
+        <Giver>내 마니또 ?</Giver><span className="role-arrow">미션 ▶</span><span className="role-me">나</span><span className="role-arrow">미션 ▶</span><Target>내 대상</Target>
+      </p>
+      <ul className="rules-list">
+        <li>나는 <b>두 역할을 모두</b> 해요. 누군가의 <Giver />이면서, 동시에 다른 누군가의 <Target />이에요.</li>
+        <li><b>내가 마니또일 때</b>: <Target>내 대상</Target> 한 사람에게 매주 몰래 미션을 해요. 내 대상이 누구인지는 나만 알아요. → <b>내 미션</b> 탭</li>
+        <li><b>내가 대상일 때</b>: <Giver>내 마니또</Giver>가 보낸 미션을 받고 인증해요. 내 마니또가 누구인지는 모르고, 단서로 추리해요. → <b>추리 보드</b> 탭</li>
+        <li>내 마니또와 내 대상은 <b>서로 다른 사람</b>이에요(서로가 서로의 마니또인 짝은 없어요).</li>
+      </ul>
+    </Panel>
+  );
+}
+
+// 일정 타임라인(규칙 탭에서 낱말 정의 다음). 지난 일정은 흐리게 ✔, 오늘 일정은 "오늘", 가장 가까운 다음 일정은 "다음 D-n".
 // 날짜는 이 기기의 오늘 기준이다(운영 단계와 무관 — 운영진이 그날 버튼을 누르는 시각은 공지로 알린다).
 const KIND_LABEL = { join: "가입", week: "미션", clue: "단서", close: "마감", party: "송년회" };
 function Timeline() {
@@ -68,13 +99,15 @@ export default function Rules() {
 
   return (
     <>
+      <Roles />
+
       <Timeline />
 
       <Panel title="한눈에 보기">
         <ol className="rules-list">
-          <li>나는 한 사람의 <b>마니또</b>이고, 동시에 다른 누군가가 내 마니또예요.</li>
-          <li><b>마니또로서</b> 매주 미션을 하나씩 해요(1·2주차는 카드 고르기, 3주차는 칭찬 한 줄 + 원하면 카드 하나 더). 대상이 인증 코드와 후기로 인증해 주면 응모권이 쌓여요.</li>
-          <li><b>받는 사람으로서</b> 받은 미션을 인증하고, 매주 공개되는 단서로 내 마니또를 추리해 마지막에 지목해요.</li>
+          <li>나는 한 사람의 <Giver />이면서, 동시에 다른 누군가의 <Target />이에요(나를 챙겨 주는 내 마니또가 따로 있어요).</li>
+          <li><Giver>마니또로서</Giver> 내 대상에게 매주 미션을 하나씩 해요(1·2주차는 카드 고르기, 3주차는 칭찬 한 줄 + 원하면 카드 하나 더). 내 대상이 인증 코드와 후기로 인증해 주면 응모권이 쌓여요.</li>
+          <li><Target>대상으로서</Target> 내 마니또에게 받은 미션을 인증하고, 매주 공개되는 단서로 내 마니또를 추리해 마지막에 지목해요.</li>
           <li>12월 9일 송년회에서 정체를 공개하고, 응모권으로 시상·추첨해요. 응모권이 많을수록 상에 가까워져요.</li>
         </ol>
       </Panel>
