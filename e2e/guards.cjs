@@ -67,7 +67,7 @@ async function tokenOf(email) {
     await inbox.locator(".how-hint .how-tag").first().waitFor();
     assert.match(await inbox.locator(".how-hint").first().innerText(), /(사이트 쪽지 카드예요: 사이트로 온 쪽지가 곧 미션이에요|실물 전달 카드예요: 실물이 따로 있어요)/);
     const entry = H.panel(r, "인증하기");
-    await entry.getByPlaceholder("K7Q2").fill(await inbox.locator("strong.mono").first().innerText());
+    await entry.getByPlaceholder("쪽지에 적힌 4자리").fill(await inbox.locator("strong.mono").first().innerText());
     await entry.locator(".card-check").getByText(hardText).waitFor();
     await entry.getByRole("checkbox", { name: /받은 것이 이 카드 내용과 같아요/ }).uncheck();
     await entry.locator("textarea").fill("응원 쪽지 잘 받았어요. 덕분에 힘이 났어요!");
@@ -154,7 +154,7 @@ async function tokenOf(email) {
     // 받는 사람이 완료 알림보다 먼저 인증한다: 카드가 아직 안 보이므로 확인 칸이 없다
     const r = u[target["다라"]]; await H.tab(r, "피드"); await H.tab(r, "추리 보드");
     const entry = H.panel(r, "인증하기");
-    await entry.getByPlaceholder("K7Q2").fill(code);
+    await entry.getByPlaceholder("쪽지에 적힌 4자리").fill(code);
     await r.waitForTimeout(800);
     assert.equal(await entry.locator(".card-check").count(), 0, "완료 알림 전에는 카드 확인 칸이 없다");
     await entry.locator("textarea").fill("메모에 적힌 코드로 먼저 인증해요. 잘 받았어요, 고마워요!");

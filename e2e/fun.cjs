@@ -131,7 +131,7 @@ const step = (s) => console.log("▶", s);
     const inbox = H.panel(r, "마니또에게서 온 것");
     const code = await inbox.locator("strong.mono").first().innerText();
     const entry = H.panel(r, "인증하기");
-    await entry.getByPlaceholder("K7Q2").fill(code);
+    await entry.getByPlaceholder("쪽지에 적힌 4자리").fill(code);
     await entry.locator("textarea").fill("서랍 속 간식 덕분에 오후가 행복했어요. 고마워요!");
     await entry.getByRole("button", { name: "인증하기" }).click();
     await r.getByText("인증했어요. 응모권 1장이 쌓였어요.").waitFor();

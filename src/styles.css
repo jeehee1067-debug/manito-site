@@ -161,6 +161,8 @@ label.with-counter { position: relative; }
 .pk-input.num { width: 80px; }
 textarea.pk-input { resize: vertical; line-height: 1.6; }
 .code-input { font-size: 24px; letter-spacing: 0.4em; text-transform: uppercase; text-align: center; }
+/* 안내 글자는 코드처럼 보이지 않게(예전 예시 "K7Q2"를 진짜 코드로 알고 따라 쓴 문의가 있었다) */
+.code-input::placeholder { font-size: 14px; letter-spacing: 0; text-transform: none; }
 .inline { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
 .inline .pk-input { flex: 1; }
 
