@@ -2,10 +2,10 @@ import { useEffect, useState } from "react";
 import { collection, doc, getDoc, increment, onSnapshot, query, serverTimestamp, setDoc, where, writeBatch } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp, Loading } from "../App.jsx";
-import { DROP_TIP, DROP_TIP_SHORT, EXTRA_NOTES_MAX, FIRST_CLUE_DATE, PROFILE_DUE, shortDate, LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT, SCHEDULE, SPEND_GUIDE_WON, scheduleLabel, todayYmd } from "../lib/constants.js";
+import { CARD_HOW, cardHow, DROP_TIP, DROP_TIP_SHORT, EXTRA_NOTES_MAX, FIRST_CLUE_DATE, PROFILE_DUE, shortDate, LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT, SCHEDULE, SPEND_GUIDE_WON, scheduleLabel, todayYmd } from "../lib/constants.js";
 import { DEAL_COUNT, dealCards } from "../lib/cards.js";
 import { syncClues } from "../lib/sync.js";
-import { Avatar, Dialogue, Giver, Panel, RoleNote, Target } from "../ui.jsx";
+import { Avatar, Dialogue, Giver, HowTag, Panel, RoleNote, Target } from "../ui.jsx";
 import { Icon } from "../icons.jsx";
 import { TICKET_RULES } from "../config/prizes.js";
 import { cardCost, cardLevel } from "../lib/scoring.js";
@@ -227,6 +227,16 @@ export default function MyMission() {
   );
 }
 
+// 카드 방법 안내: 카드마다 붙는 "사이트 쪽지"·"실물 전달" 표시가 무슨 뜻인지(난이도 고르기·카드 두 장 화면)
+function HowGuide() {
+  return (
+    <p className="small how-guide">
+      <span className="how-tag how-site">{CARD_HOW.site.label}</span> 카드는 이 사이트의 쪽지 칸에 써서 보내면 끝이에요(종이 쪽지를 따로 줄 필요 없어요).{" "}
+      <span className="how-tag how-real">{CARD_HOW.real.label}</span> 카드는 실물을 직접 두거나 건네야 해요.
+    </p>
+  );
+}
+
 function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, notes, allDone, open, phase, remote, taken = [] }) {
   const [message, setMessage] = useState("");
   const [includeCode, setIncludeCode] = useState(true);
@@ -279,6 +289,8 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
     e.preventDefault();
     setError("");
     if (isPraise && message.trim().length < 10) return setError("칭찬 한 줄은 10자 이상 써 주세요.");
+    // 사이트 쪽지로 하는 카드는 쪽지가 곧 미션이다. 빈 채로 완료를 알리면 대상은 받은 것이 없다(화면에서만 막는다. 종이로 줬다면 둔 곳을 적으면 된다).
+    if (!isPraise && how === "site" && !message.trim()) return setError("사이트 쪽지로 하는 카드예요. 쪽지 칸에 카드 내용대로 글을 써 주세요. (종이 쪽지로 따로 줬다면 둔 곳을 적어 주세요.)");
     setBusy(true);
     try {
       // 완료 알림(문서 ID = 받는사람_주차, 주차마다 한 번)과 완료 표시를 한 묶음으로 쓴다. 보안 규칙이 둘이 같이 있을 때만 받는다.
@@ -310,6 +322,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
   const title = isPraise ? "3주차 공통 미션: 올해의 칭찬 한 줄" : `${slot}주차 미션`;
   const hasCard = Boolean(choice && choice.level !== "praise"); // 고른 미션 카드(3주차는 칭찬과 함께 고른 보통·도전 카드)
   const praiseOnly = isPraise && !hasCard && (level === "praise" || choice?.level === "praise");
+  const how = hasCard ? cardHow(choice) : null; // "site" 사이트 쪽지로 끝나는 카드 / "real" 실물을 전달하는 카드
   const picking = open && !done && !hasCard && !praiseOnly;
   const levels = isPraise ? PRAISE_LEVELS : LEVELS;
   const hint = (lv) => (isPraise ? PRAISE_HINT[lv] : LEVEL_HINT[lv]);
@@ -330,6 +343,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
                 내 <Target />이 인증하면서 받은 것이 카드와 같다고 확인하면 보통은 응모권 {TICKET_RULES.cardBonus.normal}장, 도전은 {TICKET_RULES.cardBonus.hard}장을 더 받아요.
                 보통·도전에는 돈이 드는 카드가 한 장 나와요(그 미션이 인증되면 비용 카드 +{TICKET_RULES.costBonus}, 3주 동안 한 번만).
               </p>
+              <HowGuide />
               <div className="cards">
                 {levels.map((lv) => (
                   <button key={lv} type="button" className={`card level-pick level-${starLevel(lv)}`} onClick={() => setLevel(lv)}>
@@ -357,6 +371,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
                 {dealCards(myPid, slot, level, remote, taken).some((c) => c.cost) && " 두 장 중 한 장은 돈이 드는 카드, 한 장은 돈이 안 드는 카드예요."}
               </p>
               {dealCards(myPid, slot, level, remote, taken).some((c) => c.real) && <p className="tip-line"><span className="tip-tag">꿀팁</span>{DROP_TIP_SHORT}</p>}
+              <HowGuide />
               <div className="cards dealt">
                 {dealCards(myPid, slot, level, remote, taken).map((c) => (
                   <button key={c.id} type="button" className={`card level-${c.level}`} onClick={() => choose(c)}>
@@ -366,6 +381,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
                       {c.cost && <span className="cost-tag">소액 비용</span>}
                       <span className="card-reward">응모권 +{1 + (TICKET_RULES.cardBonus[c.level] || 0)}</span>
                     </span>
+                    <span className="card-how"><HowTag card={c} /></span>
                     <span className="card-text">{c.text}</span>
                   </button>
                 ))}
@@ -387,7 +403,8 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
           {hasCard && (
             <div className="chosen">
               <span className={`badge level-${choice.level}`}>{LEVEL_LABEL[choice.level]}</span>
-              <span>{choice.text}</span>
+              <HowTag card={choice} />
+              <span className="chosen-text">{choice.text}</span>
               {isCostCard(choice.cardId) && <span className="cost-tag">소액 비용 · {SPEND_GUIDE_WON.toLocaleString()}원 이하 권장</span>}
               {/* 코드가 이미 인증된 슬롯은 보안 규칙이 카드 변경을 막는다 */}
               {!redeemed && (
@@ -397,6 +414,16 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
                 </button>
               )}
             </div>
+          )}
+          {hasCard && how && (
+            <p className={`how-line how-${how}`} role="note">
+              <b>{how === "site" ? "사이트 쪽지로 하는 카드예요." : "실물을 직접 전달하는 카드예요."}</b>{" "}
+              {how === "site"
+                ? isPraise
+                  ? "아래 칸에 칭찬 한 줄과 카드 내용을 함께 써서 보내면 끝이에요(길면 완료 뒤 \"쪽지 더 보내기\"로 나눠 보내도 돼요). 종이 쪽지를 따로 줄 필요 없어요."
+                  : "아래 쪽지 칸에 쓴 글이 그대로 내 대상에게 가요. 써서 \"미션 완료 알리기\"를 누르면 끝이에요. 종이 쪽지나 실물을 따로 줄 필요 없어요."
+                : "실물을 직접 두거나 건네야 해요(사이트 쪽지만 보내면 카드와 달라서 카드 추가분이 빠져요). 아래 쪽지 칸에는 둔 곳을 알려 주세요."}
+            </p>
           )}
           {hasCard && isRealCard(choice.cardId) && (
             <Dialogue speaker="꿀팁" tone="gold"><p>{DROP_TIP}</p></Dialogue>
@@ -411,13 +438,19 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
               ? hasCard
                 ? "칭찬 한 줄은 사이트 쪽지로 전달되고, 인증 코드도 함께 보내져요. 고른 카드 미션도 해 주세요(실물이면 이 코드를 메모에 적어 함께 두면 좋아요)."
                 : "칭찬 카드는 사이트 쪽지로 전달되고, 인증 코드도 함께 보내져요."
-              : "실물 미션이면 이 코드를 메모에 적어 함께 두면 좋아요. 아래에서 코드를 쪽지로도 함께 보내면 메모를 잃어버려도 인증할 수 있어요."}
+              : how === "site"
+                ? "인증 코드는 아래 쪽지와 함께 보내져요(체크를 풀지 않으면). 대상이 이 코드와 후기로 인증해요."
+                : "이 코드를 메모에 적어 실물과 함께 두면 좋아요. 아래에서 코드를 쪽지로도 함께 보내면 메모를 잃어버려도 인증할 수 있어요."}
             {hasCard && " 고른 카드 내용은 대상에게 같이 보여요(받은 것이 카드와 다르면 카드 추가분이 빠져요). 미션을 하면 바로 완료 알리기를 눌러 주세요. 대상이 알림보다 먼저 인증하면 카드를 한 번 더 확인해야 추가분이 붙어요."}
           </p>
           <label>
-            <span className="panel-label">{isPraise ? `${receiverName}에게 보내는 칭찬 (익명)` : "쪽지 (선택, 익명으로 전달)"}</span>
+            <span className="panel-label">
+              {isPraise ? `${receiverName}에게 보내는 칭찬 (익명)`
+                : how === "site" ? "쪽지 (이 글이 미션이에요 · 익명으로 전달)"
+                  : "쪽지 (선택 · 둔 곳을 알려 주세요, 익명으로 전달)"}
+            </span>
             <textarea className="pk-input" rows={3} maxLength={500} value={message} onChange={(e) => setMessage(e.target.value)}
-              placeholder={isPraise ? "올해 고마웠던 점, 멋있었던 순간" : "예: 분석실 신발장 맨 위 칸을 확인해 보세요"} />
+              placeholder={isPraise ? "올해 고마웠던 점, 멋있었던 순간" : how === "site" ? "카드 내용대로 쪽지를 써 주세요. 이 글이 내 대상에게 가요" : "예: 분석실 신발장 맨 위 칸을 확인해 보세요"} />
           </label>
           {!isPraise && (
             <label className="check">
@@ -435,7 +468,8 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
           {choice?.text && (
             <div className="chosen">
               {choice.level !== "praise" && <span className={`badge level-${choice.level}`}>{LEVEL_LABEL[choice.level]}</span>}
-              <span>{choice.text}</span>
+              <HowTag card={choice} />
+              <span className="chosen-text">{choice.text}</span>
             </div>
           )}
           <p className={redeemed && !redeemed.voided ? "note" : "small"}>

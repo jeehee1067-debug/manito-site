@@ -2,7 +2,7 @@ import { useApp } from "../App.jsx";
 import { Giver, Panel, Target } from "../ui.jsx";
 import { PRIZES, PRIZES_ANNOUNCED, TICKET_RULES as R } from "../config/prizes.js";
 import { DEAL_COUNT } from "../lib/cards.js";
-import { DROP_TIP, EXTRA_NOTES_MAX, PROFILE_QUESTIONS, REVIEW_MIN, SCHEDULE, SPEND_GUIDE_WON, clueScheduleText, daysBetween, shortDate, todayYmd } from "../lib/constants.js";
+import { CARD_HOW, DROP_TIP, EXTRA_NOTES_MAX, PROFILE_QUESTIONS, REVIEW_MIN, SCHEDULE, SPEND_GUIDE_WON, clueScheduleText, daysBetween, shortDate, todayYmd } from "../lib/constants.js";
 
 // 낱말 정의(규칙 탭 맨 위. 사용자가 정함: "내가 누군가의 마니또이고 대상도 마니또라는 개념이 헷갈리는 분이 있다").
 // 마니또 = 챙겨 주는 쪽, 대상 = 받는 쪽. 한 사람이 두 역할을 다 한다는 것과 어느 탭이 어느 역할인지를 적는다.
@@ -209,7 +209,12 @@ export default function Rules() {
           <li><b>쉬움</b>(추가 응모권 없음): 사이트 쪽지 한 통.</li>
           <li><b>보통</b>(+{R.cardBonus.normal}장): 공들여 지어 쓰는 쪽지(시, 삼행시, O/X 퀴즈, 별명, 장점 찾기) 또는 간단한 실물(포스트잇, 간식, 음료, 핫팩).</li>
           <li><b>도전</b>(+{R.cardBonus.hard}장): 직접 만든 것을 몰래 전달하기(상장, 그림, 종이접기, 포스트잇 아트), 선물, 3일 연속 쪽지, 대상에 대해 알아내 맞혀 보기.</li>
-          <li>쪽지는 사이트로 보내는 글이에요. 긴 편지는 쓰지 않아도 돼요.</li>
+          <li>
+            카드마다 <b>하는 방법</b>이 표시돼 있어요.{" "}
+            <span className="how-tag how-site">{CARD_HOW.site.label}</span> 카드는 이 사이트의 쪽지 칸에 써서 보내면 끝이에요. 카드에 "쪽지 보내기"라고 적힌 것은 모두 사이트 쪽지이고, <b>종이 쪽지를 따로 줄 필요가 없어요</b>.{" "}
+            <span className="how-tag how-real">{CARD_HOW.real.label}</span> 카드(포스트잇, 간식, 음료, 상장, 그림, 선물 등)는 실물을 직접 두거나 건네야 해요.
+          </li>
+          <li>긴 편지는 쓰지 않아도 돼요.</li>
           <li>직접 전달하는 미션은 들킬 위험이 있는 만큼 응모권이 더 많아요. 들키지 않고 전달하는 것까지가 미션이에요.</li>
           <li><b>꿀팁</b>: {DROP_TIP}</li>
           <li><b>알아내 맞혀 보기</b> 카드는 방법이 자유예요(주변에 묻기, 관찰하기, 본인에게 슬쩍 묻기도 돼요. 대신 들킬 수 있어요). <b>맞혀야</b> 카드 추가분이 붙어요. 맞았는지는 대상이 인증할 때 "카드와 같아요"로 확인해요.</li>

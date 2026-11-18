@@ -9,8 +9,8 @@ import { seededRandom } from "../src/lib/random.js";
 import { parseRosterLine, rosterSummary, summaryToList, sameSummary } from "../src/lib/roster.js";
 import { PRIZES, TICKET_RULES } from "../src/config/prizes.js";
 import { DEAL_COUNT, dealCards } from "../src/lib/cards.js";
-import { MISSION_CARDS, PROFILE_QUESTIONS, CLUE_COUNT, EXTRA_NOTES_MAX, CLUE_DATES, SCHEDULE, daysBetween, profileAnswerError } from "../src/lib/constants.js";
-import { pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../src/lib/pairs.js";
+import { CARD_HOW, MISSION_CARDS, PROFILE_QUESTIONS, cardHow, findCard, CLUE_COUNT, EXTRA_NOTES_MAX, CLUE_DATES, SCHEDULE, daysBetween, profileAnswerError } from "../src/lib/constants.js";
+import { cardPicks, pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../src/lib/pairs.js";
 
 // 참여자 54명(부서 56명 중 운영자·PL님 제외). 파트 크기를 주면 { pid, part } 목록을 만든다.
 const pids = Array.from({ length: 54 }, (_, i) => `p${String(i + 1).padStart(3, "0")}`);
@@ -1167,4 +1167,44 @@ test("프로필 작성 안내: 기한은 첫 단서 공개 전날, 받는 사람
   const { subject, body } = profileMessage({ url: "https://example.web.app/", due: shortDate(PROFILE_DUE), clueDay: shortDate(FIRST_CLUE_DATE) });
   assert.ok(subject.includes("11/19(목)까지"));
   assert.ok(body.includes("https://example.web.app/") && body.includes("11/20(금)에 첫 단서") && body.includes("은신 응모권"));
+});
+
+test("카드 방법 표시: 모든 카드가 사이트 쪽지 또는 실물 전달이고, 카드 글과 어긋나지 않는다", () => {
+  const all = Object.entries(MISSION_CARDS).flatMap(([level, cs]) => cs.map((c) => ({ ...c, level })));
+  for (const c of all) {
+    const how = cardHow({ cardId: c.id });
+    assert.equal(how, c.real ? "real" : "site", c.id);
+    assert.ok(CARD_HOW[how].label, c.id);
+    // 완료 알림(deliveries.card)에는 번호가 없다: 글만으로도 같은 카드를 찾는다
+    assert.equal(findCard({ level: c.level, text: c.text })?.id, c.id);
+    // 사이트 쪽지 카드는 글에 "쪽지"가 있고, 실물 전달 카드는 글에 "쪽지"가 없다(표시와 글이 서로 다른 말을 하지 않게)
+    assert.equal(c.text.includes("쪽지"), how === "site", `${c.id}: ${c.text}`);
+  }
+  assert.ok(MISSION_CARDS.easy.every((c) => cardHow(c) === "site"), "쉬움은 모두 사이트 쪽지");
+  assert.ok(all.filter((c) => c.cost).every((c) => cardHow(c) === "real"), "비용 카드는 모두 실물 전달");
+  assert.equal(cardHow({ cardId: "praise", level: "praise", text: "올해의 칭찬 한 줄" }), null, "칭찬만은 표시 없음");
+  assert.equal(cardHow(null), null);
+});
+
+test("운영 화면 고른 미션 카드: 주차별로 카드마다 고른 사람 수·완료·인증, 사람별 카드와 방법", () => {
+  const e1 = MISSION_CARDS.easy[0], n1 = MISSION_CARDS.normal.find((c) => c.id === "n1");
+  const pick = (c, level) => ({ cardId: c.id, level, text: c.text });
+  const rows = pairRows({
+    assignments: { A: { receiverPid: "B" }, B: { receiverPid: "C" }, C: { receiverPid: "D" }, D: { receiverPid: "A" } },
+    giverCodes: { A: { codes: { 1: "AAAA" } }, B: { codes: { 1: "BBBB" } }, C: { codes: { 1: "CCCC" } }, D: { codes: { 1: "DDDD" } } },
+    missions: {
+      A: { choices: { 1: pick(e1, "easy") }, done: { 1: true } },
+      B: { choices: { 1: pick(e1, "easy") } },
+      C: { choices: { 1: pick(n1, "normal") }, done: { 1: true } },
+    },
+    redemptions: { AAAA: { voided: false } },
+  });
+  const { people, cards, counts } = cardPicks(rows, 1);
+  assert.deepEqual(counts, { easy: 2, normal: 1, hard: 0, praise: 0, none: 1, site: 2, real: 1, done: 2, redeemed: 1 });
+  assert.deepEqual(cards.map((c) => [c.key, c.how, c.picked, c.done, c.redeemed]), [["e1", "site", 2, 1, 1], ["n1", "real", 1, 1, 0]]);
+  const by = Object.fromEntries(people.map((p) => [p.giverPid, p]));
+  assert.deepEqual([by.A.how, by.A.status, by.B.status, by.C.how, by.C.status, by.D.level, by.D.how], ["site", "redeemed", "chosen", "real", "sent", null, null]);
+  // 아직 아무도 고르지 않은 주차
+  assert.deepEqual(cardPicks(rows, 2).counts.none, 4);
+  assert.equal(cardPicks(rows, 2).cards.length, 0);
 });

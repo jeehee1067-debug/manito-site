@@ -298,6 +298,10 @@ const step = (s) => console.log("▶", s);
       assert.equal(free, 1, "돈이 안 드는 카드 한 장");
       assert.equal(texts.length - free, 1, "돈이 드는 카드 한 장(모두에게 비용 카드가 나오게)");
       assert.equal(await slot.getByRole("button", { name: /다른 .* 카드 보기/ }).count(), 0, "다시 뽑는 버튼은 없다");
+      // 카드마다 하는 방법 표시(사이트 쪽지 / 실물 전달). 비용 카드는 실물 전달
+      assert.equal(await slot.locator(".dealt .card .how-tag").count(), 2, "카드 두 장 모두 방법 표시");
+      assert.equal(await slot.locator(".dealt .card:has(.cost-tag) .how-tag.how-real").count(), 1, "비용 카드는 실물 전달");
+      await slot.locator(".how-guide").getByText("종이 쪽지를 따로 줄 필요 없어요").waitFor();
       assert.equal(await slot.locator(".tip-line", { hasText: "분석실 신발장" }).count(), 1, "카드 두 장 화면의 작은 꿀팁(비용 카드는 실물)");
       await slot.getByRole("button", { name: "난이도 다시 고르기" }).click();
       await slot.locator(".level-pick").first().waitFor();
@@ -321,9 +325,11 @@ const step = (s) => console.log("▶", s);
     if (p.name === "가나") {
       // 실물 카드를 고르면 꿀팁(분석실 신발장)이 보인다. 쪽지만으로 끝나는 카드면 안 보인다
       const MC = (await import("../src/lib/constants.js")).MISSION_CARDS;
-      const chosenText = (await slot.locator(".chosen span").nth(1).innerText()).trim();
+      const chosenText = (await slot.locator(".chosen .chosen-text").innerText()).trim();
       const real = Boolean(MC.hard.find((c) => c.text === chosenText)?.real);
       assert.equal(await slot.getByText(/분석실 신발장을 이용해 보세요/).count(), real ? 1 : 0, `실물(${real}) 카드의 꿀팁`);
+      assert.equal(await slot.locator(`.chosen .how-tag.how-${real ? "real" : "site"}`).count(), 1, "고른 카드의 방법 표시");
+      await slot.locator(`.how-line.how-${real ? "real" : "site"}`).getByText(real ? "실물을 직접 전달하는 카드예요." : "사이트 쪽지로 하는 카드예요.").waitFor();
     }
     const box = slot.locator('input[type="checkbox"]');
     if (!(await box.isChecked())) await box.check();
@@ -380,6 +386,35 @@ const step = (s) => console.log("▶", s);
     assert.equal((await t.locator(".ticket-count").innerText()).replace(/\s/g, ""), `${4 + ganaCost}장`);
     console.log(`  가나 내 응모권(지금까지): ${4 + ganaCost}장 = 미션 1 + 카드 추가분 2(도전) + 비용 카드 ${ganaCost} + 인증 입력 1`);
     await shot(g, "my-mission");
+  }
+
+  step("운영 화면 '고른 미션 카드': 카드별 인원(이름 없음)과 사람별 카드");
+  {
+    await tab(admin, "운영");
+    const picks = panel(admin, "고른 미션 카드");
+    await picks.locator(".pick-counts").waitFor();
+    assert.match(await panel(admin, "고른 미션 카드").locator("h2.panel-title").innerText(), new RegExp(`고른 미션 카드 \\(${N} / ${N}명\\)`));
+    const counts = (await picks.locator(".pick-counts").innerText()).replace(/\s+/g, " ");
+    assert.match(counts, new RegExp(`쉬움 ${N - 1} · 보통 0 · 도전 1 · 아직 안 고름 0`), counts);
+    assert.match(counts, new RegExp(`완료 알림 ${N} · 인증됨 ${N}`), counts);
+    // 카드별 표: 고른 사람 수의 합 = 전체, 이름은 없다
+    const cardRows = await picks.locator("table").first().locator("tbody tr").allInnerTexts();
+    assert.equal(cardRows.reduce((sum, t) => sum + Number(t.split("\t").slice(-3)[0]), 0), N, cardRows.join(" | "));
+    for (const p of PEOPLE) assert.ok(!cardRows.some((t) => t.includes(p.name)), "카드별 표에는 이름이 없다");
+    assert.equal(await picks.locator("table").count(), 1, "사람별 표는 접혀 있다");
+    await picks.getByRole("button", { name: "사람별 보기" }).click();
+    const who = (await picks.locator("table").nth(1).locator("tbody tr").allInnerTexts()).map((t) => t.replace(/\s+/g, " "));
+    assert.equal(who.length, N);
+    const gana = who.find((t) => t.startsWith("가나"));
+    assert.match(gana, /도전 (사이트 쪽지|실물 전달) /, gana);
+    assert.match(gana, /인증됨/, gana);
+    assert.equal(who.filter((t) => / 쉬움 사이트 쪽지 /.test(t)).length, N - 1, who.join(" | "));
+    await picks.getByRole("button", { name: "2주차", exact: true }).click();
+    await picks.getByText("2주차는 아직 열리지 않았어요.").waitFor();
+    await picks.getByText("아직 고른 카드가 없어요.").waitFor();
+    await picks.getByRole("button", { name: "1주차", exact: true }).click();
+    await picks.getByRole("button", { name: "사람별 가리기" }).click();
+    await shot(admin, "admin-picks");
   }
 
   step("익명 피드: 받는 사람 정보가 없는 별도 문서, 인증 문서·명단 원본은 남이 못 읽음");
@@ -568,6 +603,7 @@ const step = (s) => console.log("▶", s);
     });
     assert.equal(r.status, 200);
     await slot.getByText("이미 인증해서 카드를 바꿀 수 없어요").waitFor();
+    await slot.locator("textarea").fill("자리 근처를 살펴봐 주세요!");
     await slot.getByRole("button", { name: "미션 완료 알리기" }).click();
     await panel(g, "2주차 미션 ✔").waitFor();
   }
@@ -578,8 +614,17 @@ const step = (s) => console.log("▶", s);
     const slot = panel(g, "2주차 미션");
     await require("./helpers.cjs").pickCard(slot, "easy");
     await slot.locator(".chosen").waitFor();
+    // 쉬움은 사이트 쪽지 카드: 표시가 붙고, 쪽지 칸이 비어 있으면 완료를 알릴 수 없다(쪽지가 곧 미션)
+    await slot.locator(".chosen .how-tag.how-site", { hasText: "사이트 쪽지" }).waitFor();
+    await slot.locator(".how-line.how-site").getByText("사이트 쪽지로 하는 카드예요.").waitFor();
+    await slot.getByText("쪽지 (이 글이 미션이에요 · 익명으로 전달)").waitFor();
+    await slot.getByRole("button", { name: "미션 완료 알리기" }).click();
+    await slot.getByText("사이트 쪽지로 하는 카드예요. 쪽지 칸에 카드 내용대로 글을 써 주세요.").waitFor();
+    assert.equal(await panel(g, "2주차 미션 ✔").count(), 0, "빈 쪽지로는 완료되지 않는다");
+    await slot.locator("textarea").fill("이번 주도 힘내세요! 늘 응원하고 있어요.");
     await slot.getByRole("button", { name: "미션 완료 알리기" }).click();
     await panel(g, "2주차 미션 ✔").waitFor();
+    await panel(g, "2주차 미션 ✔").locator(".chosen .how-tag.how-site").waitFor();
   }
 
   step("받은 게 없어요: 받는 사람이 신고 → 마니또 화면에 알림 → 운영자가 '못 받음'으로 확인");
@@ -713,7 +758,7 @@ const step = (s) => console.log("▶", s);
     assert.deepEqual((await slot.locator(".level-pick .card-reward").allInnerTexts()), ["응모권 +1", "응모권 +2", "응모권 +3"]);
     await slot.locator(".level-pick.level-hard").click();
     await slot.locator(".dealt .card:not(:has(.cost-tag))").click();
-    daraHard = (await slot.locator(".chosen span").nth(1).innerText()).trim();
+    daraHard = (await slot.locator(".chosen .chosen-text").innerText()).trim();
     await slot.locator("textarea").fill("올해 늘 웃으며 도와줘서 정말 고마웠어요!");
     await slot.getByRole("button", { name: "칭찬 보내고 미션 완료 알리기" }).click();
     await panel(g, "3주차 공통 미션: 올해의 칭찬 한 줄 ✔").waitFor();
