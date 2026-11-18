@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { collection, doc, getDoc, increment, onSnapshot, query, serverTimestamp, setDoc, where, writeBatch } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp, Loading } from "../App.jsx";
-import { DROP_TIP, DROP_TIP_SHORT, EXTRA_NOTES_MAX, LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT, SCHEDULE, SPEND_GUIDE_WON, scheduleLabel, todayYmd } from "../lib/constants.js";
+import { DROP_TIP, DROP_TIP_SHORT, EXTRA_NOTES_MAX, FIRST_CLUE_DATE, PROFILE_DUE, shortDate, LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT, SCHEDULE, SPEND_GUIDE_WON, scheduleLabel, todayYmd } from "../lib/constants.js";
 import { DEAL_COUNT, dealCards } from "../lib/cards.js";
 import { syncClues } from "../lib/sync.js";
 import { Avatar, Dialogue, Panel } from "../ui.jsx";
@@ -193,7 +193,12 @@ export default function MyMission() {
         <Dialogue speaker="운영진" tone="warn">{targetName}이 아직 받은 미션이 없어요. 이번 주 미션을 먼저 해 주세요!</Dialogue>
       )}
       {!progress.unknown && !progress.profileDone && (
-        <Dialogue speaker="운영진" tone="warn">내 프로필이 비어 있어요. 대상에게 갈 단서가 프로필에서 나오니 <a href="#profile">지금 채워 주세요</a>.</Dialogue>
+        <Dialogue speaker="운영진" tone="warn">
+          내 프로필이 비어 있어요. {PROFILE_DUE && todayYmd() <= PROFILE_DUE
+            ? <><b>{shortDate(PROFILE_DUE)}까지</b> 6문항을 채워 주세요. {shortDate(FIRST_CLUE_DATE)}에 첫 단서가 공개되는데, 단서는 프로필 답에서 나가요. </>
+            : "대상에게 갈 단서가 프로필에서 나와요. "}
+          프로필을 다 채워야 은신 응모권도 받을 수 있어요. <a href="#profile">지금 채우기</a>
+        </Dialogue>
       )}
 
       {[1, 2, 3].map((slot) => (

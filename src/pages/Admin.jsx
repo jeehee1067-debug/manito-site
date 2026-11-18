@@ -12,7 +12,7 @@ import { computeTickets, missionLikes, noticedWeeks, partStandings, rankReviews,
 import { angelQueue, angelQueueStatus, matchAngels, needyReceivers } from "../lib/angels.js";
 import { PRIZES, TICKET_RULES as R } from "../config/prizes.js";
 import { parseRosterLine, rosterSummary, sameSummary } from "../lib/roster.js";
-import InviteMail from "./InviteMail.jsx";
+import InviteMail, { ProfileMail } from "./InviteMail.jsx";
 
 // Firestore 배치는 500건 제한이라 나눠서 커밋한다.
 async function commitInChunks(ops) {
@@ -239,8 +239,7 @@ export default function Admin() {
         <div className="phase-bar">
           {PHASES.map((p, i) => <span key={p} className={i === phase ? "on" : i < phase ? "past" : ""}>{p}</span>)}
         </div>
-        {phase < PHASE.REVEAL && <button className="pk-btn red" onClick={advance}>다음 단계로: {PHASES[phase + 1]}</button>}
-        {stepMsg && <p className="error" role="alert">{stepMsg}</p>}
+        {phase < PHASE.REVEAL && <p className="small muted">지금은 <b>{PHASES[phase]}</b> 단계예요. 다음 단계로 넘기는 버튼은 실수로 누르지 않게 이 화면 맨 아래에 있어요.</p>}
       </Panel>
 
       <Notice />
@@ -257,6 +256,14 @@ export default function Admin() {
       {phase >= PHASE.RUNNING && <Accounts />}
       {phase >= PHASE.RUNNING && <WriteCounts />}
       <CoAdmins />
+      {/* 단계 넘기기는 되돌릴 수 없어서 맨 아래에 둔다(사용자가 정함: "실수로 안 누르게") */}
+      {phase < PHASE.REVEAL && (
+        <Panel title="다음 단계로 넘기기">
+          <p className="small">지금 <b>{PHASES[phase]}</b> → 다음 <b>{PHASES[phase + 1]}</b>. 넘기면 되돌릴 수 없어요. 누르면 무엇이 바뀌는지 확인창이 한 번 더 나와요.</p>
+          <button className="pk-btn red" onClick={advance}>다음 단계로: {PHASES[phase + 1]}</button>
+          {stepMsg && <p className="error" role="alert">{stepMsg}</p>}
+        </Panel>
+      )}
       {phase === PHASE.REVEAL && <Panel title="공개"><p><a href="#reveal">결과 탭</a>에서 "발표 화면 열기"로 발표하고 추첨을 진행하세요. 참여자 결과 탭은 발표 화면에서 넘긴 장면까지만 열려요.</p></Panel>}
     </>
   );
@@ -1010,6 +1017,7 @@ function Running() {
 
       {/* 미션 시작 뒤에도 가입할 수 있다: 아직 가입 안 한 사람이 있으면 안내 메일을 다시 보낼 수 있게 */}
       {roster.some((r) => !r.uid) && <InviteMail roster={roster} />}
+      {roster.some((r) => !progress[r.pid]?.profileDone) && <ProfileMail roster={roster} progress={progress} />}
     </>
   );
 }

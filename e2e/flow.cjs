@@ -801,7 +801,7 @@ const step = (s) => console.log("▶", s);
   }
   // 집계 없이 공개 단계로 넘어갈 수 없다
   await admin.getByRole("button", { name: "다음 단계로: 공개" }).click();
-  await panel(admin, "운영 단계").getByText("아직 집계하지 않았어요.").waitFor();
+  await panel(admin, "다음 단계로 넘기기").getByText("아직 집계하지 않았어요.").waitFor();
   await admin.locator(".hud-chip", { hasText: "집계" }).waitFor();
   {
     const direct = await fetch(`${FS}/v1/projects/${PROJECT}/databases/(default)/documents/config/app?updateMask.fieldPaths=phase`, {

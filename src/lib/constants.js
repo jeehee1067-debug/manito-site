@@ -72,6 +72,14 @@ export function shortDate(date) {
 export function scheduleLabel({ date, text }) {
   return `${shortDate(date)} ${text}`;
 }
+// 프로필 작성 기한: 첫 단서 공개 전날(사용자가 정함: "이번 주 목요일까지 작성해 달라"). 단서는 프로필 답에서 나간다.
+const dayBefore = (date) => {
+  const d = new Date(`${date}T00:00:00`);
+  d.setDate(d.getDate() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+export const FIRST_CLUE_DATE = SCHEDULE.find((e) => e.text.startsWith("단서"))?.date || null;
+export const PROFILE_DUE = FIRST_CLUE_DATE ? dayBefore(FIRST_CLUE_DATE) : null;
 // 단서 공개 날짜 3개(1·2번, 3·4번, 5·6번). 일정에서 "단서"로 시작하는 날을 순서대로 쓴다.
 export const CLUE_DATES = SCHEDULE.filter((e) => e.text.startsWith("단서")).map((e) => shortDate(e.date));
 export const clueScheduleText = () => (CLUE_DATES.length >= 3

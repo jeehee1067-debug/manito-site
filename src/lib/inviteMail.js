@@ -44,6 +44,33 @@ export function inviteMessage({ url, senderHost }) {
   return { subject, body };
 }
 
+// 프로필 작성 안내 메일(운영 화면 "프로필 작성 안내 메일"): 가입은 했는데 프로필 6문항을 저장하지 않은 사람에게.
+// people: [{ pid, email, uid }], progress: { pid: { profileDone } }. includeUnjoined면 아직 가입 안 한 사람도 넣는다(가입하고 채워 달라고).
+export function profileRecipients(roster, progress = {}, { includeUnjoined = false } = {}) {
+  const todo = roster.filter((r) => (r.uid ? !progress[r.pid]?.profileDone : includeUnjoined));
+  const emails = [...new Set(todo.map((r) => r.email).filter(Boolean))].sort();
+  return { emails, noEmail: todo.filter((r) => !r.email).map((r) => r.name), names: todo.map((r) => r.name) };
+}
+// due·clueDay: "11/19(목)" 같은 표시용 날짜
+export function profileMessage({ url, due, clueDay }) {
+  const subject = `[S1FA 마니또] 프로필 6문항을 ${due}까지 작성해 주세요`;
+  const body = [
+    "안녕하세요! 마니또 프로필을 아직 저장하지 않으셔서 안내드려요.",
+    "",
+    `▶ ${due}까지 사이트의 "내 프로필"에서 6문항을 채우고 "저장"을 눌러 주세요. 1~2분이면 끝나요.`,
+    `▶ 사이트: ${url}`,
+    "",
+    "[왜 필요한가요]",
+    `- ${clueDay}에 첫 단서 2개가 공개돼요. 단서는 내 프로필 답에서 나가서, 비어 있으면 내 대상이 단서를 받지 못해요.`,
+    "- 프로필 6칸을 모두 채워야 끝까지 안 들켰을 때 은신 응모권(+2장)을 받을 수 있어요.",
+    "- \"내 마니또에게 알려 줄 것\"(좋아하는 간식, 못 먹는 음식)도 같이 적어 주시면 마니또가 미션을 준비하기 좋아요.",
+    "",
+    "아직 가입 전이라면 같은 주소에서 \"처음 가입\"으로 먼저 가입해 주세요.",
+    "문의: 운영진",
+  ].join("\n");
+  return { subject, body };
+}
+
 // 메일 앱으로 여는 주소. 받는 사람(나)에게 보내고 참여자는 숨은 참조(BCC)로 넣는다(서로의 주소가 안 보이고 전체 답장이 안 가게).
 // 순서: bcc → subject → body. 메일 앱이 긴 주소를 자르면 뒤쪽(본문)부터 잘려서 받는 사람이 빠지는 일을 줄인다.
 // 줄바꿈은 RFC 6068대로 %0D%0A.

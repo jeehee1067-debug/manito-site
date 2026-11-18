@@ -1138,3 +1138,23 @@ test("배정 미리 보기: 저장 없이 여러 번 돌려 조건 확인(같은
   assert.deepEqual(typo.similar, [["EFA1", "efa 1"]]);
   assert.equal(typo.blank, 0);
 });
+
+test("프로필 작성 안내: 기한은 첫 단서 공개 전날, 받는 사람은 가입했는데 프로필을 저장하지 않은 사람", async () => {
+  const { profileRecipients, profileMessage } = await import("../src/lib/inviteMail.js");
+  const { PROFILE_DUE, FIRST_CLUE_DATE, shortDate } = await import("../src/lib/constants.js");
+  assert.equal(FIRST_CLUE_DATE, "2026-11-20");
+  assert.equal(PROFILE_DUE, "2026-11-19");
+  assert.equal(shortDate(PROFILE_DUE), "11/19(목)");
+  const roster = [
+    { pid: "p1", name: "가", email: "a@samsung.com", uid: "u1" }, // 가입, 프로필 저장함
+    { pid: "p2", name: "나", email: "b@samsung.com", uid: "u2" }, // 가입, 프로필 없음
+    { pid: "p3", name: "다", email: "c@samsung.com", uid: null }, // 가입 안 함
+    { pid: "p4", name: "라", email: null, uid: "u4" },            // 가입, 프로필 없음, 아이디 없음
+  ];
+  const progress = { p1: { profileDone: true }, p2: { doneCount: 1 } };
+  assert.deepEqual(profileRecipients(roster, progress), { emails: ["b@samsung.com"], noEmail: ["라"], names: ["나", "라"] });
+  assert.deepEqual(profileRecipients(roster, progress, { includeUnjoined: true }).emails, ["b@samsung.com", "c@samsung.com"]);
+  const { subject, body } = profileMessage({ url: "https://example.web.app/", due: shortDate(PROFILE_DUE), clueDay: shortDate(FIRST_CLUE_DATE) });
+  assert.ok(subject.includes("11/19(목)까지"));
+  assert.ok(body.includes("https://example.web.app/") && body.includes("11/20(금)에 첫 단서") && body.includes("은신 응모권"));
+});
