@@ -9,7 +9,7 @@ import { seededRandom } from "../src/lib/random.js";
 import { parseRosterLine, rosterSummary, summaryToList, sameSummary } from "../src/lib/roster.js";
 import { PRIZES, TICKET_RULES } from "../src/config/prizes.js";
 import { DEAL_COUNT, dealCards } from "../src/lib/cards.js";
-import { MISSION_CARDS, PROFILE_QUESTIONS, CLUE_COUNT, EXTRA_NOTES_MAX, CLUE_DATES, SCHEDULE, profileAnswerError } from "../src/lib/constants.js";
+import { MISSION_CARDS, PROFILE_QUESTIONS, CLUE_COUNT, EXTRA_NOTES_MAX, CLUE_DATES, SCHEDULE, daysBetween, profileAnswerError } from "../src/lib/constants.js";
 import { pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../src/lib/pairs.js";
 
 // 참여자 54명(부서 56명 중 운영자·PL님 제외). 파트 크기를 주면 { pid, part } 목록을 만든다.
@@ -1059,6 +1059,16 @@ test("일정: 단서 공개 날이 단서 수 ÷ 2번(주차마다 2개)이고 �
   assert.ok(CLUE_DATES.every((d) => d.endsWith("(금)")), CLUE_DATES.join(", "));
   const dates = SCHEDULE.map((e) => e.date);
   assert.deepEqual(dates, [...dates].sort(), "일정은 날짜 순서대로");
+});
+
+test("일정 타임라인: 일정마다 꼬리표 종류(kind)가 있고, 단서 일정은 clue, 날 수 계산이 맞다", () => {
+  const kinds = ["join", "week", "clue", "close", "party"];
+  for (const e of SCHEDULE) assert.ok(kinds.includes(e.kind), `${e.date} kind=${e.kind}`);
+  assert.equal(new Set(SCHEDULE.map((e) => e.date)).size, SCHEDULE.length, "같은 날짜가 두 번 없다(타임라인의 key)");
+  for (const e of SCHEDULE) assert.equal(e.kind === "clue", e.text.startsWith("단서"), e.text);
+  assert.equal(daysBetween("2026-11-18", "2026-11-20"), 2);
+  assert.equal(daysBetween("2026-11-27", "2026-12-01"), 4);
+  assert.equal(daysBetween("2026-12-09", "2026-12-09"), 0);
 });
 
 test("수호천사: 확인된 미션 1건마다 +1(최대 2), 받는 사람은 인증 입력으로 치되 보상과 합쳐 3장까지", () => {

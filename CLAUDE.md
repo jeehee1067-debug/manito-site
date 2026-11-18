@@ -92,6 +92,8 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 - **실물 미션 꿀팁**(사용자가 정함, `constants.js` `DROP_TIP`·`DROP_TIP_SHORT`): "서로 먼 사무실이면 분석실 신발장에 두고 쪽지로 위치를 알려 주기". 난이도 고르기·카드 두 장 화면에 작은 한 줄, 실물 카드를 고른 뒤 노란 말풍선, 규칙 탭 "미션 카드 난이도". 쪽지 칸 예시도 신발장(남의 서랍을 여는 예시는 쓰지 않는다).
 - **인증을 안 해 주는 대상**: 마니또 화면의 "인증을 기다리는 중"에 "지난 주차도 최종 지목 마감 전까지 늦게 인증할 수 있고, 며칠이 지나도 그대로면 운영진에게 알려 달라"를 적어 둔다(규칙 탭도). 운영진은 대상에게 직접 알리거나 "집계 전 확인"에서 "받았음"으로 인정한다(사이트 안 요청 기능은 만들지 않았다).
 - **프로필 작성 안내**(사용자가 정함: "이번 주 목요일까지 작성해 달라"): 기한은 첫 단서 공개 전날(`constants.js` `PROFILE_DUE`, 11/19). 프로필을 저장하지 않은 참여자의 내 미션 화면에 기한 경고가 뜨고, 운영 화면(미션 진행 단계) "프로필 작성 안내 메일"(`InviteMail.jsx` `ProfileMail`, `inviteMail.js` `profileRecipients`·`profileMessage`)로 가입했는데 안 채운 사람에게 운영자의 회사 메일에서 안내를 보낸다(가입 안내 메일과 같은 작성기 `MailComposer`).
+- **인증을 마친 표시**(사용자가 정함: "인증하고 나서도 인증하기 창이 떠 있어 잘 한 건지 궁금해하는 사람들이 있다"): 추리 탭 "인증하기"(`Detective.jsx` `CodeEntry`)는 내 인증(`redemptions` `where receiverPid ==`)을 읽어 열린 주차마다 "N주차 ✔ 인증 완료 / 인증 전"을 보인다. 열린 주차를 모두 인증했으면 제목이 "인증하기 ✔"가 되고 코드 입력 칸을 접는다("코드 입력 칸 열기"로 다시 열 수 있다 — 수호천사 미션 코드 등).
+- **일정 타임라인**(사용자가 정함: "일정을 한눈에 볼 수 있게 규칙 탭 맨 위에"): 규칙 탭 첫 패널 "일정 한눈에"(`Rules.jsx` `Timeline`). `SCHEDULE`의 `kind`(join·week·clue·close·party)로 꼬리표·색을 정하고, 이 기기의 오늘 날짜로 지난 일정(흐리게 ✔)·오늘·다음(D-n)을 표시한다(운영 단계와는 무관). **일정을 더하거나 바꾸면 `kind`도 넣는다**(`npm test`가 확인).
 - **"다음 단계로" 버튼은 운영 화면 맨 아래**(사용자가 정함: "실수로 안 누르게"). 맨 위 "운영 단계"에는 지금 단계만 보인다.
 - 화면 가리기: 내 미션의 대상 이름·캐릭터는 기본으로 가리고 60초 보기, 운영 화면 짝 현황은 접힘, 초대 코드·메일은 "보기"를 눌러야 보임.
 - App Check는 `src/firebase.config.js`의 `appCheckSiteKey`가 있을 때만 켜진다(에뮬레이터 제외). 제공자는 `appCheckProvider`(기본 `"enterprise"` = reCAPTCHA Enterprise, `"v3"`도 가능). 사내망에서 reCAPTCHA가 열리는지 확인하기 전에는 콘솔에서 적용(enforce)을 켜지 말 것(README "App Check").
@@ -168,7 +170,7 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 | `src/lib/reveal.js` | 송년회 발표 장면 순서(`buildSlides`: 원을 따라 잇는 짝 공개 `pairChain`, 시상은 숫자 정하기 `drawGo` → 2등 → 3등 → 4·5등 → 1등(종이 `paper`) → `refill` → 6등(`online`)), 참여자에게 열린 장면(`revealedUpTo`) |
 | `src/pages/Reveal.jsx` | 결과 탭(참여자는 넘긴 장면까지만), 발표 화면(`Presenter`), 시상(숫자 `SeedForm`, 종이로 뽑힌 이름 입력 `PaperForm`, 겹친 자리 `RefillSlide`, 6등 `OnlineSlide`. 모두 트랜잭션), 1~6등 목록(발표된 것만). 사람이 많은 장면은 한 장에 들어가게 줄인다(명탐정 `crowdSize`: 33명부터 이름만, 수호천사 9쌍부터 한 줄씩, 칭찬 벽 `PraiseWall`은 실제 높이를 재서 마지막 카드까지 흘러감) |
 | `src/lib/roster.js` | 참여자 화면용 명단 요약(`public/roster`, 이름·근무지·파트). 운영 화면(`Admin.jsx`)이 명단과 다르면 다시 씀. 명단 입력 한 줄 읽기(`parseRosterLine`: 이름, 파트, 아이디 → 메일) |
-| `src/pages/Rules.jsx` | 참여자용 규칙 안내(숫자는 `prizes.js`·`constants.js`에서) |
+| `src/pages/Rules.jsx` | 참여자용 규칙 안내(숫자는 `prizes.js`·`constants.js`에서). 맨 위에 일정 타임라인(`Timeline`) |
 | `src/pages/PartBoard.jsx` | 파트 순위 탭(운영자가 발표한 `public/board`만 읽음) |
 | `src/pages/InviteMail.jsx`, `src/lib/inviteMail.js` | 운영 화면 "가입 안내 메일": 받는 사람(`inviteRecipients`)·본문(`inviteMessage`)·가입 링크(`joinUrl`, `?join`)·메일 앱 주소(`mailtoHref`) |
 | `src/pages/Claim.jsx` | "연결 전" 화면: 회사 메일 인증 확인(`claimWithMail`, 창으로 돌아오면 스스로 확인), 초대 코드 연결(예비), 공동 운영자로 지정받을 계정의 계정 번호 |
