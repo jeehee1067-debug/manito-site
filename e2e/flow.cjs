@@ -357,16 +357,28 @@ const step = (s) => console.log("▶", s);
     if (p.name === "가나") {
       // 아직 열리지 않은 주차(2주차)의 코드는 인증되지 않는다
       const code2 = fields(await readDoc("giverCodes/" + pidOf[giverOf[p.name]])).codes["2"];
-      await entry.getByPlaceholder("K7Q2").fill(code2);
+      await entry.getByPlaceholder("쪽지에 적힌 4자리").fill(code2);
       await entry.locator("textarea").fill("아직 열리지 않은 주차의 코드를 미리 넣어 보는 중이에요.");
       await entry.getByRole("button", { name: "인증하기" }).click();
       await page.getByText("2주차 코드예요. 2주차가 열리면 인증할 수 있어요.").waitFor();
       console.log("  1주차에 2주차 코드를 넣으면: 2주차 코드예요. 2주차가 열리면 인증할 수 있어요.");
     }
+    if (p.name === "마바") {
+      // 코드 칸의 안내 글자는 코드처럼 보이지 않는다. 예전 예시 글자(K7Q2)를 따라 쓰면 예시였다고 알려 준다
+      const ph = await entry.locator("input.code-input").getAttribute("placeholder");
+      assert.ok(!/^[0-9A-Z]{4}$/.test(ph), `안내 글자가 코드처럼 보임: ${ph}`);
+      await entry.getByPlaceholder("쪽지에 적힌 4자리").fill("K7Q2");
+      await entry.getByText("K7Q2는 입력 칸에 회색으로 보이던 예시 글자예요").first().waitFor();
+      await entry.locator("textarea").fill("입력 칸의 예시 글자를 그대로 따라 써 보는 중이에요.");
+      await entry.getByRole("button", { name: "인증하기" }).click();
+      await page.waitForTimeout(600);
+      assert.equal(await page.getByText("인증했어요. 응모권 1장이 쌓였어요.").count(), 0, "예시 글자로는 인증되지 않는다");
+      console.log("  마바: 예전 예시 글자 K7Q2를 넣으면 '예시 글자예요'라고 알려 줌");
+    }
     if (p.name === "다라") {
       // 내 미션 탭의 코드(내가 마니또로서 내 대상에게 주는 코드)를 넣으면 "나에게 온 코드가 아니에요" 대신 그 사실을 알려 준다
       const own = fields(await readDoc("giverCodes/" + pidOf[p.name])).codes["1"];
-      await entry.getByPlaceholder("K7Q2").fill(own);
+      await entry.getByPlaceholder("쪽지에 적힌 4자리").fill(own);
       await entry.getByText("이 코드는 내가 마니또로서 내 대상에게 주는 코드예요").first().waitFor();
       await entry.locator("textarea").fill("내 미션 탭의 코드를 잘못 넣어 보는 중이에요. 이건 내 코드예요.");
       await entry.getByRole("button", { name: "인증하기" }).click();
@@ -378,7 +390,7 @@ const step = (s) => console.log("▶", s);
       assert.equal(await entry.getByText("이 코드는 내가 마니또로서 내 대상에게 주는 코드예요").count(), 0, "맞는 코드가 들어가면 경고가 사라진다");
       console.log("  다라: 내 미션 탭의 코드를 넣으면 '내가 내 대상에게 주는 코드'라고 알려 줌, '이 코드로 인증하기'로 맞는 코드가 들어감");
     }
-    await entry.getByPlaceholder("K7Q2").fill(code.toLowerCase());
+    await entry.getByPlaceholder("쪽지에 적힌 4자리").fill(code.toLowerCase());
     await entry.locator("textarea").fill(`${giverOf[p.name]}님 덕분에 오늘 하루가 즐거웠어요. 정말 고마워요!`);
     await entry.getByRole("button", { name: "인증하기" }).click();
     await page.getByText("인증했어요. 응모권 1장이 쌓였어요.").waitFor();
@@ -386,7 +398,7 @@ const step = (s) => console.log("▶", s);
     const done = panel(page, "인증하기 ✔");
     await done.getByText("✔ 인증을 마쳤어요.").waitFor();
     await done.locator(".redeem-status li.done", { hasText: "1주차 ✔ 인증 완료" }).waitFor();
-    assert.equal(await done.getByPlaceholder("K7Q2").count(), 0, "다 인증하면 코드 입력 칸이 없다");
+    assert.equal(await done.getByPlaceholder("쪽지에 적힌 4자리").count(), 0, "다 인증하면 코드 입력 칸이 없다");
     assert.equal(await done.getByRole("button", { name: "코드 입력 칸 열기" }).count(), 1);
     await tab(page, "내 미션");
     await page.locator(".target-name").waitFor();
@@ -813,7 +825,7 @@ const step = (s) => console.log("▶", s);
     await inbox.getByText(`마니또가 고른 카드: 도전 · ${daraHard}`).waitFor();
     const code = await inbox.locator(".dialogue.gold strong.mono").innerText();
     const entry = panel(r, "인증하기");
-    await entry.getByPlaceholder("K7Q2").fill(code);
+    await entry.getByPlaceholder("쪽지에 적힌 4자리").fill(code);
     await entry.locator(".card-check").getByText(daraHard).waitFor(); // 3주차도 고른 카드를 보고 확인한다
     assert.ok(await entry.getByRole("checkbox", { name: /받은 것이 이 카드 내용과 같아요/ }).isChecked());
     await entry.locator("textarea").fill("칭찬 카드 받고 눈물 날 뻔했어요. 고마워요!");

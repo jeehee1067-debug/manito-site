@@ -21,6 +21,11 @@ const howHint = (card) => (cardHow(card) === "site"
   : "카드예요: 실물이 따로 있어요. 쪽지에 적힌 곳이나 자리 주변을 살펴보세요.");
 
 // 받는 쪽이 자기 미션 탭의 코드(내가 마니또로서 내 대상에게 주는 코드)를 넣었을 때
+// 코드 칸의 안내 글자. 예전에는 "K7Q2"라는 예시 코드가 진짜 코드와 같은 크기로 보여서, 그것을 따라 써 넣고 "코드가 틀렸다"는 문의가 있었다(11/18).
+// 코드처럼 보이는 예시를 쓰지 않는다.
+const CODE_PLACEHOLDER = "쪽지에 적힌 4자리";
+const OLD_EXAMPLE = "K7Q2";
+const EXAMPLE_MSG = "K7Q2는 입력 칸에 회색으로 보이던 예시 글자예요(진짜 코드가 아니에요). 위 \"마니또에게서 온 것\"의 쪽지에 적힌 코드를 넣어 주세요. \"이 코드로 인증하기\"를 누르면 자동으로 들어가요.";
 const OWN_CODE_MSG = "이 코드는 내가 마니또로서 내 대상에게 주는 코드예요(\"내 미션\" 탭에 보이는 코드). 여기에는 내 마니또가 보낸 쪽지(위 \"마니또에게서 온 것\")에 적힌 코드를 넣어 주세요.";
 
 const CARD_BONUS = TICKET_RULES.cardBonus; // 카드 추가 응모권(보통·도전만)
@@ -329,6 +334,7 @@ function CodeEntry({ myPid, items, prefill }) {
     try {
       const codeSnap = await getDoc(doc(db, "codes", c)).catch(() => null);
       if (!codeSnap || !codeSnap.exists()) {
+        if (c === OLD_EXAMPLE) throw new Error(EXAMPLE_MSG);
         throw new Error(await isOwnCode(c) ? OWN_CODE_MSG
           : "이 코드는 나에게 온 마니또 코드가 아니에요. 위 \"마니또에게서 온 것\"에 적힌 코드를 그대로 넣어 주세요(\"이 코드로 인증하기\"를 누르면 자동으로 들어가요). 코드에는 0·1·O·I가 없어요.");
       }
@@ -384,10 +390,11 @@ function CodeEntry({ myPid, items, prefill }) {
       {(!allDone || showForm) && <form className="stack" id="code-entry-form" onSubmit={submit}>
         <label>
           <span className="panel-label">인증 코드</span>
-          <input className="pk-input code-input" value={code} maxLength={6} onChange={(e) => setCode(e.target.value)} placeholder="K7Q2" disabled={!running} autoComplete="off" />
+          <input className="pk-input code-input" value={code} maxLength={6} onChange={(e) => setCode(e.target.value)} placeholder={CODE_PLACEHOLDER} disabled={!running} autoComplete="off" />
         </label>
         {own && <p className="error" role="alert">{OWN_CODE_MSG}</p>}
-        {!own && <p className="small muted">내 마니또가 보낸 쪽지("마니또에게서 온 것")에 적힌 코드예요. "내 미션" 탭의 코드는 내가 내 대상에게 주는 코드라 여기에 넣지 않아요.</p>}
+        {!own && typed === OLD_EXAMPLE && slotOf === null && <p className="error" role="alert">{EXAMPLE_MSG}</p>}
+        {!own && typed !== OLD_EXAMPLE && <p className="small muted">내 마니또가 보낸 쪽지("마니또에게서 온 것")에 적힌 코드예요. "내 미션" 탭의 코드는 내가 내 대상에게 주는 코드라 여기에 넣지 않아요.</p>}
         <label className="with-counter">
           <span className="panel-label">후기 ({REVIEW_MIN}자 이상, 익명 피드에 올라가요)</span>
           <textarea className="pk-input" rows={3} maxLength={500} value={review} onChange={(e) => setReview(e.target.value)} disabled={!running}

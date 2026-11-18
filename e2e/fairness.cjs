@@ -94,7 +94,7 @@ const val = (v) => v.stringValue ?? (v.integerValue !== undefined ? Number(v.int
     const inbox = panel(page, "마니또에게서 온 것");
     await inbox.locator("strong.mono").first().waitFor();
     const entry = panel(page, "인증하기");
-    await entry.getByPlaceholder("K7Q2").fill(await inbox.locator("strong.mono").first().innerText());
+    await entry.getByPlaceholder("쪽지에 적힌 4자리").fill(await inbox.locator("strong.mono").first().innerText());
     await entry.locator("textarea").fill("잘 받았어요. 덕분에 기분 좋은 하루였어요. 고마워요!");
     await entry.getByRole("button", { name: "인증하기" }).click();
     await page.getByText("인증했어요. 응모권 1장이 쌓였어요.").waitFor();
