@@ -1,6 +1,6 @@
 // 운영 화면 "짝 현황" 표와 "받은 게 없어요 확인" 표에 쓰는 계산.
 // 운영자는 참여하지 않는 계정이라 짝·진행·지목을 언제든 읽는다(보안 규칙).
-import { MISSION_SLOTS } from "./constants.js";
+import { MISSION_SLOTS, cardHow } from "./constants.js";
 
 // 주차 상태
 //  none      아직 카드를 안 고름
@@ -51,7 +51,7 @@ export function pairRows({ assignments = {}, giverCodes = {}, missions = {}, red
       if (red && !red.voided) status = "redeemed";
       else if (red) status = verdict === "received" ? "confirmed" : "voided"; // 무효 처리된 인증: "받았음"으로 확인하면 마니또의 미션은 인정
       else if (done) status = verdict === "received" ? "confirmed" : verdict === "missing" ? "missing" : reported ? "reported" : autoPraise.has(key) ? "auto" : "sent";
-      slots[slot] = { status, level: choice?.level || null, text: choice?.text || "", done, notes: m.notes?.[slot] || 0, code, reported, verdict, voided: Boolean(red?.voided) };
+      slots[slot] = { status, level: choice?.level || null, cardId: choice?.cardId || null, text: choice?.text || "", done, notes: m.notes?.[slot] || 0, code, reported, verdict, voided: Boolean(red?.voided) };
     }
     const guessPid = guesses[receiverPid]?.guessPid || null;
     return { giverPid, receiverPid, slots, guessPid, correct: guessPid === giverPid };
@@ -133,4 +133,41 @@ export function cluesDoneSet(assignments, clues, ver = 0) {
   return new Set(Object.entries(assignments || {})
     .filter(([, a]) => clueAnswers(clues, a.receiverPid, ver).every(Boolean))
     .map(([giverPid]) => giverPid));
+}
+
+/**
+ * 운영 화면 "고른 미션 카드": 한 주차에 누가 어떤 카드를 골랐는지와 카드별 인원.
+ * rows: pairRows의 결과. how: "site"(사이트 쪽지) / "real"(실물 전달) / null(칭찬만·안 고름).
+ * 반환: { people: [{ giverPid, receiverPid, level, cardId, text, how, status, notes }],
+ *         cards: [{ key, level, text, how, picked, done, redeemed }] 고른 사람이 많은 순,
+ *         counts: { easy, normal, hard, praise, none, site, real, done, redeemed } }
+ *   done = 완료를 알린 것(인증 대기·신고·확인·자동 인정·인증됨·무효 포함), redeemed = 대상이 인증한 것.
+ */
+export function cardPicks(rows, slot) {
+  const counts = { easy: 0, normal: 0, hard: 0, praise: 0, none: 0, site: 0, real: 0, done: 0, redeemed: 0 };
+  const byCard = new Map();
+  const people = rows.map((r) => {
+    const x = r.slots[slot] || { status: "none" };
+    const picked = Boolean(x.level);
+    const how = picked ? cardHow({ cardId: x.cardId, text: x.text }) : null;
+    const done = picked && x.status !== "chosen" && x.status !== "none";
+    const redeemed = x.status === "redeemed";
+    if (!picked) counts.none++;
+    else if (counts[x.level] !== undefined) counts[x.level]++;
+    if (how) counts[how]++;
+    if (done) counts.done++;
+    if (redeemed) counts.redeemed++;
+    if (picked) {
+      const key = x.cardId || x.text;
+      const c = byCard.get(key) || { key, level: x.level, text: x.text, how, picked: 0, done: 0, redeemed: 0 };
+      c.picked++;
+      if (done) c.done++;
+      if (redeemed) c.redeemed++;
+      byCard.set(key, c);
+    }
+    return { giverPid: r.giverPid, receiverPid: r.receiverPid, level: x.level || null, cardId: x.cardId || null, text: x.text || "", how, status: x.status, notes: x.notes || 0 };
+  });
+  const order = { easy: 0, normal: 1, hard: 2, praise: 3 };
+  const cards = [...byCard.values()].sort((a, b) => b.picked - a.picked || (order[a.level] ?? 9) - (order[b.level] ?? 9) || a.text.localeCompare(b.text, "ko"));
+  return { people, cards, counts };
 }

@@ -4,9 +4,9 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp } from "../App.jsx";
-import { Panel } from "../ui.jsx";
-import { PHASE, PHASES, CLUE_COUNT, LEVEL_LABEL, MAIL_DOMAIN, PART_HINT_IDX, PRAISE_SLOT, RULES_VERSION } from "../lib/constants.js";
-import { SLOT_STATUS_LABEL, assignmentHealth, clueAnswers, cluesDoneSet, pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../lib/pairs.js";
+import { HowTag, Panel } from "../ui.jsx";
+import { PHASE, PHASES, CARD_HOW, CLUE_COUNT, LEVEL_LABEL, MAIL_DOMAIN, PART_HINT_IDX, PRAISE_SLOT, RULES_VERSION } from "../lib/constants.js";
+import { SLOT_STATUS_LABEL, assignmentHealth, cardPicks, clueAnswers, cluesDoneSet, pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../lib/pairs.js";
 import { assignManito, assignmentMemo, generateCodes, makeInviteCode, previewAssignments } from "../lib/assign.js";
 import { computeTickets, missionLikes, noticedWeeks, partStandings, rankReviews, reviewLikes, weeklyPartBoard } from "../lib/scoring.js";
 import { angelQueue, angelQueueStatus, matchAngels, needyReceivers } from "../lib/angels.js";
@@ -251,6 +251,7 @@ export default function Admin() {
       {phase >= PHASE.RUNNING && phase <= PHASE.CLOSED && <Unresolved />}
       {phase >= PHASE.RUNNING && <Angels />}
       <Pairs />
+      {phase >= PHASE.RUNNING && <CardPicks />}
       {phase >= PHASE.RUNNING && phase <= PHASE.SCORING && <Moderation />}
       {phase === PHASE.SCORING && <Scoring />}
       {phase >= PHASE.RUNNING && <Accounts />}
@@ -1626,6 +1627,79 @@ function Pairs() {
           </tbody>
         </table>
       </div>}
+    </Panel>
+  );
+}
+
+// 고른 미션 카드(사용자가 정함: "실제 어떤 카드를 각자 뽑아서 하고 있는지 내가 보게"). 짝 현황과 같은 자료(usePairs)를 쓴다.
+// 카드별 인원(이름 없음)은 바로 보이고, 누가 어떤 카드를 골랐는지는 "사람별 보기"를 눌러야 보인다(사무실에서 화면이 보일 수 있어서).
+function CardPicks() {
+  const { config, nameOf, byPid } = useApp();
+  const { ready, rows } = usePairs();
+  const [slot, setSlot] = useState(() => Math.min(3, Math.max(1, config.week || 1)));
+  const [shown, setShown] = useState(false);
+  if (!ready || rows.length === 0) return null;
+
+  const { people, cards, counts } = cardPicks(rows, slot);
+  const picked = rows.length - counts.none;
+  const levelLabel = (lv) => (lv === "praise" ? "칭찬만" : LEVEL_LABEL[lv] || lv);
+  const partOf = (pid) => byPid[pid]?.part || "";
+  const sorted = [...people].sort((a, b) => Number(!a.level) - Number(!b.level)
+    || partOf(a.giverPid).localeCompare(partOf(b.giverPid), "ko") || nameOf(a.giverPid).localeCompare(nameOf(b.giverPid), "ko"));
+  const open = slot <= (config.week || 1);
+
+  return (
+    <Panel title={`고른 미션 카드 (${picked} / ${rows.length}명)`}>
+      <p className="small">주차마다 마니또들이 고른 카드예요. 카드별 인원은 이름 없이 보이고, 누가 골랐는지는 "사람별 보기"를 눌러야 보여요.</p>
+      <div className="chip-row" role="group" aria-label="주차 고르기">
+        {[1, 2, 3].map((s) => (
+          <button key={s} type="button" className={s === slot ? "chip is-on" : "chip"} aria-pressed={s === slot} onClick={() => setSlot(s)}>{s}주차</button>
+        ))}
+      </div>
+      {!open && <p className="small muted">{slot}주차는 아직 열리지 않았어요.</p>}
+      <p className="small pick-counts">
+        {slot === PRAISE_SLOT ? <>칭찬만 <b>{counts.praise}</b> · </> : <>쉬움 <b>{counts.easy}</b> · </>}보통 <b>{counts.normal}</b> · 도전 <b>{counts.hard}</b> · 아직 안 고름 <b>{counts.none}</b>
+        <br />
+        <span className="how-tag how-site">{CARD_HOW.site.label}</span> <b>{counts.site}</b> · <span className="how-tag how-real">{CARD_HOW.real.label}</span> <b>{counts.real}</b>
+        {" "}· 완료 알림 <b>{counts.done}</b> · 인증됨 <b>{counts.redeemed}</b>
+      </p>
+      {cards.length === 0 ? <p className="muted">아직 고른 카드가 없어요.</p> : (
+        <div className="table-wrap">
+          <table className="pk-table pick-table">
+            <thead><tr><th>카드</th><th>고름</th><th>완료</th><th>인증</th></tr></thead>
+            <tbody>
+              {cards.map((c) => (
+                <tr key={c.key}>
+                  <td className="card-cell"><span className="small">{levelLabel(c.level)}</span> <HowTag card={{ cardId: c.key, text: c.text }} /> {c.text}</td>
+                  <td>{c.picked}</td><td>{c.done}</td><td>{c.redeemed}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="reveal-row">
+        <button type="button" className="pk-btn sm" aria-pressed={shown} onClick={() => setShown(!shown)}>{shown ? "사람별 가리기" : "사람별 보기"}</button>
+      </div>
+      {shown && (
+        <div className="table-wrap">
+          <table className="pk-table pair-table pick-table">
+            <thead><tr><th>마니또</th><th>대상</th><th>고른 카드</th><th>상태</th></tr></thead>
+            <tbody>
+              {sorted.map((p) => (
+                <tr key={p.giverPid}>
+                  <td className="left">{nameOf(p.giverPid)}{partOf(p.giverPid) && <span className="small muted"> {partOf(p.giverPid)}</span>}</td>
+                  <td className="left">{nameOf(p.receiverPid)}</td>
+                  <td className="card-cell">
+                    {p.level ? <><span className="small">{levelLabel(p.level)}</span> <HowTag card={p} /> {p.text}</> : <span className="muted">아직 안 고름</span>}
+                  </td>
+                  <td className={`st-${p.status}`}>{p.status === "none" ? "-" : SLOT_STATUS_LABEL[p.status]}{p.notes > 0 && <span className="small"> +쪽지 {p.notes}</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </Panel>
   );
 }

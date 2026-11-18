@@ -159,5 +159,26 @@ export const MISSION_CARDS = {
   ],
 };
 
+// 카드를 하는 방법(사용자가 정함: "실물 쪽지를 실제로 줘야 하는 것과 이 사이트에서 쪽지를 보내면 되는 과제가 헷갈리지 않게").
+// 카드 글에 "쪽지 보내기"라고만 적힌 카드가 많은데, 미션이 시작된 뒤에는 글을 바꿀 수 없어서(cardLevel) 글 대신 표시로 구분한다.
+//   site(사이트 쪽지): 이 사이트의 쪽지 칸에 써서 보내면 끝나는 카드(종이 쪽지 아님). real이 없는 카드 전부.
+//   real(실물 전달): 실물을 직접 두거나 건네는 카드(real: true).
+export const CARD_HOW = {
+  site: { label: "사이트 쪽지", desc: "이 사이트의 쪽지 칸에 써서 보내면 끝이에요 (종이 쪽지를 따로 줄 필요 없어요)" },
+  real: { label: "실물 전달", desc: "실물을 직접 두거나 건네야 해요 (사이트 쪽지만 보내면 카드와 달라요)" },
+};
+const CARD_LIST = Object.entries(MISSION_CARDS).flatMap(([level, cards]) => cards.map((c) => ({ ...c, level })));
+// 번호(cardId·id)나 글로 카드를 찾는다. 완료 알림(deliveries.card)에는 번호가 없어서 글로 찾는다.
+export function findCard(card) {
+  if (!card) return null;
+  const id = card.cardId || card.id;
+  return (id && CARD_LIST.find((c) => c.id === id)) || CARD_LIST.find((c) => c.text === card.text) || null;
+}
+// "site" | "real" | null(목록에 없는 카드: 3주차 "칭찬만" 등)
+export function cardHow(card) {
+  const c = findCard(card);
+  return c ? (c.real ? "real" : "site") : null;
+}
+
 // 캐릭터: 방탈출(office-escape)의 참가자 캐릭터와 같은 그림 (public/char)
 export const AVATARS = ["p1", "p2", "p3", "p4"];

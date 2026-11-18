@@ -330,6 +330,18 @@ ul.plain.redeem-status li { flex: 0 0 auto; width: auto; margin: 0; }
 .rules-table td.num { text-align: center; font-weight: 700; min-width: 5.2em; }
 .rules-list { padding-left: 1.2em; display: grid; gap: 4px; }
 
+/* 카드를 하는 방법 표시: 사이트 쪽지(초록) / 실물 전달(주황). ui.jsx HowTag, constants.js CARD_HOW */
+.how-tag { display: inline-block; font-size: 11px; font-weight: 700; border: 2px solid; border-radius: 6px; padding: 0 6px; white-space: nowrap; line-height: 1.5; vertical-align: baseline; }
+.how-tag.how-site { color: #1d6a39; background: #e7f6ec; border-color: var(--green); }
+.how-tag.how-real { color: #8a3d00; background: #ffe9d6; border-color: #d9772b; }
+.card-how { display: block; margin: 2px 0 4px; }
+.how-guide { margin: 6px 0; line-height: 1.9; word-break: keep-all; }
+.how-line { font-size: 13px; border: 2px solid; border-left-width: 8px; border-radius: 6px; padding: 6px 10px; background: #fff; word-break: keep-all; }
+.how-line.how-site { border-color: var(--green); }
+.how-line.how-real { border-color: #d9772b; }
+.pick-counts { line-height: 2; }
+.pk-table.pick-table td.card-cell { text-align: left; white-space: normal; word-break: keep-all; min-width: 11em; }
+
 /* 역할 낱말: 마니또(챙겨 주는 쪽, 파랑)·대상(받는 쪽, 노랑). ui.jsx Giver·Target·RoleNote, 규칙 탭 "마니또와 대상" */
 .role { display: inline-block; padding: 0 4px; border-radius: 3px; font-weight: 700; line-height: 1.35; white-space: nowrap; }
 .role-giver { background: #d6e6f7; color: var(--blue-dark); box-shadow: inset 0 -2px 0 var(--blue); }

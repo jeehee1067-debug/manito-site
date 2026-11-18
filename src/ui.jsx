@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Icon, iconForTitle } from "./icons.jsx";
-import { AVATARS } from "./lib/constants.js";
+import { AVATARS, CARD_HOW, cardHow } from "./lib/constants.js";
 import { useApp } from "./App.jsx";
 
 const base = import.meta.env.BASE_URL;
@@ -72,4 +72,11 @@ export function RoleNote({ as }) {
       </p>
     </div>
   );
+}
+
+// 카드를 하는 방법 표시: "사이트 쪽지"(쪽지 칸에 써서 보내면 끝) / "실물 전달"(직접 두거나 건네기). 목록에 없는 카드는 표시하지 않는다.
+export function HowTag({ card }) {
+  const how = cardHow(card);
+  if (!how) return null;
+  return <span className={`how-tag how-${how}`}>{CARD_HOW[how].label}</span>;
 }

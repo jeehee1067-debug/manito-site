@@ -4,8 +4,8 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp } from "../App.jsx";
-import { Avatar, Dialogue, Giver, Panel, RoleNote } from "../ui.jsx";
-import { LEVEL_LABEL, PHASE, PRAISE_SLOT, PROFILE_QUESTIONS, REVIEW_MIN, CLUE_COUNT, PART_HINT_IDX, clueScheduleText } from "../lib/constants.js";
+import { Avatar, Dialogue, Giver, HowTag, Panel, RoleNote } from "../ui.jsx";
+import { cardHow, LEVEL_LABEL, PHASE, PRAISE_SLOT, PROFILE_QUESTIONS, REVIEW_MIN, CLUE_COUNT, PART_HINT_IDX, clueScheduleText } from "../lib/constants.js";
 import { normalizeCode } from "../lib/random.js";
 import { bump } from "../lib/writes.js";
 import { TICKET_RULES } from "../config/prizes.js";
@@ -14,6 +14,11 @@ import { TICKET_RULES } from "../config/prizes.js";
 const carriesCard = (it) => (it.kind === "mission" || it.kind === "praise") && it.card;
 // "알아내 맞혀 보기" 카드(constants.js guess)는 맞혔을 때만 "카드와 같다"로 확인한다
 const isGuessCard = (card) => /맞혀 보기|좋아하는 게 아니면/.test(card?.text || "");
+
+// 받는 쪽 안내: 사이트 쪽지 카드면 위 쪽지가 곧 미션이고(실물 없음), 실물 전달 카드면 실물을 찾아야 한다
+const howHint = (card) => (cardHow(card) === "site"
+  ? "카드예요: 사이트로 온 쪽지가 곧 미션이에요. 따로 받을 실물은 없어요."
+  : "카드예요: 실물이 따로 있어요. 쪽지에 적힌 곳이나 자리 주변을 살펴보세요.");
 
 const CARD_BONUS = TICKET_RULES.cardBonus; // 카드 추가 응모권(보통·도전만)
 
@@ -68,8 +73,11 @@ function Inbox({ myPid, items }) {
           <Dialogue key={it.id} speaker={speaker(it)} tone={it.kind === "praise" ? "gold" : ""}>
             {it.hidden
               ? <p className="muted">운영진이 가린 쪽지예요.</p>
-              : <p>{it.message || "마니또가 미션을 했대요. 주변을 살펴보세요!"}</p>}
+              : <p>{it.message || (cardHow(it.card) === "site"
+                ? "마니또가 미션을 했다고 알렸는데 쪽지 내용이 비어 있어요. 종이 쪽지로 줬을 수도 있으니 주변을 살펴보세요."
+                : "마니또가 미션을 했대요. 주변을 살펴보세요!")}</p>}
             {it.card && <p className="small">마니또가 고른 카드: {LEVEL_LABEL[it.card.level] || it.card.level} · {it.card.text}</p>}
+            {it.card && cardHow(it.card) && <p className="small how-hint"><HowTag card={it.card} /> {howHint(it.card)}</p>}
             {it.code && (
               <p className="small">인증 코드 <strong className="mono">{it.code}</strong>{redeemedCodes.has(it.code) ? " (인증 완료)" : ""}</p>
             )}
@@ -337,6 +345,7 @@ function CodeEntry({ myPid, items }) {
         {card && (
           <div className="card-check">
             <p className="small">마니또가 고른 카드: <b>{LEVEL_LABEL[card.level] || card.level}</b> · {card.text}</p>
+            {cardHow(card) && <p className="small how-hint"><HowTag card={card} /> {howHint(card)}</p>}
             <label className="check">
               <input type="checkbox" checked={cardMatch} onChange={(e) => setCardMatch(e.target.checked)} />
               받은 것이 이 카드 내용과 같아요 (다르면 체크를 풀어 주세요. 보통·도전 카드일 때 마니또의 추가 응모권에 영향이 있어요)
@@ -405,7 +414,7 @@ function CardCheck({ code, slot, card }) {
   return (
     <div className="card-check">
       <p className="small">
-        <b>{slot}주차 카드 확인</b> 인증한 뒤에 마니또의 완료 알림이 왔어요. 마니또가 고른 카드: <b>{LEVEL_LABEL[card.level] || card.level}</b> · {card.text}
+        <b>{slot}주차 카드 확인</b> 인증한 뒤에 마니또의 완료 알림이 왔어요. 마니또가 고른 카드: <b>{LEVEL_LABEL[card.level] || card.level}</b> · {card.text} <HowTag card={card} />
       </p>
       <p className="small">받은 것이 이 카드 내용과 같았나요? (같았다고 해야 마니또가 카드 추가 응모권을 받아요. 한 번만 고를 수 있어요){isGuessCard(card) ? " 알아내 맞혀 보기 카드는 맞혔을 때만 \"같았어요\"를 눌러 주세요." : ""}</p>
       <span className="inline">

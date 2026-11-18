@@ -55,7 +55,7 @@ async function tokenOf(email) {
     const g = u["가나"]; await g.reload();
     const slot = H.panel(g, "1주차 미션");
     await H.pickCard(slot, "hard");
-    const hardText = await slot.locator(".chosen span").nth(1).innerText();
+    const hardText = await slot.locator(".chosen .chosen-text").innerText();
     await slot.locator("textarea").fill("가나의 응원 쪽지");
     await slot.getByRole("button", { name: "미션 완료 알리기" }).click();
     await H.panel(g, "1주차 미션 ✔").waitFor();
@@ -63,6 +63,9 @@ async function tokenOf(email) {
     const inbox = H.panel(r, "마니또에게서 온 것"); await inbox.locator("strong.mono").first().waitFor();
     // 받는 사람 화면에 마니또가 고른 카드가 보이고, 인증할 때 받은 것과 맞는지 고를 수 있다
     await inbox.getByText(`마니또가 고른 카드: 도전 · ${hardText}`).waitFor();
+    // 받는 쪽에도 카드를 하는 방법(사이트 쪽지 / 실물 전달)이 보인다
+    await inbox.locator(".how-hint .how-tag").first().waitFor();
+    assert.match(await inbox.locator(".how-hint").first().innerText(), /(사이트 쪽지 카드예요: 사이트로 온 쪽지가 곧 미션이에요|실물 전달 카드예요: 실물이 따로 있어요)/);
     const entry = H.panel(r, "인증하기");
     await entry.getByPlaceholder("K7Q2").fill(await inbox.locator("strong.mono").first().innerText());
     await entry.locator(".card-check").getByText(hardText).waitFor();
@@ -146,7 +149,7 @@ async function tokenOf(email) {
     const g = u["다라"]; await H.tab(g, "추리 보드"); await H.tab(g, "내 미션");
     const slot = H.panel(g, "1주차 미션");
     await H.pickCard(slot, "hard");
-    const hardText = await slot.locator(".chosen span").nth(1).innerText();
+    const hardText = await slot.locator(".chosen .chosen-text").innerText();
     const code = (await slot.locator(".code-tag strong").innerText()).trim(); // 실물과 함께 전한 메모의 코드
     // 받는 사람이 완료 알림보다 먼저 인증한다: 카드가 아직 안 보이므로 확인 칸이 없다
     const r = u[target["다라"]]; await H.tab(r, "피드"); await H.tab(r, "추리 보드");
@@ -169,6 +172,7 @@ async function tokenOf(email) {
     const mod = H.panel(admin, "인증 검토");
     await mod.locator("span.small.muted", { hasText: "· 카드 확인 전" }).waitFor();
     // 마니또가 완료를 알린다 → 받는 사람의 할 일과 '내가 인증한 것'에 카드 확인이 뜬다
+    await slot.locator("textarea").fill("늦었지만 완료를 알려요. 자리 근처를 봐 주세요!");
     await slot.getByRole("button", { name: "미션 완료 알리기" }).click();
     await H.panel(g, "1주차 미션 ✔").waitFor();
     await tk.getByText(/대상이 추리 보드에서 "카드와 같았어요"를 누르면 카드 추가분이 붙어요/).waitFor();
