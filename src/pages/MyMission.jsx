@@ -184,7 +184,7 @@ export default function MyMission({ active = true }) {
           );
         })}
       </div>
-      <TargetPrefs receiverPid={receiverPid} targetName={targetName} />
+      <TargetPrefs receiverPid={receiverPid} targetName={targetName} active={active} />
       {fromReceiver.length > 0 && (
         <Panel title={`${targetName}이 보낸 한마디`}>
           {fromReceiver.map((m) => (
@@ -226,7 +226,7 @@ export default function MyMission({ active = true }) {
       ))}
 
       <TicketSummary codes={codes} missions={missions} entries={myEntries} />
-      <AngelCard />
+      <AngelCard active={active} />
     </>
   );
 }
@@ -570,7 +570,7 @@ function MoreNotes({ slot, myPid, receiverPid, receiverName, code, sent, showCod
 
 // 수호천사: 응모권을 더 받고 싶은 사람이 지원하면, 운영진이 마니또에게 아무것도 받지 못한 사람에게 몰래 연결한다.
 // 연결되면 그 사람에게 미션을 2번까지 하고 "완료 알리기". 그 사람이 확인하면 1건당 응모권 +1(최대 2).
-function AngelCard() {
+function AngelCard({ active = true }) {
   const { myPid, config } = useApp();
   const [vol, setVol] = useState(undefined); // 지원 중인지
   const [targets, setTargets] = useState([]); // 내가 수호천사로 연결된 받는 사람
@@ -603,7 +603,7 @@ function AngelCard() {
   const R = TICKET_RULES;
   return (
     <>
-      {targets.map((r) => <AngelMission key={r} receiverPid={r} />)}
+      {targets.map((r) => <AngelMission key={r} receiverPid={r} active={active} />)}
       {canApply && targets.length === 0 && (
         <Panel title="수호천사 지원 (응모권을 더 받고 싶다면)">
           <p className="small">
@@ -623,7 +623,7 @@ function AngelCard() {
   );
 }
 
-function AngelMission({ receiverPid }) {
+function AngelMission({ receiverPid, active = true }) {
   const { nameOf, config } = useApp();
   const [shown, setShown] = useState(false);
   const [gifts, setGifts] = useState({}); // { 1: 문서 | null, 2: 문서 | null }
@@ -687,17 +687,19 @@ function AngelMission({ receiverPid }) {
         {!next && <p className="small muted">수호천사 미션 2번을 모두 했어요. 고마워요!</p>}
         {error && <p className="error small" role="alert">{error}</p>}
       </Panel>
-      <TargetPrefs receiverPid={receiverPid} targetName={name} />
+      <TargetPrefs receiverPid={receiverPid} targetName={name} active={active} />
     </>
   );
 }
 
 // 내 대상이 알려 준 것(좋아하는 간식, 못 먹는 음식·알레르기, 받기 곤란한 것). 대상 본인과 나(마니또), 운영진만 읽는다.
-function TargetPrefs({ receiverPid, targetName }) {
+function TargetPrefs({ receiverPid, targetName, active = true }) {
   const [p, setP] = useState(undefined);
+  // 대상이 나중에 적거나 고칠 수 있어서(알레르기) 탭이 다시 보일 때마다 읽는다(문서 1건)
   useEffect(() => {
+    if (!active) return;
     getDoc(doc(db, "prefs", receiverPid)).then((s) => setP(s.exists() ? s.data() : null)).catch(() => setP(null));
-  }, [receiverPid]);
+  }, [receiverPid, active]);
   if (p === undefined) return null;
   const any = p && (p.likes || p.avoid || p.nope);
   return (

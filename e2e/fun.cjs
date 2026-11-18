@@ -56,6 +56,17 @@ const step = (s) => console.log("▶", s);
     await tp.locator(".warn-line", { hasText: "땅콩 알레르기" }).waitFor();
     await tp.getByText("귤, 초코 과자").waitFor();
     console.log(`  ${R}이 적은 알레르기·좋아하는 간식이 마니또(가나) 화면에 보임(이름은 가린 채 '내 대상')`);
+    // 탭은 숨겨 둔 채 남는다: 대상이 나중에 고치면 마니또가 새로 고침 없이 탭을 다시 열 때 보인다
+    await H.tab(p, "내 프로필");
+    await f.getByPlaceholder(/땅콩 알레르기/).fill("땅콩·새우 알레르기");
+    await f.getByRole("button", { name: "알려 주기 저장" }).click();
+    // 서버에 저장된 것을 확인한 뒤(저장 전에 탭을 오가면 예전 값을 읽는다) 마니또가 탭을 한 번 오간다
+    const rPid = Object.entries((await H.readDoc("public/roster")).people || {}).find(([, v]) => v.name === R)?.[0];
+    for (let k = 0; k < 50 && (await H.readDoc(`prefs/${rPid}`)).avoid !== "땅콩·새우 알레르기"; k++) await p.waitForTimeout(200);
+    assert.equal((await H.readDoc(`prefs/${rPid}`)).avoid, "땅콩·새우 알레르기", "대상의 수정이 저장됨");
+    await H.tab(g, "추리 보드"); await H.tab(g, "내 미션");
+    await tp.locator(".warn-line", { hasText: "땅콩·새우 알레르기" }).waitFor({ timeout: 10000 });
+    console.log("  대상이 나중에 고친 알레르기도 마니또가 탭을 다시 열면 보임(새로 고침 없이)");
     const other = u[NAMES.find((n) => n !== "가나" && target[n] !== R && n !== R)];
     await other.reload(); await H.tab(other, "내 미션");
     await H.panel(other, "내 대상이 알려 준 것").getByText("아직 적지 않았어요").waitFor();

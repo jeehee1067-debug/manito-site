@@ -52,8 +52,20 @@ const H = require("./helpers.cjs");
   seen = await clueTexts(u[target["가나"]], 4);
   assert.equal(seen[2], new3);
   console.log("다음 공개 때 고친 3번이 보임:", seen[2], `(원래 ${ans["가나"][2]})`);
+  // 탭은 숨겨 둔 채 남는다: 대상이 추리 보드를 열어 둔 채(새로 고침 없이) 다른 탭에 갔다 오면, 공개 뒤 늦게 채운 단서가 보인다
+  const rm = u[target["마바"]];
+  await rm.goto(H.BASE + "#detective"); await rm.reload();
+  const c4 = H.panel(rm, "단서 4 / 6"); await c4.waitFor(); await rm.waitForTimeout(1500);
+  assert.equal(await c4.getByText("아직 마니또가 프로필을 안 채웠어요").count(), 4, "마바가 아직 프로필을 안 채움");
   const m = u["마바"];
   await m.reload(); await H.fillProfile(m, ans["마바"], PQ);
+  let shownLate = false;
+  for (let k = 0; k < 6 && !shownLate; k++) {
+    await H.tab(rm, "규칙"); await H.tab(rm, "추리 보드"); await rm.waitForTimeout(800);
+    shownLate = (await c4.locator(".clue-a", { hasText: ans["마바"][3] }).count()) > 0;
+  }
+  assert.ok(shownLate, "새로 고침 없이 탭을 다시 열면 늦게 채운 단서가 보인다");
+  console.log("새로 고침 없이 추리 보드를 다시 열면 늦게 채운 단서가 보임");
   seen = await clueTexts(u[target["마바"]], 4);
   assert.deepEqual(seen.slice(0, 4), ans["마바"].slice(0, 4));
   console.log(`늦게 쓴 마바의 단서 1~4번이 대상(${target["마바"]})에게 보임`);

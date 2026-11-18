@@ -30,7 +30,7 @@ const OWN_CODE_MSG = "이 코드는 내가 마니또로서 내 대상에게 주�
 
 const CARD_BONUS = TICKET_RULES.cardBonus; // 카드 추가 응모권(보통·도전만)
 
-export default function Detective() {
+export default function Detective({ active = true }) {
   const { myPid, config, roster, inbox: items } = useApp();
   // 파트 단서: 최종 지목 단계부터 읽을 수 있다(보안 규칙). undefined = 아직 안 읽음, null = 없음
   const partsInUse = roster.some((r) => r.part);
@@ -55,7 +55,7 @@ export default function Detective() {
       <CodeEntry myPid={myPid} items={items} prefill={fill} />
       <ToManito myPid={myPid} />
       <MyRedemptions myPid={myPid} items={items} />
-      <Clues myPid={myPid} partsInUse={partsInUse} hintOpen={hintOpen} hintPart={hintPart} />
+      <Clues myPid={myPid} partsInUse={partsInUse} hintOpen={hintOpen} hintPart={hintPart} active={active} />
       <Suspects myPid={myPid} hintPart={hintOpen ? hintPart : null} />
     </>
   );
@@ -510,17 +510,23 @@ function Thanks({ feedId }) {
   );
 }
 
-function Clues({ myPid, partsInUse, hintOpen, hintPart }) {
+function Clues({ myPid, partsInUse, hintOpen, hintPart, active = true }) {
   const { config } = useApp();
   const released = Math.min(config.cluesReleased || 0, CLUE_COUNT);
   const [clues, setClues] = useState({});
+  const cluesRef = useRef(clues);
+  cluesRef.current = clues;
+  // 공개된 칸을 읽는다. 탭은 숨겨 둔 채 남아 있으므로, 다시 보일 때는 아직 비어 있던 칸만 다시 읽는다
+  // (공개 뒤에 마니또가 늦게 프로필을 채우면 보이게. 예전에는 탭에 들어올 때마다 전부 다시 읽었다)
   useEffect(() => {
+    if (!active) return;
     for (let i = 0; i < released; i++) {
+      if (cluesRef.current[i]) continue;
       getDoc(doc(db, "clues", `${myPid}_${i}`))
         .then((s) => setClues((p) => ({ ...p, [i]: s.exists() ? s.data().answer : null })))
         .catch(() => setClues((p) => ({ ...p, [i]: null })));
     }
-  }, [myPid, released]);
+  }, [myPid, released, active]);
 
   return (
     <Panel title={`단서 ${released} / ${CLUE_COUNT}`}>
