@@ -4,7 +4,7 @@ const { chromium } = require("playwright");
 const assert = require("node:assert/strict");
 
 // 대상 이름은 기본으로 가려져 있다(내 미션 화면). "이름 보기"를 눌러 읽는다.
-const readTarget = async (p) => { const b = p.locator(".target-toggle"); await b.waitFor(); if ((await b.getAttribute("aria-pressed")) !== "true") await b.click(); return (await p.locator(".target-name").innerText()).trim(); };
+const readTarget = async (p) => { const b = p.locator(".target-toggle:visible"); await b.waitFor(); if ((await b.getAttribute("aria-pressed")) !== "true") await b.click(); return (await p.locator(".target-name:visible").innerText()).trim(); };
 // 운영 화면의 초대 코드·메일은 기본으로 가려져 있다.
 const showSecrets = async (p) => { for (const b of await p.getByRole("button", { name: "초대 코드·메일 보기" }).all()) await b.click(); };
 const H = require("./helpers.cjs");
@@ -14,7 +14,7 @@ const JOIN = ["가나", "다라", "마바", "사아"], ALL = [...JOIN, "자차"]
 const PART = { 가나: "가파트", 다라: "가파트", 마바: "나파트", 사아: "나파트", 자차: "다파트" };
 const errors = [], dialogs = [];
 const step = (s) => console.log("▶", s);
-const panel = (page, title) => page.locator("section.panel", { has: page.locator("h2.panel-title", { hasText: title }) });
+const panel = (page, title) => page.locator("section.panel:visible", { has: page.locator("h2.panel-title", { hasText: title }) });
 const tab = (page, name) => page.locator("nav.tabs button", { hasText: name }).click();
 const rest = async (path) => (await fetch(`${FS}/${path}`, { headers: { Authorization: "Bearer owner" } })).json();
 const val = (v) => v.stringValue ?? (v.integerValue !== undefined ? Number(v.integerValue) : v.booleanValue ?? (v.mapValue ? Object.fromEntries(Object.entries(v.mapValue.fields || {}).map(([k, x]) => [k, val(x)])) : null));
@@ -56,7 +56,7 @@ const val = (v) => v.stringValue ?? (v.integerValue !== undefined ? Number(v.int
     await page.getByPlaceholder("Knox ID").fill(`f${i}@example.com`);
     await page.locator('input[type="password"]').fill("secret123");
     await page.getByRole("button", { name: "가입하기" }).click();
-    await page.locator(".target-name").waitFor();
+    await page.locator(".target-name:visible").waitFor();
     // 프로필을 채워야 단서 6개가 대상에게 가고 은신 응모권 자격이 생긴다
     await H.fillProfile(page, H.answersFor(PQ, i, name), PQ);
     await H.tab(page, "내 미션");
@@ -65,7 +65,7 @@ const val = (v) => v.stringValue ?? (v.integerValue !== undefined ? Number(v.int
   console.log("  시작 확인창 경고:", dialogs.find((d) => d.includes("가입 안 한 사람")).split("\n").find((l) => l.includes("가입 안 한")));
 
   const target = {};
-  for (const name of JOIN) { await users[name].reload(); await users[name].locator(".target-name").waitFor(); target[name] = await readTarget(users[name]); }
+  for (const name of JOIN) { await users[name].reload(); await users[name].locator(".target-name:visible").waitFor(); target[name] = await readTarget(users[name]); }
   target["자차"] = ALL.find((n) => !Object.values(target).includes(n)); // 남은 한 명이 자차의 대상
   const giverOf = Object.fromEntries(Object.entries(target).map(([g, r]) => [r, g]));
   console.log("  짝(마니또 → 대상):", target);
@@ -193,8 +193,8 @@ const val = (v) => v.stringValue ?? (v.integerValue !== undefined ? Number(v.int
     const page = users[name];
     await page.reload();
     await tab(page, "결과");
-    await page.locator(".target .small").waitFor();
-    console.log(`  ${name}:`, (await page.locator(".target .small").innerText()).replace(/\s+/g, " "));
+    await page.locator(".target:visible .small").waitFor();
+    console.log(`  ${name}:`, (await page.locator(".target:visible .small").innerText()).replace(/\s+/g, " "));
   }
   await tab(admin, "결과");
   // 시상(발표 화면): 불참(가입 안 함·중도 이탈)은 응모권 0장이라 2등(응모권 최다)에도, 종이 추첨 입력에도, 6등에도 없다

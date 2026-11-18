@@ -1720,18 +1720,33 @@ function CardPicks() {
 // 미션 중에는 Firebase 콘솔에서 고친다(넣을 값을 보여 준다).
 function CodeCheck() {
   const { nameOf } = useApp();
-  const assignments = useColl("assignments");
+  const assignments = useColl("assignments"); // 짝 현황과 같은 구독(한 번만 읽는다)
   const giverCodes = useColl("giverCodes");
-  const codes = useColl("codes");
-  if (!assignments || !giverCodes || !codes) return null;
+  // 코드 문서(54명 기준 162건)는 운영 탭을 열 때마다 읽지 않고 "점검하기"를 누를 때만 읽는다(읽기 줄이기)
+  const [codes, setCodes] = useState(null);
+  const [busy, setBusy] = useState(false);
+  async function run() {
+    setBusy(true);
+    try { setCodes(await readAll("codes")); } catch { setCodes(undefined); } finally { setBusy(false); }
+  }
+  if (!assignments || !giverCodes) return null;
   const total = Object.keys(assignments).length * 3;
   if (!total) return null;
+  if (!codes) {
+    return (
+      <p className="small code-check">
+        인증 코드 점검: 대상이 맞는 코드를 넣었는데도 "나에게 온 코드가 아니에요"가 뜬다는 문의가 있을 때 눌러 보세요(코드 {total}건을 읽어요).{" "}
+        <button type="button" className="pk-btn sm" disabled={busy} onClick={run}>인증 코드 점검하기</button>
+        {codes === undefined && <span className="error"> 읽지 못했어요. 다시 눌러 주세요.</span>}
+      </p>
+    );
+  }
   const bad = codeProblems(assignments, giverCodes, codes);
   if (!bad.length) return <p className="note banner" role="status">인증 코드 점검: 정상이에요. 코드 {total}개가 모두 맞는 대상·주차를 가리켜요.</p>;
   return (
     <section className="panel warn-panel" role="alert">
       <p><b>⚠ 인증 코드 점검: {bad.length}개가 어긋나요.</b> 이 코드를 받은 대상은 맞는 코드를 넣어도 "나에게 온 코드가 아니에요"가 떠요.</p>
-      <p className="small">Firebase 콘솔 → Firestore → <span className="mono">codes</span> 컬렉션에서 아래 문서를 만들거나 고쳐 주세요(필드 <span className="mono">receiverPid</span>는 문자열, <span className="mono">slot</span>은 숫자). 고치면 이 경고가 사라져요.</p>
+      <p className="small">Firebase 콘솔 → Firestore → <span className="mono">codes</span> 컬렉션에서 아래 문서를 만들거나 고쳐 주세요(필드 <span className="mono">receiverPid</span>는 문자열, <span className="mono">slot</span>은 숫자). 고친 뒤 다시 점검하세요.</p>
       <ul className="small">
         {bad.map((b) => (
           <li key={`${b.giverPid}_${b.slot}`}>
@@ -1741,6 +1756,7 @@ function CodeCheck() {
           </li>
         ))}
       </ul>
+      <button type="button" className="pk-btn sm" disabled={busy} onClick={run}>다시 점검하기</button>
     </section>
   );
 }

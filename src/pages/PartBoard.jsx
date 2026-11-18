@@ -9,15 +9,17 @@ import { TICKET_RULES as R } from "../config/prizes.js";
 // 파트 대항전 주간 순위. 운영자가 발표한 문서(public/board) 한 건만 읽는다.
 // 실시간 숫자가 아니다: 실시간이면 미션을 받은 직후 어느 파트 숫자가 올랐는지로 마니또의 파트가 드러난다.
 // 개인별 숫자는 여기 없다(다른 사람의 진행 상황은 보안 규칙이 읽지 못하게 한다). 내 것만 따로 읽어서 보여 준다.
-export default function PartBoard() {
+export default function PartBoard({ active = true }) {
   const { myPid, myPart, config } = useApp();
   const [board, setBoard] = useState(undefined);
   const [myDone, setMyDone] = useState(null);
 
   useEffect(() => onSnapshot(doc(db, "public", "board"), (s) => setBoard(s.exists() ? s.data() : null), () => setBoard(null)), []);
+  // 내 미션 탭에서 완료를 알리면 바뀌는 값이라 이 탭이 다시 보일 때 읽는다(문서 1건)
   useEffect(() => {
+    if (!active) return;
     getDoc(doc(db, "progress", myPid)).then((s) => setMyDone(s.exists() ? s.data().doneCount || 0 : 0)).catch(() => {});
-  }, [myPid]);
+  }, [myPid, active]);
 
   if (board === undefined) return <Loading />;
   const parts = board?.parts || [];

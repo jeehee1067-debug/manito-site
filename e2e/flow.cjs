@@ -3,7 +3,7 @@ const { chromium } = require("playwright");
 const assert = require("node:assert/strict");
 
 // 대상 이름은 기본으로 가려져 있다(내 미션 화면). "이름 보기"를 눌러 읽는다.
-const readTarget = async (p) => { const b = p.locator(".target-toggle"); await b.waitFor(); if ((await b.getAttribute("aria-pressed")) !== "true") await b.click(); return (await p.locator(".target-name").innerText()).trim(); };
+const readTarget = async (p) => { const b = p.locator(".target-toggle:visible"); await b.waitFor(); if ((await b.getAttribute("aria-pressed")) !== "true") await b.click(); return (await p.locator(".target-name:visible").innerText()).trim(); };
 // 운영 화면의 초대 코드·메일은 기본으로 가려져 있다.
 const showSecrets = async (p) => { for (const b of await p.getByRole("button", { name: "초대 코드·메일 보기" }).all()) await b.click(); };
 
@@ -67,12 +67,14 @@ async function newUser(browser, label) {
   page.on("pageerror", (e) => errors.push(`[${label}] pageerror ${e.message}`));
   return page;
 }
-const panel = (page, title) => page.locator("section.panel", { has: page.locator("h2.panel-title", { hasText: title }) });
+const panel = (page, title) => page.locator("section.panel:visible", { has: page.locator("h2.panel-title", { hasText: title }) });
 async function shot(page, name, full = true) {
   shotNo++;
   await page.screenshot({ path: `${SHOT}${String(shotNo).padStart(2, "0")}-${name}.png`, fullPage: full });
 }
 const tab = (page, name) => page.locator("nav.tabs button", { hasText: name }).click();
+// 지금 보이는 탭(한 번 연 탭은 숨겨 둔 채 남아 있어서, 페이지 전체에서 글자를 세면 숨긴 탭까지 센다)
+const shown = (page) => page.locator(".tab-page:not([hidden])");
 async function advance(admin, to) {
   await admin.getByRole("button", { name: `다음 단계로: ${to}` }).click();
   await admin.locator(".hud-chip", { hasText: to }).waitFor();
@@ -197,7 +199,7 @@ const step = (s) => console.log("▶", s);
   for (const p of PEOPLE) {
     const page = users[p.name];
     await tab(page, "내 미션");
-    await page.locator(".target-name").waitFor();
+    await page.locator(".target-name:visible").waitFor();
     target[p.name] = await readTarget(page);
   }
   console.log("  화면에 나온 짝(마니또 → 대상):", target);
@@ -235,7 +237,7 @@ const step = (s) => console.log("▶", s);
       // 일정 타임라인이 규칙 탭 맨 위에 있다(날짜는 실행하는 날에 따라 달라지므로 개수와 순서만 본다)
       const tl = panel(page, "일정 한눈에");
       await tl.locator("ol.timeline").waitFor();
-      const titles = (await page.locator("section.panel h2.panel-title").allInnerTexts()).map((t) => t.trim());
+      const titles = (await page.locator("section.panel:visible h2.panel-title").allInnerTexts()).map((t) => t.trim());
       assert.match(titles[0] || "", /마니또와 대상/, `규칙 탭 첫 패널이 낱말 정의: ${titles.slice(0, 3).join(" | ")}`);
       assert.match(titles[1] || "", /일정 한눈에/, `그다음이 일정 타임라인: ${titles.slice(0, 3).join(" | ")}`);
       const roles = panel(page, "마니또와 대상");
@@ -263,10 +265,10 @@ const step = (s) => console.log("▶", s);
       assert.match(prizeRows[0], /^1등 대추첨 1명, 50만원 상품권 /);
       assert.equal(prizeRows.filter((t) => t.includes("추후 공지")).length, 5, prizeRows.join(" | "));
       assert.equal(await panel(page, "상품과 추첨").getByText(/10만원|5만원|1만원|커피 쿠폰/).count(), 0, "2~6등의 금액은 아직 보이지 않는다");
-      assert.equal(await page.getByText("사이트 관리 계정").count(), 0, "사이트 관리 계정 설명은 지웠다");
+      assert.equal(await shown(page).getByText("사이트 관리 계정").count(), 0, "사이트 관리 계정 설명은 지웠다");
     }
-    assert.equal(await page.getByText("투표").count(), 0, "규칙 탭에 '투표' 글자 없음(투표는 없앰)");
-    assert.equal(await page.getByText("팀").count(), 0, "규칙 탭에 '팀' 글자 없음");
+    assert.equal(await shown(page).getByText("투표").count(), 0, "규칙 탭에 '투표' 글자 없음(투표는 없앰)");
+    assert.equal(await shown(page).getByText("팀").count(), 0, "규칙 탭에 '팀' 글자 없음");
     await panel(page, "단서와 최종 지목").getByText("마니또의 파트").waitFor();
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "규칙 탭: 휴대폰 폭에서 가로 스크롤 없음(표가 화면 밖으로 밀리지 않음)");
     await shot(page, "rules");
@@ -347,7 +349,7 @@ const step = (s) => console.log("▶", s);
     await page.getByText("내 마니또가 보낸 미션 1건을 아직 인증하지 않았어요").waitFor();
     // 역할 안내: 내 미션 탭에서는 내가 마니또, 추리 보드에서는 내가 대상
     await page.locator(".role-note-giver").getByText("이 탭에서 나는 마니또예요").waitFor();
-    assert.equal(await page.locator(".role-note-target").count(), 0, "내 미션 탭에는 '나는 대상' 안내가 없다");
+    assert.equal(await page.locator(".role-note-target:visible").count(), 0, "내 미션 탭에는 '나는 대상' 안내가 없다");
     await tab(page, "추리 보드");
     await page.locator(".role-note-target").getByText("이 탭에서 나는 대상이에요").waitFor();
     const inbox = panel(page, "마니또에게서 온 것");
@@ -401,9 +403,9 @@ const step = (s) => console.log("▶", s);
     assert.equal(await done.getByPlaceholder("쪽지에 적힌 4자리").count(), 0, "다 인증하면 코드 입력 칸이 없다");
     assert.equal(await done.getByRole("button", { name: "코드 입력 칸 열기" }).count(), 1);
     await tab(page, "내 미션");
-    await page.locator(".target-name").waitFor();
+    await page.locator(".target-name:visible").waitFor();
     await page.waitForTimeout(400);
-    assert.equal(await page.getByText("아직 인증하지 않았어요").count(), 0, "인증 후 알림 사라짐");
+    assert.equal(await shown(page).getByText("아직 인증하지 않았어요").count(), 0, "인증 후 알림 사라짐");
   }
   {
     const g = users["가나"];
@@ -420,6 +422,8 @@ const step = (s) => console.log("▶", s);
   step("운영 화면 '고른 미션 카드': 카드별 인원(이름 없음)과 사람별 카드");
   {
     await tab(admin, "운영");
+    // 인증 코드 점검은 누를 때만 코드 문서를 읽는다(읽기 줄이기)
+    await admin.getByRole("button", { name: "인증 코드 점검하기" }).click();
     await admin.getByText(`인증 코드 점검: 정상이에요. 코드 ${N * 3}개가 모두 맞는 대상·주차를 가리켜요.`).waitFor();
     const picks = panel(admin, "고른 미션 카드");
     await picks.locator(".pick-counts").waitFor();
@@ -518,8 +522,8 @@ const step = (s) => console.log("▶", s);
   {
     const g = users["가나"];
     await tab(g, "내 미션");
-    assert.equal(await g.locator(".target-name").innerText(), "● ● ●", "대상 이름은 기본으로 가려져 있다");
-    assert.equal(await g.getByText(target["가나"]).count(), 0, "가려 둔 동안 화면 어디에도 대상 이름이 없다");
+    assert.equal(await g.locator(".target-name:visible").innerText(), "● ● ●", "대상 이름은 기본으로 가려져 있다");
+    assert.equal(await shown(g).getByText(target["가나"]).count(), 0, "가려 둔 동안 화면 어디에도 대상 이름이 없다");
     await readTarget(g); // 이름 보기(1분)
     const slot = panel(g, "1주차 미션 ✔");
     await slot.getByRole("button", { name: "쪽지 더 보내기" }).click();
@@ -995,8 +999,8 @@ const step = (s) => console.log("▶", s);
     assert.equal(gName, giverOf[rName], `${rName}의 마니또`);
     chain.push([rName, gName]);
     if (k === 0) {
-      await users[rName].locator(".target .target-name", { hasText: gName }).waitFor();
-      assert.equal(await users[gName].locator(".target .target-name").innerText(), "무대에서 공개돼요");
+      await users[rName].locator(".target:visible .target-name", { hasText: gName }).waitFor();
+      assert.equal(await users[gName].locator(".target:visible .target-name").innerText(), "무대에서 공개돼요");
       console.log(`  첫 짝 공개 → ${rName}의 휴대폰에만 마니또(${gName})가 열리고, ${gName}의 휴대폰은 아직 가려져 있음`);
     }
   }
@@ -1182,9 +1186,9 @@ const step = (s) => console.log("▶", s);
   for (const p of PEOPLE) {
     const page = users[p.name];
     await tab(page, "결과");
-    await page.locator(".target .target-name").waitFor();
-    assert.equal(await page.locator(".target .target-name").innerText(), giverOf[p.name], `${p.name}의 마니또 공개`);
-    const text = (await page.locator(".target .small").innerText()).replace(/\s+/g, " ");
+    await page.locator(".target:visible .target-name").waitFor();
+    assert.equal(await page.locator(".target:visible .target-name").innerText(), giverOf[p.name], `${p.name}의 마니또 공개`);
+    const text = (await page.locator(".target:visible .small").innerText()).replace(/\s+/g, " ");
     const m = text.match(/내 응모권 (\d+)장: 미션 (\d+) \+ 카드 (\d+)(?: \+ 비용 카드 (\d+))? \+ 인증 입력 (\d+)(?: \+ 못 받은 주차 보상 (\d+))? \+ 은신 (\d+) \+ 정답 지목 (\d+)(?: \+ 우승 파트 (\d+))?/);
     assert.ok(m, text);
     const shown = { total: +m[1], mission: +m[2], card: +m[3], cost: +(m[4] || 0), entries: +m[5], comp: +(m[6] || 0), hidden: +m[7], guess: +m[8], partBonus: +(m[9] || 0) };
@@ -1226,7 +1230,7 @@ const step = (s) => console.log("▶", s);
     assert.match(rows[1], /^2위 나파트 50% 3 \/ 6 · 2명$/);
     assert.match(rows[2], /^3위 다파트 33% 2 \/ 6 · 2명$/);
     // 운영자 확인으로 인정된 미션은 결과 화면에 표시된다
-    const mabaText = (await users["마바"].locator(".target .small").innerText()).replace(/\s+/g, " ");
+    const mabaText = (await users["마바"].locator(".target:visible .small").innerText()).replace(/\s+/g, " ");
     assert.match(mabaText, /대상의 인증 없이 인정된 미션 1건 포함/);
   }
   await shot(users["가나"], "reveal");

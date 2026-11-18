@@ -32,7 +32,7 @@ const stars = (lv) => {
   return <span className="card-stars" aria-hidden="true">{"★".repeat(k + 1)}<i>{"★".repeat(2 - k)}</i></span>;
 };
 
-export default function MyMission() {
+export default function MyMission({ active = true }) {
   const { myPid, nameOf, config, byPid, inbox, fromReceiver, angelInbox } = useApp();
   const [assignment, setAssignment] = useState(undefined);
   const [codes, setCodes] = useState(null);
@@ -45,6 +45,8 @@ export default function MyMission() {
   const [angelTodo, setAngelTodo] = useState(0); // 내가 수호천사로 연결된 사람 수(아래 AngelCard와 같은 질의라 한 번만 읽는다)
   useEffect(() => onSnapshot(query(collection(db, "angels"), where("angelPid", "==", myPid)), (s) => setAngelTodo(s.size), () => setAngelTodo(0)), [myPid]);
   const [shown, setShown] = useState(false); // 대상 이름을 보이는지(기본은 가림)
+  // 탭은 숨겨 둔 채 남아 있으므로, 다른 탭으로 가면 다시 가린다(예전처럼 돌아오면 가려진 상태)
+  useEffect(() => { if (!active) setShown(false); }, [active]);
   useEffect(() => {
     if (!shown) return undefined;
     const t = setTimeout(() => setShown(false), SHOW_MS);
@@ -53,11 +55,13 @@ export default function MyMission() {
 
   // 받는 사람으로서: 마니또가 보냈는데 아직 인증하지 않은 미션이 있으면 알려 준다(인증해야 둘 다 응모권을 받는다).
   useEffect(() => onSnapshot(query(collection(db, "redemptions"), where("receiverPid", "==", myPid)), (s) => setMine(s.docs.map((d) => d.data())), () => setMine([])), [myPid]);
+  // 탭을 숨겨 두는 동안 다른 탭(내 프로필·추리 보드)에서 바꿀 수 있는 값이라 이 탭이 다시 보일 때 읽는다(문서 2건)
   useEffect(() => {
+    if (!active) return;
     const get = (path, key, pick) => getDoc(doc(db, ...path)).then((s) => setExtra((x) => ({ ...x, [key]: pick(s) }))).catch(() => setExtra((x) => ({ ...x, [key]: null })));
     get(["prefs", myPid], "prefs", (s) => s.exists());
     if (config.phase === PHASE.RUNNING) get(["midGuesses", myPid], "mid", (s) => (s.exists() ? s.data().guesses || {} : {}));
-  }, [myPid, config.phase, config.week]);
+  }, [myPid, config.phase, config.week, active]);
 
   useEffect(() => {
     getDoc(doc(db, "assignments", myPid))

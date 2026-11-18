@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 require("node:fs").mkdirSync(__dirname + "/shots", { recursive: true });
 
 // 대상 이름은 기본으로 가려져 있다(내 미션 화면). "이름 보기"를 눌러 읽는다.
-const readTarget = async (p) => { const b = p.locator(".target-toggle"); await b.waitFor(); if ((await b.getAttribute("aria-pressed")) !== "true") await b.click(); return (await p.locator(".target-name").innerText()).trim(); };
+const readTarget = async (p) => { const b = p.locator(".target-toggle:visible"); await b.waitFor(); if ((await b.getAttribute("aria-pressed")) !== "true") await b.click(); return (await p.locator(".target-name:visible").innerText()).trim(); };
 // 운영 화면의 초대 코드·메일은 기본으로 가려져 있다.
 const showSecrets = async (p) => { for (const b of await p.getByRole("button", { name: "초대 코드·메일 보기" }).all()) await b.click(); };
 const BASE = "http://localhost:5173/", P = "demo-manito", FS = `http://127.0.0.1:8080/v1/projects/${P}/databases/(default)/documents`;
@@ -36,7 +36,7 @@ const BASE = "http://localhost:5173/", P = "demo-manito", FS = `http://127.0.0.1
   await admin.getByPlaceholder("Knox ID").fill("admin@example.com");
   await admin.locator('input[type="password"]').fill("secret123");
   await admin.getByRole("button", { name: "운영자 계정 만들기" }).click();
-  await admin.locator("section.panel", { has: admin.locator("h2", { hasText: "1. 명단" }) }).locator("textarea").fill("가나,가파트\n다라,가파트\n마바,나파트");
+  await admin.locator("section.panel:visible", { has: admin.locator("h2", { hasText: "1. 명단" }) }).locator("textarea").fill("가나,가파트\n다라,가파트\n마바,나파트");
   await admin.getByRole("button", { name: "명단에 추가" }).click(); await admin.getByText("3명을 추가했어요.").waitFor();
   await admin.getByRole("button", { name: "배정하기" }).click(); await admin.getByText(/3명 배정 완료/).waitFor();
   console.log("  배정 결과 문구(가파트 2명/3명이라 같은 파트를 피할 수 없는 경우):", await admin.locator(".note.banner").innerText());
@@ -101,7 +101,7 @@ const BASE = "http://localhost:5173/", P = "demo-manito", FS = `http://127.0.0.1
 
   step("미션 진행 단계: 계정 연결 패널");
   await admin.getByRole("button", { name: /다음 단계로: 미션 진행/ }).click();
-  const acc = admin.locator("section.panel", { has: admin.locator("h2", { hasText: "계정 연결" }) });
+  const acc = admin.locator("section.panel:visible", { has: admin.locator("h2", { hasText: "계정 연결" }) });
   await acc.waitFor();
   console.log("  계정 연결 패널:", (await acc.locator("tbody").innerText()).replace(/\t/g, " ").replace(/\n+/g, " | "));
   await admin.screenshot({ path: __dirname + "/shots/accounts-panel.png", fullPage: true });

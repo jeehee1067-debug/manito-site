@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 require("node:fs").mkdirSync(__dirname + "/shots", { recursive: true });
 
 // 대상 이름은 기본으로 가려져 있다(내 미션 화면). "이름 보기"를 눌러 읽는다.
-const readTarget = async (p) => { const b = p.locator(".target-toggle"); await b.waitFor(); if ((await b.getAttribute("aria-pressed")) !== "true") await b.click(); return (await p.locator(".target-name").innerText()).trim(); };
+const readTarget = async (p) => { const b = p.locator(".target-toggle:visible"); await b.waitFor(); if ((await b.getAttribute("aria-pressed")) !== "true") await b.click(); return (await p.locator(".target-name:visible").innerText()).trim(); };
 // 운영 화면의 초대 코드·메일은 기본으로 가려져 있다.
 const showSecrets = async (p) => { for (const b of await p.getByRole("button", { name: "초대 코드·메일 보기" }).all()) await b.click(); };
 const BASE = "http://localhost:5173/", P = "demo-manito", AUTH = "http://127.0.0.1:9099";
@@ -36,7 +36,7 @@ async function expectSession(page, who) {
   await page.locator(".hud-out").waitFor();
   await page.locator(".hud-who", { hasText: who === "운영자" ? "운영자" : `${who}님` }).waitFor({ timeout: 8000 });
   if (who === "운영자") await page.locator("h2.panel-title", { hasText: "운영 단계" }).waitFor();
-  else await page.locator(".target-name").waitFor();
+  else await page.locator(".target-name:visible").waitFor();
 }
 
 (async () => {
@@ -53,7 +53,7 @@ async function expectSession(page, who) {
   await mailBox(page).fill(MAIL.운영자);
   await page.locator('input[type="password"]').fill(PW);
   await page.getByRole("button", { name: "운영자 계정 만들기" }).click();
-  await page.locator("section.panel", { has: page.locator("h2", { hasText: "1. 명단" }) }).locator("textarea").fill("가나,가파트\n다라,가파트\n마바,나파트");
+  await page.locator("section.panel:visible", { has: page.locator("h2", { hasText: "1. 명단" }) }).locator("textarea").fill("가나,가파트\n다라,가파트\n마바,나파트");
   await page.getByRole("button", { name: "명단에 추가" }).click(); await page.getByText("3명을 추가했어요.").waitFor();
   await page.getByRole("button", { name: "배정하기" }).click(); await page.getByText(/3명 배정 완료/).waitFor();
   const inv = {};

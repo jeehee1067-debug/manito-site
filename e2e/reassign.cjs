@@ -2,7 +2,7 @@ const { chromium } = require("playwright");
 const assert = require("node:assert/strict");
 
 // 대상 이름은 기본으로 가려져 있다(내 미션 화면). "이름 보기"를 눌러 읽는다.
-const readTarget = async (p) => { const b = p.locator(".target-toggle"); await b.waitFor(); if ((await b.getAttribute("aria-pressed")) !== "true") await b.click(); return (await p.locator(".target-name").innerText()).trim(); };
+const readTarget = async (p) => { const b = p.locator(".target-toggle:visible"); await b.waitFor(); if ((await b.getAttribute("aria-pressed")) !== "true") await b.click(); return (await p.locator(".target-name:visible").innerText()).trim(); };
 // 운영 화면의 초대 코드·메일은 기본으로 가려져 있다.
 const showSecrets = async (p) => { for (const b of await p.getByRole("button", { name: "초대 코드·메일 보기" }).all()) await b.click(); };
 const H = require("./helpers.cjs");
@@ -18,11 +18,11 @@ const H = require("./helpers.cjs");
   for (const [i, [name]] of PEOPLE.entries()) {
     const p = await mk(name); u[name] = p;
     await H.signup(p, inv[name], `r${i}@example.com`);
-    await p.locator(".target-name").waitFor();
+    await p.locator(".target-name:visible").waitFor();
     ans[name] = H.answersFor(PQ, i, name); // 1번 답(음료)이 사람마다 다름
     await H.fillProfile(p, ans[name], PQ);
   }
-  const targetsOf = async () => { const t = {}; for (const [name] of PEOPLE) { const p = u[name]; await p.goto(H.BASE + "#mission"); await p.reload(); await p.locator(".target-name").waitFor(); t[name] = await readTarget(p); } return t; };
+  const targetsOf = async () => { const t = {}; for (const [name] of PEOPLE) { const p = u[name]; await p.goto(H.BASE + "#mission"); await p.reload(); await p.locator(".target-name:visible").waitFor(); t[name] = await readTarget(p); } return t; };
   const before = await targetsOf();
   let after;
   for (let k = 0; k < 8; k++) {
