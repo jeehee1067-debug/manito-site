@@ -80,6 +80,33 @@ export function unresolvedSlots(rows, { onlyReported = false } = {}) {
 
 // 받는 사람 기준 코드 { receiverPid: { 1: 코드, 2: 코드, 3: 코드 } } (giverCodes를 뒤집은 것).
 // 보안 규칙이 "이 피드 글이 그 사람의 실제 인증에 딸린 것인지" 확인할 때 receiverCodes 문서를 읽는다.
+// 배정이 끝까지 저장됐는지 점검(운영 화면 AssignCheck). 배정은 서버 없이 운영자 브라우저가 여러 번에 나눠 쓴다:
+// ① 짝·코드 → ② 파트 단서 → ③ 설정(assignVer·partExcluded). 그 사이에 단계를 넘기면(실제로 있었던 일) 뒤쪽이 보안 규칙에 거부돼 빠진다.
+//   roster: [{ pid, part }], assignments: { 마니또: { receiverPid } }, hints: [{ receiverPid, answer, ver }](파트 단서, idx 6), config
+// 반환 status: "none"(짝이 없음) | "mismatch"(명단과 짝이 안 맞음) | "partial"(짝은 있는데 마무리 값이 빠짐) | "ok"
+//   want: 설정에 있어야 하는 값 { assignVer, partExcluded, siteMatched } — hintsUsable이면 콘솔에서 이 값만 넣어도 된다
+export function assignmentHealth({ roster = [], assignments = {}, hints = [], config = {} }) {
+  const partOf = Object.fromEntries(roster.map((r) => [r.pid, (r.part || "").trim()]));
+  const givers = Object.keys(assignments);
+  const n = roster.length;
+  const base = { n, assigned: givers.length, hintCount: hints.length };
+  if (!givers.length) return { ...base, status: "none" };
+  const receivers = new Set(givers.map((g) => assignments[g]?.receiverPid));
+  if (givers.length !== n || roster.some((r) => !assignments[r.pid] || !receivers.has(r.pid))) return { ...base, status: "mismatch" };
+  const pairs = givers.map((g) => [g, assignments[g].receiverPid]);
+  const partExcluded = !pairs.some(([g, r]) => partOf[g] && partOf[g] === partOf[r]);
+  const byReceiver = Object.fromEntries(hints.map((h) => [h.receiverPid, h]));
+  const needHint = pairs.filter(([g]) => partOf[g]);
+  const vers = new Set(needHint.map(([, r]) => byReceiver[r]?.ver));
+  // 파트 단서가 모두 있고(같은 회차, 답 = 마니또의 파트) 그 회차가 0이 아니면, 설정만 그 회차로 맞추면 된다
+  const hintsUsable = needHint.every(([g, r]) => byReceiver[r] && byReceiver[r].answer === partOf[g]) && vers.size <= 1 && (!needHint.length || Number(byReceiver[needHint[0][1]].ver) >= 1);
+  const hintVer = needHint.length && hintsUsable ? Number(byReceiver[needHint[0][1]].ver) : null;
+  const want = { assignVer: hintVer ?? (config.assignVer ?? 0) + 1, partExcluded, siteMatched: config.siteMatched === true };
+  const configOk = Number(config.assignVer) >= 1 && config.partExcluded === partExcluded && (hintVer == null || config.assignVer === hintVer);
+  const ok = configOk && (hintsUsable || !needHint.length);
+  return { ...base, status: ok ? "ok" : "partial", hintsUsable: hintsUsable || !needHint.length, needHints: needHint.length, want };
+}
+
 export function receiverCodesOf(assignments, giverCodes) {
   const out = {};
   for (const [giverPid, a] of Object.entries(assignments || {})) {
