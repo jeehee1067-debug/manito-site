@@ -72,7 +72,8 @@ export default function MyMission() {
       onSnapshot(doc(db, "progress", myPid), (s) => setProgress(s.exists() ? s.data() : {}), () => setProgress({ unknown: true })),
     ];
     return () => offs.forEach((o) => o());
-  }, [myPid]);
+    // 배정이 저장되거나(회차) 단계가 바뀌면 다시 읽는다: 배정 전부터 열어 둔 화면이 "아직 배정 전이에요"로 남지 않게
+  }, [myPid, config.assignVer, config.phase]);
 
   useEffect(() => {
     if (!assignment) return;

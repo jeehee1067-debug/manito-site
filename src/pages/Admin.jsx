@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  arrayRemove, arrayUnion, collection, deleteDoc, deleteField, doc, getDoc, getDocs, onSnapshot, runTransaction, serverTimestamp, setDoc, updateDoc, writeBatch,
+  arrayRemove, arrayUnion, collection, deleteDoc, deleteField, doc, getDoc, getDocs, onSnapshot, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, writeBatch,
 } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp } from "../App.jsx";
 import { Panel } from "../ui.jsx";
 import { PHASE, PHASES, CLUE_COUNT, LEVEL_LABEL, MAIL_DOMAIN, PART_HINT_IDX, PRAISE_SLOT, RULES_VERSION } from "../lib/constants.js";
-import { SLOT_STATUS_LABEL, clueAnswers, cluesDoneSet, pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../lib/pairs.js";
+import { SLOT_STATUS_LABEL, assignmentHealth, clueAnswers, cluesDoneSet, pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../lib/pairs.js";
 import { assignManito, assignmentMemo, generateCodes, makeInviteCode, previewAssignments } from "../lib/assign.js";
 import { computeTickets, missionLikes, noticedWeeks, partStandings, rankReviews, reviewLikes, weeklyPartBoard } from "../lib/scoring.js";
 import { angelQueue, angelQueueStatus, matchAngels, needyReceivers } from "../lib/angels.js";
@@ -56,6 +56,9 @@ async function saveErrorText(err, { isOwner }) {
   }
   return `저장하지 못했어요(${code || err?.message || "알 수 없는 오류"}). 잠시 뒤 다시 해 주세요.`;
 }
+
+// 배정을 저장하는 중인지(이 탭). 저장이 끝나기 전에 미션을 시작하면 뒤쪽 저장이 보안 규칙에 거부된다(실제로 있었던 일).
+let assigningNow = false;
 
 const NEXT_PHASE_NOTE = {
   0: "미션 진행을 시작합니다. 시작 후에는 명단 추가·삭제와 재배정을 할 수 없어요.",
@@ -198,6 +201,21 @@ export default function Admin() {
       const res = await getDoc(doc(db, "results", "public")).catch(() => null);
       if (!res?.exists()) return setStepMsg("아직 집계하지 않았어요. 아래 '집계하기'를 먼저 눌러 주세요. 집계 결과가 있어야 공개 단계로 넘어갈 수 있어요.");
     }
+    // 미션 시작 전: 배정이 끝까지 저장됐는지 확인한다(배정은 여러 번에 나눠 저장되고, 미션이 시작되면 더는 쓸 수 없다)
+    if (phase === PHASE.SETUP) {
+      if (assigningNow) return setStepMsg("배정을 저장하는 중이에요. \"○명 배정 완료\"가 뜬 뒤에 눌러 주세요.");
+      if (!fullRoster) return setStepMsg("명단을 읽는 중이에요. 잠시 뒤 다시 눌러 주세요.");
+      const [aSnap, hSnap] = await Promise.all([getDocs(collection(db, "assignments")), getDocs(query(collection(db, "clues"), where("idx", "==", PART_HINT_IDX)))]).catch(() => [null, null]);
+      if (!aSnap) return setStepMsg("배정 상태를 확인하지 못했어요. 잠시 뒤 다시 눌러 주세요.");
+      const h = assignmentHealth({
+        roster: fullRoster, config,
+        assignments: Object.fromEntries(aSnap.docs.map((d) => [d.id, d.data()])),
+        hints: hSnap.docs.map((d) => d.data()),
+      });
+      if (h.status === "none") return setStepMsg("아직 배정하지 않았어요. 아래 \"배정하기\"를 눌러 \"○명 배정 완료\"가 뜬 뒤에 시작해 주세요.");
+      if (h.status === "mismatch") return setStepMsg(`배정한 뒤에 명단이 바뀌었어요(명단 ${h.n}명, 배정 ${h.assigned}명). \"배정하기\"를 다시 누른 뒤 시작해 주세요.`);
+      if (h.status === "partial") return setStepMsg("배정이 끝까지 저장되지 않았어요. 아래 \"2. 마니또 배정\"의 안내대로 마무리한 뒤 시작해 주세요.");
+    }
     // 미션 시작 전: 가입 안 한 사람이 있으면 그 사람의 마니또는 인증을 받을 수 없어 미션 응모권이 0장이 된다.
     const unjoined = phase === PHASE.SETUP && fullRoster ? fullRoster.filter((r) => !r.uid) : [];
     const warn = unjoined.length
@@ -227,6 +245,7 @@ export default function Admin() {
 
       <Notice />
 
+      {phase >= PHASE.RUNNING && phase <= PHASE.GUESSING && <AssignCheck />}
       {phase === PHASE.SETUP && <Setup />}
       {phase === PHASE.RUNNING && <Running />}
       {phase === PHASE.GUESSING && <GuessStatus />}
@@ -503,6 +522,8 @@ function Setup() {
       : blank ? `\n\n⚠ 파트가 비어 있는 사람이 ${blank}명 있어요. 이 사람들은 누구와도 짝이 될 수 있고 파트 순위에서 빠져요.` : "";
     if (!window.confirm(`마니또를 배정할까요? 다시 배정하면 이전 배정과 코드는 모두 없어져요.${partWarn}`)) return;
     setBusy(true);
+    assigningNow = true;
+    setMsg("배정을 저장하는 중이에요… \"○명 배정 완료\"가 뜰 때까지 다른 버튼을 누르지 말아 주세요.");
     try {
       const metaRef = doc(db, "meta", "assignment");
       const prev = await getDoc(metaRef);
@@ -562,6 +583,7 @@ function Setup() {
         ? "배정을 저장하지 못했어요(권한 없음). Firebase 콘솔에 게시된 보안 규칙이 예전 것이면 이렇게 돼요. 최신 firestore.rules를 게시한 뒤 '배정하기'를 다시 눌러 주세요."
         : err.message);
     } finally {
+      assigningNow = false;
       setBusy(false);
     }
   }
@@ -633,6 +655,7 @@ function Setup() {
           roster.map((r) => ({ pid: r.pid, part: (r.part || "").trim() || null, loc: r.loc || null })), { runs: 300, siteMode }))}
           disabled={busy || roster.length < 3}>미리 보기 (저장 안 함)</button>
         {preview && <AssignPreview p={preview} joined={joined} />}
+        {!busy && <AssignCheck />}
         <button className="pk-btn main" onClick={assign} disabled={busy || roster.length < 3}>배정하기</button>
       </Panel>
 
@@ -688,6 +711,106 @@ function Setup() {
 
       {loaded && <InviteMail roster={roster} />}
     </>
+  );
+}
+
+// 배정 점검: 배정이 끝까지 저장됐는지 보고, 덜 됐으면 고치는 방법을 알려 준다(lib/pairs.js assignmentHealth).
+// 배정은 ① 짝·코드 ② 파트 단서 ③ 설정 순서로 나눠 저장하는데, "배정 완료"가 뜨기 전에 미션을 시작하면 ②③이 보안 규칙에 거부돼 빠진다
+// (11/18 실제로 있었던 일. 지금은 advance가 막는다). 미션이 시작된 뒤에는 화면에서 고칠 수 없어 Firebase 콘솔에서 값을 넣는다.
+function AssignCheck() {
+  const { config } = useApp();
+  const isOwner = useIsOwner();
+  const roster = useFullRoster();
+  const assignments = useColl("assignments");
+  const [hints, setHints] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    getDocs(query(collection(db, "clues"), where("idx", "==", PART_HINT_IDX)))
+      .then((s) => alive && setHints(s.docs.map((d) => d.data())), () => alive && setHints([]));
+    return () => { alive = false; };
+  }, [tick, config.assignVer]);
+  if (!roster || !assignments || !hints) return null;
+  const h = assignmentHealth({ roster, assignments, hints, config });
+  const phase = config.phase;
+  if (phase === PHASE.SETUP && (h.status === "none" || h.status === "ok")) return null; // 배정 전이거나 정상: 준비 단계에서는 조용히
+  if (h.status === "ok") {
+    return <p className="note banner" role="status">배정 점검: 정상이에요. 명단 {h.n}명 모두 짝이 있고, 파트 단서 {h.needHints}건과 설정(회차 {config.assignVer})이 맞아요. 참여자 화면에 "아직 배정 전이에요"가 보이면 새로 고치면 돼요.</p>;
+  }
+
+  // 짝은 그대로 두고 마무리(준비 단계에서만 저장된다): 파트 단서를 다시 쓰고 설정을 맞춘다
+  async function finish() {
+    setBusy(true);
+    setMsg("");
+    try {
+      const partOf = Object.fromEntries(roster.map((r) => [r.pid, (r.part || "").trim()]));
+      const newVer = (config.assignVer ?? 0) + 1;
+      const ops = Object.entries(assignments).filter(([g]) => partOf[g]).map(([g, a]) => (b) => b.set(doc(db, "clues", `${a.receiverPid}_${PART_HINT_IDX}`), {
+        receiverPid: a.receiverPid, idx: PART_HINT_IDX, answer: partOf[g], ver: newVer,
+      }));
+      await commitInChunks(ops);
+      await updateDoc(doc(db, "config", "app"), { assignVer: newVer, partExcluded: h.want.partExcluded, siteMatched: h.want.siteMatched });
+      setTick((t) => t + 1);
+      setMsg("배정을 마무리했어요(짝은 그대로예요). 이제 \"다음 단계로: 미션 진행\"을 눌러 주세요.");
+    } catch (err) {
+      setMsg(err?.code === "permission-denied" ? "저장이 거부됐어요. 처음 운영자 계정인지, 준비 단계인지 확인해 주세요." : `마무리하지 못했어요(${err?.code || err?.message}).`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const back = <>Firebase 콘솔 → Firestore Database → <code>config</code> → <code>app</code> 문서에서 <code>phase</code>를 <b>0</b>(숫자)으로 바꾸고, 이 화면을 새로 고쳐 주세요.</>;
+  return (
+    <div className="error banner" role="alert" aria-label="배정 점검">
+      {h.status === "none" && (
+        <>
+          <p><b>⚠ 배정이 저장되지 않았어요</b>(명단 {h.n}명, 짝 0건). "배정 완료"가 뜨기 전에 미션을 시작하면 이렇게 돼요.</p>
+          <ol className="small">
+            <li>{back}</li>
+            <li>"2. 마니또 배정"에서 "배정하기"를 누르고 <b>"○명 배정 완료"가 뜰 때까지</b> 기다려 주세요.</li>
+            <li>그다음 "다음 단계로: 미션 진행"을 눌러 주세요. 아직 아무도 미션을 하지 못한 상태라 잃는 것은 없어요.</li>
+          </ol>
+        </>
+      )}
+      {h.status === "mismatch" && (
+        <>
+          <p><b>⚠ 명단과 배정이 맞지 않아요</b>(명단 {h.n}명, 짝 {h.assigned}건). 다시 배정해야 해요. 다시 배정하면 모든 사람의 대상이 바뀌어요.</p>
+          {phase !== PHASE.SETUP && <ol className="small"><li>{back}</li><li>"배정하기"를 누르고 "○명 배정 완료"를 확인한 뒤 "다음 단계로: 미션 진행"을 눌러 주세요.</li></ol>}
+        </>
+      )}
+      {h.status === "partial" && (
+        <>
+          <p>
+            <b>⚠ 짝은 모두 저장됐지만({h.assigned}명) 배정 마무리가 빠졌어요.</b> 참여자는 대상을 보고 미션을 할 수 있어요.
+            다만 이대로 두면 최종 지목 때 "마니또의 파트" 단서가 안 나오고, 추리 보드가 내 파트를 후보에서 빼지 않아요. <b>짝을 다시 뽑지 않고</b> 고칠 수 있어요.
+          </p>
+          {phase === PHASE.SETUP ? (
+            <>
+              <button className="pk-btn main" disabled={busy || !isOwner} onClick={finish}>배정 마무리 (짝은 그대로)</button>
+              {!isOwner && <p className="small">처음 운영자만 할 수 있어요.</p>}
+            </>
+          ) : h.hintsUsable ? (
+            <>
+              <p className="small">Firebase 콘솔 → Firestore Database → <code>config</code> → <code>app</code> 문서에 아래 세 칸을 넣어 주세요(있으면 값만 고치기). 넣으면 이 경고가 사라져요.</p>
+              <ul className="small mono">
+                <li>assignVer (number) = {h.want.assignVer}</li>
+                <li>partExcluded (boolean) = {String(h.want.partExcluded)}</li>
+                <li>siteMatched (boolean) = {String(h.want.siteMatched)}</li>
+              </ul>
+            </>
+          ) : (
+            <ol className="small">
+              <li>{back} (파트 단서 {h.hintCount} / {h.needHints}건만 저장돼 있어 화면에서 다시 써야 해요. 1~2분이면 돼요)</li>
+              <li>"2. 마니또 배정"에 나오는 <b>"배정 마무리 (짝은 그대로)"</b>를 눌러 주세요. "배정하기"는 누르지 마세요(대상이 전부 바뀌어요).</li>
+              <li>그다음 "다음 단계로: 미션 진행"을 눌러 주세요.</li>
+            </ol>
+          )}
+        </>
+      )}
+      {msg && <p className="small" role="status">{msg}</p>}
+    </div>
   );
 }
 

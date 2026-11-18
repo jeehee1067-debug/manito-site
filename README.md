@@ -348,7 +348,7 @@ GitHub Actions도 같은 순서(`npm test` → `npm run test:rules` → `npm run
 
 ```
 npm run dev:emu      # 터미널 1: 에뮬레이터에 붙은 개발 서버
-npm run test:e2e     # 터미널 2: 화면 흐름 검증 11개 (특정 것만: npm run test:e2e -- guards)
+npm run test:e2e     # 터미널 2: 화면 흐름 검증 12개 (특정 것만: npm run test:e2e -- guards)
 ```
 실제 브라우저(Chromium)로 화면을 눌러 가며 확인한다(`e2e/`). 각 스크립트는 로컬 에뮬레이터 데이터를 지우고 시작하며 실제 Firebase 프로젝트에는 붙지 않는다. Playwright가 필요하다(`npm i --no-save playwright && npx playwright install chromium`, GitHub Actions에서는 돌리지 않음).
 
