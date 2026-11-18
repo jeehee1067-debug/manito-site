@@ -304,7 +304,8 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
         slot,
         kind: isPraise ? "praise" : "mission",
         message: message.trim(),
-        code: includeCode || isPraise ? code : null,
+        // 사이트 쪽지 카드와 칭찬 카드는 코드를 항상 같이 보낸다(쪽지가 곧 미션이라 따로 건넬 메모가 없다). 실물 카드만 끌 수 있다.
+        code: includeCode || isPraise || how === "site" ? code : null,
         ...(hasCard ? { card: { level: choice.level, text: choice.text } } : {}),
         createdAt: serverTimestamp(),
       });
@@ -429,8 +430,8 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
             <Dialogue speaker="꿀팁" tone="gold"><p>{DROP_TIP}</p></Dialogue>
           )}
           {hasCard && redeemed && <p className="small">{receiverName}이 이미 인증해서 카드를 바꿀 수 없어요. 완료 알리기를 눌러 주세요. 그래야 대상이 고른 카드를 보고 확인해서 카드 추가분이 붙어요.</p>}
-          <div className="code-tag" aria-label="인증 코드">
-            <span>인증 코드</span>
+          <div className="code-tag" aria-label="내 대상에게 줄 인증 코드">
+            <span>내 대상에게 줄<br />인증 코드</span>
             <strong>{code || "----"}</strong>
           </div>
           <p className="small">
@@ -439,7 +440,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
                 ? "칭찬 한 줄은 사이트 쪽지로 전달되고, 인증 코드도 함께 보내져요. 고른 카드 미션도 해 주세요(실물이면 이 코드를 메모에 적어 함께 두면 좋아요)."
                 : "칭찬 카드는 사이트 쪽지로 전달되고, 인증 코드도 함께 보내져요."
               : how === "site"
-                ? "인증 코드는 아래 쪽지와 함께 보내져요(체크를 풀지 않으면). 대상이 이 코드와 후기로 인증해요."
+                ? "사이트 쪽지 카드도 대상이 이 코드와 후기로 인증해요. 코드는 쪽지와 함께 자동으로 가요."
                 : "이 코드를 메모에 적어 실물과 함께 두면 좋아요. 아래에서 코드를 쪽지로도 함께 보내면 메모를 잃어버려도 인증할 수 있어요."}
             {hasCard && " 고른 카드 내용은 대상에게 같이 보여요(받은 것이 카드와 다르면 카드 추가분이 빠져요). 미션을 하면 바로 완료 알리기를 눌러 주세요. 대상이 알림보다 먼저 인증하면 카드를 한 번 더 확인해야 추가분이 붙어요."}
           </p>
@@ -452,12 +453,13 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
             <textarea className="pk-input" rows={3} maxLength={500} value={message} onChange={(e) => setMessage(e.target.value)}
               placeholder={isPraise ? "올해 고마웠던 점, 멋있었던 순간" : how === "site" ? "카드 내용대로 쪽지를 써 주세요. 이 글이 내 대상에게 가요" : "예: 분석실 신발장 맨 위 칸을 확인해 보세요"} />
           </label>
-          {!isPraise && (
+          {!isPraise && how !== "site" && (
             <label className="check">
               <input type="checkbox" checked={includeCode} onChange={(e) => setIncludeCode(e.target.checked)} />
-              쪽지에 인증 코드 함께 보내기
+              쪽지에 인증 코드 함께 보내기 (끄면 실물과 함께 둔 메모의 코드로만 인증할 수 있어요)
             </label>
           )}
+          {!isPraise && how === "site" && <p className="small">인증 코드는 쪽지와 함께 자동으로 가요. 내 대상이 이 코드와 후기로 인증해요.</p>}
           {error && <p className="error" role="alert">{error}</p>}
           <button className="pk-btn main" disabled={busy}>{isPraise ? (hasCard ? "칭찬 보내고 미션 완료 알리기" : "칭찬 카드 보내기") : "미션 완료 알리기"}</button>
         </form>
@@ -480,7 +482,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
               : verdict === "received" ? "운영진이 전달된 것으로 확인했어요. 미션으로 인정돼요(카드 추가분은 직접 인증된 경우에만 있어요)."
                 : verdict === "missing" ? "운영진이 전달되지 않은 것으로 확인했어요. 이 주차는 미션으로 인정되지 않아요."
                   : isPraise ? `칭찬 카드가 전달됐어요. 미션으로 인정돼요(${receiverName}이 인증하면 ${receiverName}도 응모권을 받아요).${hasCard ? ` 고른 카드의 추가분은 ${receiverName}이 인증하면서 카드와 같다고 확인해야 붙어요.` : ""}`
-                    : `${receiverName}의 인증을 기다리는 중이에요. 인증은 지난 주차도 최종 지목이 마감될 때까지 늦게 할 수 있고, ${receiverName}의 화면에도 인증해 달라는 알림이 계속 떠요. 며칠이 지나도 그대로면 운영진에게 알려 주세요. 운영진이 확인해서 미션으로 인정할 수 있어요(카드 추가분은 대상이 직접 인증해야 붙어요).`}
+                    : `${receiverName}의 인증을 기다리는 중이에요. 인증은 지난 주차도 최종 지목이 마감될 때까지 늦게 할 수 있고, ${receiverName}의 화면에도 인증해 달라는 알림이 계속 떠요. 며칠이 지나도 그대로면 운영진에게 알려 주세요. 운영진이 확인해서 미션으로 인정할 수 있어요(카드 추가분은 대상이 직접 인증해야 붙어요).${open ? ` 쪽지에 인증 코드를 넣지 않았다면 아래 "쪽지 더 보내기"로 코드를 함께 보내 주세요(${receiverName}이 코드가 없으면 인증할 수 없어요).` : ""}`}
           </p>
           {!redeemed && !verdict && reported && (
             <Dialogue speaker="알림" tone="warn">
@@ -501,7 +503,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
 function MoreNotes({ slot, myPid, receiverPid, receiverName, code, sent, showCode }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
-  const [withCode, setWithCode] = useState(false);
+  const [withCode, setWithCode] = useState(Boolean(showCode)); // 아직 인증 전이면 기본으로 코드를 같이 보낸다(대상이 코드를 못 받았을 때 다시 보내는 길)
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState({ type: "", text: "" });
   const left = EXTRA_NOTES_MAX - sent;
