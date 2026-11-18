@@ -231,6 +231,20 @@ const step = (s) => console.log("▶", s);
     const page = users["다라"];
     await tab(page, "규칙");
     await panel(page, "응모권 받는 법 (최대 17장, 수호천사는 +2장)").waitFor();
+    {
+      // 일정 타임라인이 규칙 탭 맨 위에 있다(날짜는 실행하는 날에 따라 달라지므로 개수와 순서만 본다)
+      const tl = panel(page, "일정 한눈에");
+      await tl.locator("ol.timeline").waitFor();
+      const titles = (await page.locator("section.panel h2.panel-title").allInnerTexts()).map((t) => t.trim());
+      assert.match(titles[0] || "", /일정 한눈에/, `규칙 탭 첫 패널이 일정 타임라인: ${titles.slice(0, 3).join(" | ")}`);
+      const rows = (await tl.locator("ol.timeline li").allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim());
+      assert.equal(rows.length, 9, rows.join(" | "));
+      assert.match(rows[0], /^11\/17\(화\).*가입 시작/);
+      assert.match(rows[8], /^12\/9\(수\).*송년회/);
+      assert.equal(rows.filter((t) => t.includes("단서 2개 공개")).length, 3, "단서 공개 세 번");
+      assert.ok((await tl.locator("li.tl-next").count()) <= 1, "'다음' 표시는 하나까지");
+      await tl.getByText("오늘은").waitFor();
+    }
     await panel(page, "파트 대항전").getByText("같은 파트끼리는 마니또가 되지 않아요.").waitFor();
     await panel(page, "응모권 받는 법").getByText("마지막 집계에서 미션 완수율 1위").waitFor();
     await panel(page, "응모권 받는 법").getByText("끝까지 해야 받는 것이 있어요.").waitFor();
@@ -336,6 +350,12 @@ const step = (s) => console.log("▶", s);
     await entry.locator("textarea").fill(`${giverOf[p.name]}님 덕분에 오늘 하루가 즐거웠어요. 정말 고마워요!`);
     await entry.getByRole("button", { name: "인증하기" }).click();
     await page.getByText("인증했어요. 응모권 1장이 쌓였어요.").waitFor();
+    // 인증을 마치면 입력 칸 대신 "인증 완료"가 보인다(열린 주차를 모두 인증했을 때)
+    const done = panel(page, "인증하기 ✔");
+    await done.getByText("✔ 인증을 마쳤어요.").waitFor();
+    await done.locator(".redeem-status li.done", { hasText: "1주차 ✔ 인증 완료" }).waitFor();
+    assert.equal(await done.getByPlaceholder("K7Q2").count(), 0, "다 인증하면 코드 입력 칸이 없다");
+    assert.equal(await done.getByRole("button", { name: "코드 입력 칸 열기" }).count(), 1);
     await tab(page, "내 미션");
     await page.locator(".target-name").waitFor();
     await page.waitForTimeout(400);

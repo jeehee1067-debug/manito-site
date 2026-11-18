@@ -49,16 +49,17 @@ export const EXTRA_NOTES_MAX = 5;
 
 // 행사 일정(참여자 화면 "이번 주 할 일"과 규칙 탭에 보인다). 바꾸면 화면에 바로 반영된다.
 // 주차를 올리고 단서를 공개하는 것은 운영자가 그날 운영 탭에서 직접 누른다(자동으로 바뀌지 않음).
+// kind: 규칙 탭 타임라인의 꼬리표·색(join 가입, week 주차 미션, clue 단서, close 마감·지목, party 송년회)
 export const SCHEDULE = [
-  { date: "2026-11-17", text: "가입 시작 (회사 메일 인증, 프로필 작성)" },
-  { date: "2026-11-18", text: "마니또 배정 · 1주차 미션 시작" },
-  { date: "2026-11-20", text: "단서 2개 공개" },
-  { date: "2026-11-24", text: "2주차 미션 시작" },
-  { date: "2026-11-27", text: "단서 2개 공개" },
-  { date: "2026-12-01", text: "3주차 시작 (전원 칭찬 한 줄 + 원하면 카드 미션)" },
-  { date: "2026-12-04", text: "단서 2개 공개" },
-  { date: "2026-12-08", text: "미션 마감 · 최종 지목(마지막 단서: 파트)" },
-  { date: "2026-12-09", text: "송년회: 응모권 집계, 정체 공개, 시상, 추첨" },
+  { date: "2026-11-17", kind: "join", text: "가입 시작 (회사 메일 인증, 프로필 작성)" },
+  { date: "2026-11-18", kind: "week", text: "마니또 배정 · 1주차 미션 시작" },
+  { date: "2026-11-20", kind: "clue", text: "단서 2개 공개" },
+  { date: "2026-11-24", kind: "week", text: "2주차 미션 시작" },
+  { date: "2026-11-27", kind: "clue", text: "단서 2개 공개" },
+  { date: "2026-12-01", kind: "week", text: "3주차 시작 (전원 칭찬 한 줄 + 원하면 카드 미션)" },
+  { date: "2026-12-04", kind: "clue", text: "단서 2개 공개" },
+  { date: "2026-12-08", kind: "close", text: "미션 마감 · 최종 지목(마지막 단서: 파트)" },
+  { date: "2026-12-09", kind: "party", text: "송년회: 응모권 집계, 정체 공개, 시상, 추첨" },
 ];
 const WEEKDAY = ["일", "월", "화", "수", "목", "금", "토"];
 // 이 기기의 오늘 날짜 "YYYY-MM-DD"(한국 시간 기기 기준)
@@ -71,6 +72,10 @@ export function shortDate(date) {
 }
 export function scheduleLabel({ date, text }) {
   return `${shortDate(date)} ${text}`;
+}
+// 두 날짜("YYYY-MM-DD") 사이의 날 수(to - from). 타임라인의 "D-2" 표시에 쓴다.
+export function daysBetween(from, to) {
+  return Math.round((new Date(`${to}T00:00:00`) - new Date(`${from}T00:00:00`)) / 86400000);
 }
 // 프로필 작성 기한: 첫 단서 공개 전날(사용자가 정함: "이번 주 목요일까지 작성해 달라"). 단서는 프로필 답에서 나간다.
 const dayBefore = (date) => {

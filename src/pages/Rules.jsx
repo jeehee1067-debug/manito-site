@@ -2,7 +2,46 @@ import { useApp } from "../App.jsx";
 import { Panel } from "../ui.jsx";
 import { PRIZES, PRIZES_ANNOUNCED, TICKET_RULES as R } from "../config/prizes.js";
 import { DEAL_COUNT } from "../lib/cards.js";
-import { DROP_TIP, EXTRA_NOTES_MAX, PROFILE_QUESTIONS, REVIEW_MIN, SCHEDULE, SPEND_GUIDE_WON, clueScheduleText, scheduleLabel, todayYmd } from "../lib/constants.js";
+import { DROP_TIP, EXTRA_NOTES_MAX, PROFILE_QUESTIONS, REVIEW_MIN, SCHEDULE, SPEND_GUIDE_WON, clueScheduleText, daysBetween, shortDate, todayYmd } from "../lib/constants.js";
+
+// 일정 타임라인(규칙 탭 맨 위). 지난 일정은 흐리게 ✔, 오늘 일정은 "오늘", 가장 가까운 다음 일정은 "다음 D-n".
+// 날짜는 이 기기의 오늘 기준이다(운영 단계와 무관 — 운영진이 그날 버튼을 누르는 시각은 공지로 알린다).
+const KIND_LABEL = { join: "가입", week: "미션", clue: "단서", close: "마감", party: "송년회" };
+function Timeline() {
+  const today = todayYmd();
+  const next = SCHEDULE.find((e) => e.date > today);
+  const todays = SCHEDULE.filter((e) => e.date === today);
+  const over = today > SCHEDULE[SCHEDULE.length - 1].date;
+  return (
+    <Panel title="일정 한눈에">
+      <p className="small tl-now">
+        오늘은 <b>{shortDate(today)}</b>
+        {todays.length > 0 && <> · 오늘 일정: <b>{todays.map((e) => e.text).join(", ")}</b></>}
+        {next && <> · 다음 일정: <b>{shortDate(next.date)} {next.text}</b> ({daysBetween(today, next.date)}일 뒤)</>}
+        {over && <> · 모든 일정이 끝났어요.</>}
+      </p>
+      <ol className="timeline">
+        {SCHEDULE.map((e) => {
+          const state = e.date < today ? "past" : e.date === today ? "today" : e === next ? "next" : "later";
+          return (
+            <li key={e.date} className={`tl-${state} tl-kind-${e.kind}`}>
+              <span className="tl-date">{shortDate(e.date)}</span>
+              <span className="tl-dot" aria-hidden="true">{state === "past" ? "✔" : ""}</span>
+              <span className="tl-body">
+                <span className="tl-tag">{KIND_LABEL[e.kind]}</span>
+                {state === "today" && <span className="tl-badge today">오늘</span>}
+                {state === "next" && <span className="tl-badge next">다음 · D-{daysBetween(today, e.date)}</span>}
+                {state === "past" && <span className="sr-only">(지남) </span>}
+                <span className="tl-text">{e.text}</span>
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+      <p className="small">주차가 바뀌거나 단서가 열리는 시각은 운영진이 그날 공지로 알려 드려요.</p>
+    </Panel>
+  );
+}
 
 // 참여자에게 보여 주는 규칙. 숫자는 prizes.js·constants.js에서 가져오므로 그쪽을 바꾸면 여기도 같이 바뀐다.
 // 문장으로 적은 규칙(보상·불참 처리·동점 기준)은 src/lib/scoring.js의 계산과 같아야 한다.
@@ -29,6 +68,8 @@ export default function Rules() {
 
   return (
     <>
+      <Timeline />
+
       <Panel title="한눈에 보기">
         <ol className="rules-list">
           <li>나는 한 사람의 <b>마니또</b>이고, 동시에 다른 누군가가 내 마니또예요.</li>
@@ -36,15 +77,6 @@ export default function Rules() {
           <li><b>받는 사람으로서</b> 받은 미션을 인증하고, 매주 공개되는 단서로 내 마니또를 추리해 마지막에 지목해요.</li>
           <li>12월 9일 송년회에서 정체를 공개하고, 응모권으로 시상·추첨해요. 응모권이 많을수록 상에 가까워져요.</li>
         </ol>
-      </Panel>
-
-      <Panel title="일정">
-        <ul className="rules-list schedule">
-          {SCHEDULE.map((e) => (
-            <li key={e.date} className={e.date < todayYmd() ? "muted" : ""}>{scheduleLabel(e)}</li>
-          ))}
-        </ul>
-        <p className="small">주차가 바뀌거나 단서가 열리는 시각은 운영진이 그날 공지로 알려 드려요.</p>
       </Panel>
 
       <Panel title="소소한 재미">

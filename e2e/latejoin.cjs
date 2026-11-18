@@ -177,7 +177,9 @@ const H = require("./helpers.cjs");
     await t.reload();
     await H.tab(t, "추리 보드");
     await H.panel(t, "인증하기").getByText("인증은 미션 진행 기간과 최종 지목 기간에 할 수 있어요.").waitFor();
-    assert.ok(await H.panel(t, "인증하기").getByRole("button", { name: "인증하기" }).isDisabled());
+    // 다 인증한 사람에게는 입력 칸이 없고(인증 완료 표시), 남은 주차가 있는 사람에게는 버튼이 꺼져 있다
+    const verifyBtn = H.panel(t, "인증하기").getByRole("button", { name: "인증하기" });
+    assert.ok((await verifyBtn.count()) === 0 || (await verifyBtn.isDisabled()), "마감 뒤에는 인증할 수 없다");
   }
 
   await browser.close();

@@ -240,6 +240,16 @@ function CodeEntry({ myPid, items }) {
   const [busy, setBusy] = useState(false);
   const [slotOf, setSlotOf] = useState(null); // 입력한 코드의 주차(나에게 온 코드일 때)
   const [cardMatch, setCardMatch] = useState(true);
+  // 내가 이미 인증한 주차. 인증을 마친 뒤에도 입력 칸이 그대로 있어 "제대로 인증됐나?" 하고 헷갈린다는 문의가 있어서,
+  // 열린 주차를 모두 인증했으면 입력 칸 대신 "인증 완료"를 보인다(같은 조회를 Inbox·MyRedemptions도 써서 읽기는 늘지 않는다).
+  const [mine, setMine] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  useEffect(() => onSnapshot(query(collection(db, "redemptions"), where("receiverPid", "==", myPid)), (s) =>
+    setMine(s.docs.map((d) => d.data().slot)), () => setMine([])), [myPid]);
+  const openWeeks = Array.from({ length: Math.min(3, Math.max(1, config.week || 1)) }, (_, i) => i + 1);
+  const doneWeeks = openWeeks.filter((w) => (mine || []).includes(w));
+  const leftWeeks = openWeeks.filter((w) => !doneWeeks.includes(w));
+  const allDone = mine !== null && leftWeeks.length === 0;
   // 미션(완료 알리기)은 미션 진행 단계에 마감되지만, 인증은 최종 지목 단계가 끝날 때까지 받는다(마감 직전에 온 미션을 인증할 시간)
   const running = config.phase === PHASE.RUNNING || config.phase === PHASE.GUESSING;
   // 4자리를 다 넣으면 어느 주차 코드인지 확인하고, 그 주차에 마니또가 고른 카드를 보여 준다(받은 것과 맞는지 확인)
@@ -289,10 +299,30 @@ function CodeEntry({ myPid, items }) {
   }
 
   return (
-    <Panel title="인증하기">
+    <Panel title={allDone ? "인증하기 ✔" : "인증하기"}>
       {!running && <p className="muted">인증은 미션 진행 기간과 최종 지목 기간에 할 수 있어요.</p>}
       {config.phase === PHASE.GUESSING && <p className="small note">미션은 마감됐어요. 받은 미션은 최종 지목이 마감되기 전까지 인증할 수 있어요.</p>}
-      <form className="stack" onSubmit={submit}>
+      {mine !== null && (
+        <ul className="plain redeem-status" aria-label="주차별 인증 상태">
+          {openWeeks.map((w) => (
+            <li key={w} className={doneWeeks.includes(w) ? "done" : ""}>{w}주차 {doneWeeks.includes(w) ? "✔ 인증 완료" : "인증 전"}</li>
+          ))}
+        </ul>
+      )}
+      {allDone && (
+        <div className="stack tight">
+          <p className="note" role="status">
+            <b>✔ 인증을 마쳤어요.</b> {openWeeks.length > 1 ? `${openWeeks.length}주차까지 ` : ""}받은 미션을 모두 인증해서 지금은 더 입력할 것이 없어요.
+            {(config.week || 1) < 3 && running ? " 다음 주차 미션을 받으면 여기에 입력 칸이 다시 나와요." : ""} 내 후기는 아래 "내가 인증한 것"에서 볼 수 있어요.
+          </p>
+          {msg.type === "ok" && msg.text && <p className="note" role="status">{msg.text}</p>}
+          {!showForm && running && <button type="button" className="text-btn" onClick={() => setShowForm(true)}>코드 입력 칸 열기</button>}
+        </div>
+      )}
+      {!allDone && doneWeeks.length > 0 && running && (
+        <p className="small">{doneWeeks.join("·")}주차는 인증을 마쳤어요 ✔. 아직 인증하지 않은 주차: {leftWeeks.join("·")}주차(마니또의 미션을 받으면 코드를 입력해 주세요).</p>
+      )}
+      {(!allDone || showForm) && <form className="stack" onSubmit={submit}>
         <label>
           <span className="panel-label">인증 코드</span>
           <input className="pk-input code-input" value={code} maxLength={6} onChange={(e) => setCode(e.target.value)} placeholder="K7Q2" disabled={!running} autoComplete="off" />
@@ -313,9 +343,9 @@ function CodeEntry({ myPid, items }) {
             {isGuessCard(card) && <p className="small"><b>알아내 맞혀 보기 카드예요.</b> 마니또가 맞혔을 때만 체크해 주세요(틀렸으면 체크를 풀어 주세요).</p>}
           </div>
         )}
-        {msg.text && <p className={msg.type === "error" ? "error" : "note"} role="status">{msg.text}</p>}
+        {msg.text && !(allDone && msg.type === "ok") && <p className={msg.type === "error" ? "error" : "note"} role="status">{msg.text}</p>}
         <button className="pk-btn main" disabled={busy || !running}>인증하기</button>
-      </form>
+      </form>}
     </Panel>
   );
 }
