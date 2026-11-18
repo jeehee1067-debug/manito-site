@@ -60,6 +60,22 @@ const pairsNow = async () => Object.fromEntries((await list("assignments")).map(
   await admin.locator(".hud-chip", { hasText: "미션 진행" }).waitFor();
   await admin.getByText(/배정 점검: 정상이에요\. 명단 9명 모두 짝이 있고, 파트 단서 9건과 설정\(회차 1\)이 맞아요/).waitFor();
 
+  step("프로필 작성 안내: 가입했는데 프로필을 안 채운 사람에게 보내는 메일과, 그 사람 화면의 기한 경고");
+  {
+    const { PROFILE_DUE, shortDate } = await import("../src/lib/constants.js");
+    const mail = H.panel(admin, "프로필 작성 안내 메일");
+    await mail.waitFor();
+    assert.match(await mail.locator("h2").innerText(), /받는 사람 1명/);
+    assert.equal(await mail.getByLabel("받는 사람 주소").inputValue(), "p01@samsung.com");
+    assert.ok((await mail.getByLabel("메일 제목").inputValue()).includes(`${shortDate(PROFILE_DUE)}까지`));
+    assert.ok((await mail.getByLabel("메일 본문").inputValue()).includes(`${shortDate(PROFILE_DUE)}까지 사이트의 "내 프로필"에서 6문항을 채우고`));
+    await mail.getByText("안 채운 사람 1명").waitFor();
+    await mail.getByRole("button", { name: "가입 안 한 사람도" }).click();
+    assert.match(await mail.locator("h2").innerText(), /받는 사람 9명/);
+    await guest.getByText(/내 프로필이 비어 있어요\./).waitFor();
+    console.log(`  받는 사람 1명(p01), 제목·본문에 기한 ${shortDate(PROFILE_DUE)} / '가입 안 한 사람도' 9명 / 참여자 화면에 프로필 경고`);
+  }
+
   step("미션 시작 뒤 발견: 설정만 빠진 경우(11/18 재현) → 콘솔에 넣을 값을 알려 주고, 넣으면 경고가 사라진다");
   await patchConfig({}, ["assignVer", "partExcluded", "siteMatched"]);
   await check().getByText("짝은 모두 저장됐지만(9명) 배정 마무리가 빠졌어요.").waitFor();
