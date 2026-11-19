@@ -13,6 +13,7 @@ import { angelQueue, angelQueueStatus, matchAngels, needyReceivers } from "../li
 import { PRIZES, TICKET_RULES as R } from "../config/prizes.js";
 import { parseRosterLine, rosterSummary, sameSummary } from "../lib/roster.js";
 import InviteMail, { ProfileMail } from "./InviteMail.jsx";
+import { BACKUP_COLLECTIONS, BACKUP_DOCS, backupDocCount, buildBackup, messageRows, stamp, toCsv } from "../lib/backup.js";
 
 // Firestore 배치는 500건 제한이라 나눠서 커밋한다.
 async function commitInChunks(ops) {
@@ -259,6 +260,7 @@ export default function Admin() {
       {phase === PHASE.SCORING && <Scoring />}
       {phase >= PHASE.RUNNING && <Accounts />}
       {phase >= PHASE.RUNNING && <WriteCounts />}
+      <Backup />
       <CoAdmins />
       {/* 단계 넘기기는 되돌릴 수 없어서 맨 아래에 둔다(사용자가 정함: "실수로 안 누르게") */}
       {phase < PHASE.REVEAL && (
@@ -1441,6 +1443,84 @@ function WriteCounts() {
           {rows.map(([pid, n]) => <li key={pid}>{nameOf(pid)}: {n.toLocaleString()}번</li>)}
           {rows.length === 0 && <li className="muted small">기록이 없어요.</li>}
         </ol>
+      )}
+    </Panel>
+  );
+}
+
+// 파일로 내려받기(브라우저가 저장한다. 서버로 보내지 않는다)
+function saveFile(name, text, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// 백업 내려받기(사용자가 정함: "사람들이 보낸 메시지·기록을 전부 백업해서 송년회 때 돌아보는 자료로 정리하고 싶다").
+// 무료 요금제에는 자동 백업이 없다. 누르면 운영자가 읽을 수 있는 자료를 모두 한 번 읽어(전체 문서 수만큼 읽기가 든다) 두 파일을 만든다:
+//  - 전체 백업(JSON): 모든 컬렉션 그대로. 문제가 생겼을 때 그 시점 기록을 확인하는 용도
+//  - 메시지·후기 모음(CSV, 엑셀): 쪽지·칭찬·후기·답장·한마디를 "누가 누구에게"와 함께 한 줄씩. 송년회 자료 정리용
+// 두 파일 모두 누가 누구의 마니또인지가 들어 있다(운영자는 원래 볼 수 있는 내용).
+function Backup() {
+  const { nameOf } = useApp();
+  const [busy, setBusy] = useState(false);
+  const [data, setData] = useState(null); // { at, collections, docs, failed }
+  const [msg, setMsg] = useState("");
+  async function run() {
+    setBusy(true);
+    setMsg("자료를 읽는 중이에요…");
+    try {
+      const failed = [];
+      const collections = Object.fromEntries(await Promise.all(BACKUP_COLLECTIONS.map(async (n) => {
+        try { return [n, await readAll(n)]; } catch { failed.push(n); return [n, null]; }
+      })));
+      const docs = Object.fromEntries(await Promise.all(BACKUP_DOCS.map(async ([c, id]) => {
+        try { const snap = await getDoc(doc(db, c, id)); return [`${c}/${id}`, snap.exists() ? snap.data() : null]; } catch { failed.push(`${c}/${id}`); return [`${c}/${id}`, null]; }
+      })));
+      setData({ at: new Date(), collections, docs, failed });
+      setMsg("");
+    } catch (err) {
+      setMsg(`백업을 만들지 못했어요(${err?.code || err?.message || "알 수 없는 오류"}). 다시 눌러 주세요.`);
+    } finally {
+      setBusy(false);
+    }
+  }
+  const rows = useMemo(() => (data ? messageRows({ nameOf, ...Object.fromEntries(Object.entries(data.collections).map(([k, v]) => [k, v || {}])) }) : []), [data, nameOf]);
+  const when = data ? stamp(data.at) : "";
+  const kinds = rows.reduce((m, r) => ({ ...m, [r.kindLabel]: (m[r.kindLabel] || 0) + 1 }), {});
+
+  return (
+    <Panel title="백업 내려받기">
+      <p className="small">
+        지금까지 쌓인 자료를 이 PC에 파일로 저장해요(자동 백업이 없어서, 지워지면 되돌릴 방법이 이것뿐이에요).
+        매주 단서를 공개하는 날과 미션 마감 직전에 한 번씩 받아 두면 좋아요. 누를 때마다 전체 문서 수만큼 읽기가 들어요.
+      </p>
+      <p className="small warn-text">파일에는 누가 누구의 마니또인지와 쪽지 내용이 들어 있어요. 송년회 전에는 다른 사람이 볼 수 없는 곳에 보관해 주세요.</p>
+      <button type="button" className="pk-btn" disabled={busy} onClick={run}>{data ? "백업 다시 만들기" : "백업 만들기"}</button>
+      {msg && <p className="small" role="status">{msg}</p>}
+      {data && (
+        <div className="stack tight backup-result">
+          <p className="note" role="status">
+            백업을 만들었어요: 문서 {backupDocCount(data.collections, data.docs).toLocaleString()}건, 메시지·후기 {rows.length}건
+            {rows.length > 0 && ` (${Object.entries(kinds).map(([k, n]) => `${k} ${n}`).join(" · ")})`}.
+          </p>
+          {data.failed.length > 0 && (
+            <p className="small warn-text">읽지 못한 것: {data.failed.join(", ")} (초대 코드·메일 색인은 처음 운영자만 읽을 수 있어요). 나머지는 들어 있어요.</p>
+          )}
+          <div className="reveal-row">
+            <button type="button" className="pk-btn sm" onClick={() => saveFile(`manito-backup-${when}.json`, JSON.stringify(buildBackup(data), null, 1), "application/json")}>
+              전체 백업 파일 받기 (JSON)
+            </button>
+            <button type="button" className="pk-btn sm" onClick={() => saveFile(`manito-messages-${when}.csv`, toCsv(rows), "text/csv;charset=utf-8")}>
+              메시지·후기 모음 받기 (엑셀용 CSV)
+            </button>
+          </div>
+          <p className="small muted">메시지·후기 모음은 엑셀에서 바로 열려요(종류·주차·쓴 사람·받은 사람·내용·고른 카드·공감 수·시각). 전체 백업은 모든 기록이 그대로 들어 있는 보관용 파일이에요.</p>
+        </div>
       )}
     </Panel>
   );

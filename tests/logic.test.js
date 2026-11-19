@@ -1236,3 +1236,56 @@ test("인증 코드: 코드가 실린 알림이 간 주차(codeSent)와 '코드 
   delete broken.AAA3;
   assert.deepEqual(codeProblems(assignments, giverCodes, broken).map((x) => `${x.code}:${x.problem}`).sort(), ["AAA3:missing", "BBB1:wrong", "CCC2:wrong"]);
 });
+
+test("백업: 메시지·후기 모음(누가 누구에게), CSV(한글 BOM·수식 막기), 시각 변환", async () => {
+  const { BACKUP_COLLECTIONS, buildBackup, backupDocCount, messageRows, toCsv, toPlain, stamp } = await import("../src/lib/backup.js");
+  const ts = (iso) => ({ toDate: () => new Date(iso) }); // Firestore 시각 흉내
+  const name = { A: "가나", B: "다라", C: "마바" };
+  const data = {
+    assignments: { A: { receiverPid: "B" }, B: { receiverPid: "C" }, C: { receiverPid: "A" } },
+    giverCodes: { A: { codes: { 1: "AAA1" } }, B: { codes: { 1: "BBB1" } }, C: { codes: { 1: "CCC1" } } },
+    deliveries: {
+      B_1: { receiverPid: "B", slot: 1, kind: "mission", message: "오늘도 힘내세요", card: { level: "easy", text: "응원 쪽지" }, createdAt: ts("2026-11-18T03:00:00Z") },
+      B_1_n1: { receiverPid: "B", slot: 1, kind: "note", message: "=1+1 장난", hidden: true, createdAt: ts("2026-11-18T05:00:00Z") },
+      C_3: { receiverPid: "C", slot: 3, kind: "praise", message: "올해 정말 고마웠어요", createdAt: ts("2026-12-01T03:00:00Z") },
+      A_1: { receiverPid: "A", slot: 1, kind: "mission", message: "", createdAt: ts("2026-11-18T04:00:00Z") }, // 빈 쪽지는 넣지 않는다
+    },
+    redemptions: { AAA1: { receiverPid: "B", slot: 1, review: '덕분에 하루가 "즐거웠어요"', feedId: "f1", voided: false, cardMatch: true, createdAt: ts("2026-11-18T06:00:00Z") } },
+    feed: { f1: { likes: 3, thanks: "고마워요 마니또님", review: "x" } },
+    toManito: { B_1: { receiverPid: "B", slot: 1, message: "혹시 가파트세요?", createdAt: ts("2026-11-19T01:00:00Z") } },
+    angels: { A: { angelPid: "B" } },
+    angelGifts: { A_1: { receiverPid: "A", k: 1, text: "귤 두 개", message: "대신 챙겨요", createdAt: ts("2026-11-25T01:00:00Z"), confirmed: true, review: "수호천사님 감사해요!", confirmedAt: ts("2026-11-25T02:00:00Z") } },
+  };
+  const rows = messageRows({ nameOf: (p) => name[p], ...data });
+  const line = (r) => `${r.kindLabel}|${r.slot ?? ""}|${r.from}>${r.to}|${r.text}`;
+  assert.deepEqual(rows.map(line), [
+    "미션 완료 쪽지|1|가나>다라|오늘도 힘내세요",
+    "추가 쪽지|1|가나>다라|=1+1 장난",
+    '인증 후기|1|다라>가나|덕분에 하루가 "즐거웠어요"',
+    "감사 답장|1|다라>가나|고마워요 마니또님",
+    "마니또에게 한마디|1|다라>가나|혹시 가파트세요?",
+    "수호천사 미션||다라>가나|귤 두 개 / 대신 챙겨요",
+    "수호천사 미션 후기||가나>다라|수호천사님 감사해요!",
+    "칭찬 카드|3|다라>마바|올해 정말 고마웠어요",
+  ]);
+  const review = rows.find((r) => r.kind === "review");
+  assert.deepEqual([review.likes, review.at, rows[0].card, rows[1].note], [3, "2026-11-18T06:00:00.000Z", "응원 쪽지", "운영진이 가린 쪽지"]);
+  // 피드에서 가린 글: 인증 문서에 후기가 없으면 따로 옮겨 둔 원문(hiddenFeed)을 쓴다
+  const hid = messageRows({ ...data, redemptions: { AAA1: { receiverPid: "B", slot: 1, review: "", feedId: "f1" } }, feed: { f1: { hidden: true, review: "" } }, hiddenFeed: { f1: { review: "가려진 원문" } } });
+  assert.deepEqual([hid.find((r) => r.kind === "review").text, hid.find((r) => r.kind === "review").note], ["가려진 원문", "피드에서 가린 글"]);
+
+  const csv = toCsv(rows);
+  assert.equal(csv.charCodeAt(0), 0xfeff);
+  const lines = csv.slice(1).trim().split("\r\n");
+  assert.equal(lines.length, rows.length + 1);
+  assert.ok(lines[2].includes('"\'=1+1 장난"'), "수식으로 시작하는 글은 앞에 작은따옴표");
+  assert.ok(lines[3].includes('"덕분에 하루가 ""즐거웠어요"""'), "큰따옴표는 두 번");
+
+  assert.deepEqual(toPlain({ a: ts("2026-11-18T03:00:00Z"), b: [1, { c: null }], d: undefined }), { a: "2026-11-18T03:00:00.000Z", b: [1, { c: null }], d: null });
+  const b = buildBackup({ collections: { roster: { A: { name: "가나" } }, invites: null }, docs: { "config/app": { phase: 1 } }, at: new Date("2026-11-19T00:30:00Z"), failed: ["invites"] });
+  assert.deepEqual([b.counts, b.failed, b.exportedAt, b.collections.roster.A.name], [{ roster: 1, invites: null }, ["invites"], "2026-11-19T00:30:00.000Z", "가나"]);
+  assert.equal(backupDocCount({ roster: { A: {}, B: {} }, invites: null }, { "config/app": {} }), 3);
+  assert.match(stamp(new Date(2026, 10, 19, 9, 5)), /^20261119-0905$/);
+  // 메시지 모음에 쓰는 컬렉션은 모두 백업 목록에 들어 있어야 한다
+  for (const n of Object.keys(data)) assert.ok(BACKUP_COLLECTIONS.includes(n), n);
+});

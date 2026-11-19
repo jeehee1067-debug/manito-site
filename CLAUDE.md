@@ -102,6 +102,7 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
   - 규칙 탭 "마니또와 대상"에 "인증 코드도 두 가지"를 적었다.
   - **코드 칸의 안내 글자는 코드처럼 보이지 않게 쓴다**(`Detective.jsx` `CODE_PLACEHOLDER` = "쪽지에 적힌 4자리", `.code-input::placeholder`는 작은 글씨). 예전 예시 "K7Q2"가 진짜 코드와 같은 크기로 후기 칸 바로 위에 보여서 그것을 따라 써 넣은 것이 위 문의의 가장 유력한 원인이다(실패한 입력은 어디에도 저장되지 않아 확정은 못 함). 지금도 "K7Q2"를 넣으면 예시 글자였다고 따로 알린다(`EXAMPLE_MSG`). E2E는 입력 칸을 이 안내 글자로 찾는다.
 - **운영 화면 "고른 미션 카드"**(사용자가 정함: "실제 어떤 카드를 각자 뽑아서 하고 있는지 내가 보게". `Admin.jsx` `CardPicks`, `pairs.js` `cardPicks`, 짝 현황 아래): 주차를 고르면 난이도별·방법별 인원과 카드별 표(고름·완료·인증, 이름 없음)가 보이고, "사람별 보기"를 눌러야 누가 어떤 카드를 골랐는지(마니또·대상·카드·상태)가 보인다. 짝 현황과 같은 구독(`usePairs`)을 쓴다. 패널 제목에 "주차"라는 낱말을 넣지 않는다(E2E가 "주차" 패널을 제목으로 찾는다).
+- **백업 내려받기**(사용자가 정함: "사람들이 보낸 메시지·기록을 전부 백업해서 송년회 때 돌아보는 자료로 정리하고 싶다". 운영 화면 맨 아래쪽 `Admin.jsx` `Backup`, 계산은 `src/lib/backup.js`): 무료 요금제에는 자동 백업이 없어서, "백업 만들기"를 누르면 운영자가 읽을 수 있는 컬렉션을 모두 한 번 읽고(`BACKUP_COLLECTIONS` + `config/app`. **전체 문서 수만큼 읽기가 든다** — 누를 때만) 두 파일을 받게 한다: 전체 백업 `manito-backup-날짜-시각.json`(모든 컬렉션 그대로, 시각은 ISO 글자), 메시지·후기 모음 `manito-messages-….csv`(엑셀용: 종류·주차·쓴 사람·받은 사람·내용·고른 카드·공감 수·시각·비고. 완료 쪽지·칭찬 카드·추가 쪽지·인증 후기·감사 답장·마니또에게 한마디·수호천사 미션과 후기 — `messageRows`). CSV는 한글이 깨지지 않게 BOM을 넣고, 사람들이 쓴 글이 수식으로 실행되지 않게 `=`·`+`·`-`·`@`로 시작하는 칸 앞에 작은따옴표를 붙인다. **두 파일에는 누가 누구의 마니또인지가 들어 있다**(화면에 경고). `invites`·`mailIndex` 목록은 처음 운영자만 읽어서 공동 운영자가 받으면 "읽지 못한 것"으로 표시된다. **컬렉션을 새로 만들면 `BACKUP_COLLECTIONS`에도 넣는다.** 사용자에게는 매주 단서 공개 날과 미션 마감 직전에 받아 두라고 안내했다.
 - **일정 타임라인**(사용자가 정함: "일정을 한눈에 볼 수 있게 규칙 탭 맨 위에"): 규칙 탭 두 번째 패널 "일정 한눈에"(`Rules.jsx` `Timeline`. 첫 패널은 "마니또와 대상"). `SCHEDULE`의 `kind`(join·week·clue·close·party)로 꼬리표·색을 정하고, 이 기기의 오늘 날짜로 지난 일정(흐리게 ✔)·오늘·다음(D-n)을 표시한다(운영 단계와는 무관). **일정을 더하거나 바꾸면 `kind`도 넣는다**(`npm test`가 확인).
 - **"다음 단계로" 버튼은 운영 화면 맨 아래**(사용자가 정함: "실수로 안 누르게"). 맨 위 "운영 단계"에는 지금 단계만 보인다.
 - 화면 가리기: 내 미션의 대상 이름·캐릭터는 기본으로 가리고 60초 보기, 운영 화면 짝 현황은 접힘, 초대 코드·메일은 "보기"를 눌러야 보임.
@@ -181,6 +182,7 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 | `src/lib/scoring.js` | 응모권 계산(운영자 확인 `verdicts`·`cardMatch`·단서 6칸·비용 카드 반영), 파트 대항전 순위(주간·최종), 가중 추첨, 수상자 정하기(`resolvePrizes`: 큰 상 우선, 한 사람은 하나만. 2등 `seededTop`, 3등 `rankReviews`), 6등 사이트 추첨(`drawOnline`)과 검증(`verifyOnline`) |
 | `src/lib/pairs.js` | 운영 화면 짝 현황(마니또별 주차 상태·지목), 운영자가 확인할 주차, 받는 사람 기준 코드(`receiverCodes`), 마니또가 낸 단서(`clueAnswers`·`cluesDoneSet`) |
 | `src/lib/angels.js` | 수호천사 자동 연결 기준: 지원 순서(`angelQueue`), 도움이 필요한 사람(`needyReceivers`), 짝짓기(`matchAngels`), 운영 화면 표시(`angelQueueStatus`) |
+| `src/lib/backup.js` | 운영 화면 백업: 전체 백업 내용(`buildBackup`), 메시지·후기 모음(`messageRows`), 엑셀용 CSV(`toCsv`) |
 | `src/lib/writes.js` | 쓰기 횟수 `bump()` = `{ n: increment(1) }` |
 | `src/lib/reveal.js` | 송년회 발표 장면 순서(`buildSlides`: 원을 따라 잇는 짝 공개 `pairChain`, 시상은 숫자 정하기 `drawGo` → 2등 → 3등 → 4·5등 → 1등(종이 `paper`) → `refill` → 6등(`online`)), 참여자에게 열린 장면(`revealedUpTo`) |
 | `src/pages/Reveal.jsx` | 결과 탭(참여자는 넘긴 장면까지만), 발표 화면(`Presenter`), 시상(숫자 `SeedForm`, 종이로 뽑힌 이름 입력 `PaperForm`, 겹친 자리 `RefillSlide`, 6등 `OnlineSlide`. 모두 트랜잭션), 1~6등 목록(발표된 것만). 사람이 많은 장면은 한 장에 들어가게 줄인다(명탐정 `crowdSize`: 33명부터 이름만, 수호천사 9쌍부터 한 줄씩, 칭찬 벽 `PraiseWall`은 실제 높이를 재서 마지막 카드까지 흘러감) |
@@ -190,7 +192,7 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 | `src/pages/InviteMail.jsx`, `src/lib/inviteMail.js` | 운영 화면 "가입 안내 메일": 받는 사람(`inviteRecipients`)·본문(`inviteMessage`)·가입 링크(`joinUrl`, `?join`)·메일 앱 주소(`mailtoHref`) |
 | `src/pages/Claim.jsx` | "연결 전" 화면: 회사 메일 인증 확인(`claimWithMail`, 창으로 돌아오면 스스로 확인), 초대 코드 연결(예비), 공동 운영자로 지정받을 계정의 계정 번호 |
 | `src/pages/Feed.jsx` | 익명 피드(`feed` 문서만 읽음) |
-| `src/pages/Admin.jsx` | 운영 화면: 단계, 명단·배정, 주차·단서, 짝 현황(`Pairs`), 고른 미션 카드(`CardPicks`), 받은 게 없어요·집계 전 확인(`Unresolved`), 수호천사 연결(`Angels`), 인증 검토(`Moderation`), 쪽지 검토(`NotesReview`), 쓰기 횟수(`WriteCounts`), 집계·검산, 공동 운영자, 규칙 버전 경고(`RulesCheck`) |
+| `src/pages/Admin.jsx` | 운영 화면: 단계, 명단·배정, 주차·단서, 짝 현황(`Pairs`), 고른 미션 카드(`CardPicks`), 받은 게 없어요·집계 전 확인(`Unresolved`), 수호천사 연결(`Angels`), 인증 검토(`Moderation`), 쪽지 검토(`NotesReview`), 쓰기 횟수(`WriteCounts`), 백업 내려받기(`Backup`), 집계·검산, 공동 운영자, 규칙 버전 경고(`RulesCheck`) |
 | `src/ui.jsx` | 패널·대사창·캐릭터 공통 컴포넌트, 역할 낱말 강조(`Giver`·`Target`·`RoleNote`), 카드 방법 표시(`HowTag`). 패널 제목 앞 아이콘은 제목의 낱말로 고른다(`icons.jsx` `iconForTitle`) |
 | `src/icons.jsx`, `src/assets/icons/`, `tools/icons/make_icons.py` | 픽셀 아이콘(16×16 SVG): 메뉴(탭)와 패널 제목. 그림은 Python 스크립트의 글자 격자에서 만든다(고치면 `python3 tools/icons/make_icons.py`). 시즌과 무관한 기본 디자인이다 |
 | `src/firebase.js` | Firebase 연결. `npm run dev:emu`(`.env.emulator`)일 때만 에뮬레이터 연결. `appCheckSiteKey`가 있으면 App Check. `?longpoll`로 연 기기는 Firestore 긴 폴링(사내 프록시 대비) |
