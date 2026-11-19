@@ -342,6 +342,14 @@ ul.plain.redeem-status li { flex: 0 0 auto; width: auto; margin: 0; }
 .how-line.how-site { border-color: var(--green); }
 .how-line.how-real { border-color: #d9772b; }
 .pick-counts { line-height: 2; }
+/* 예약(자동 진행) 목록 */
+.auto-list { gap: 8px; }
+.auto-item { border: 2px solid #c3bfae; border-radius: 8px; padding: 8px 10px; background: #fff; display: grid; gap: 4px; }
+.auto-item.is-waiting { border-color: var(--blue); }
+.auto-item.is-done { background: #eef6ef; border-color: var(--green); }
+.auto-item.is-blocked, .auto-item.is-failed { border-color: var(--red); }
+.auto-item .pk-input { width: 100%; max-width: 16em; }
+.auto-state { word-break: keep-all; }
 .warn-text { color: var(--red); font-weight: 700; }
 .panel.warn-panel { border-color: var(--red); }
 .pk-table.pick-table td.card-cell { text-align: left; white-space: normal; word-break: keep-all; min-width: 11em; }

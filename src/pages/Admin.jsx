@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   arrayRemove, arrayUnion, collection, deleteDoc, deleteField, doc, getDoc, getDocs, onSnapshot, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, writeBatch,
 } from "firebase/firestore";
@@ -13,6 +13,7 @@ import { angelQueue, angelQueueStatus, matchAngels, needyReceivers } from "../li
 import { PRIZES, TICKET_RULES as R } from "../config/prizes.js";
 import { parseRosterLine, rosterSummary, sameSummary } from "../lib/roster.js";
 import InviteMail, { ProfileMail } from "./InviteMail.jsx";
+import { AUTO_ITEMS, CLAIM_MS, autoPlan, localInputToMs, msToLocalInput, nextDue } from "../lib/schedule.js";
 import { BACKUP_COLLECTIONS, BACKUP_DOCS, backupDocCount, buildBackup, messageRows, stamp, toCsv } from "../lib/backup.js";
 
 // Firestore 배치는 500건 제한이라 나눠서 커밋한다.
@@ -910,15 +911,10 @@ function Running() {
     // 주차를 올리면 그때까지 아무것도 받지 못한 사람에게 수호천사가 자동으로 연결된다(되돌릴 수 없어서 한 번 묻는다)
     if (week > config.week && !window.confirm(`${week}주차를 열까요?\n\n지금까지 마니또에게 아무것도 받지 못한 사람이 있으면, 수호천사 지원자가 먼저 지원한 순서대로 자동 연결돼요(운영자가 고르지 않아요). 정해진 날에만 눌러 주세요.`)) return;
     try {
-      await updateDoc(doc(db, "config", "app"), { week });
+      if (week > config.week) setBoardMsg(await openWeek(week));
+      else await updateDoc(doc(db, "config", "app"), { week });
     } catch {
       return setBoardMsg("주차를 바꾸지 못했어요. 잠시 뒤 다시 눌러 주세요.");
-    }
-    if (week > config.week) {
-      const made = await linkAngelsNow(week).catch(() => null);
-      setBoardMsg(made == null ? `${week}주차를 열었어요. 수호천사 자동 연결은 하지 못했어요. 아래 "수호천사"에서 "지금 순서대로 연결"을 눌러 주세요.`
-        : made.length ? `${week}주차를 열었어요. 수호천사 ${made.length}명을 지원 순서대로 연결했어요(아래 "수호천사"에서 볼 수 있어요).`
-          : `${week}주차를 열었어요. 수호천사를 연결할 사람은 없었어요.`);
     }
   }
 
@@ -979,6 +975,8 @@ function Running() {
           {released >= CLUE_COUNT && " 단서 6개를 모두 공개했어요."}
         </p>
       </Panel>
+
+      <ScheduleBox />
 
       <Panel title="파트 순위 발표">
         <p className="small">
@@ -1444,6 +1442,146 @@ function WriteCounts() {
           {rows.length === 0 && <li className="muted small">기록이 없어요.</li>}
         </ol>
       )}
+    </Panel>
+  );
+}
+
+// ── 예약(자동 진행) ───────────────────────────────────────────────────────
+// 주차 열기·단서 공개를 버튼과 예약이 같이 쓴다(확인창 없이 실제 작업만). 실패하면 던진다.
+async function openWeek(week) {
+  await updateDoc(doc(db, "config", "app"), { week });
+  const made = await linkAngelsNow(week).catch(() => null);
+  return made == null ? `${week}주차를 열었어요. 수호천사 자동 연결은 하지 못했어요. 아래 "수호천사"에서 "지금 순서대로 연결"을 눌러 주세요.`
+    : made.length ? `${week}주차를 열었어요. 수호천사 ${made.length}명을 지원 순서대로 연결했어요(아래 "수호천사"에서 볼 수 있어요).`
+      : `${week}주차를 열었어요. 수호천사를 연결할 사람은 없었어요.`;
+}
+async function releaseCluesTo(count, week) {
+  await updateDoc(doc(db, "config", "app"), { cluesReleased: count });
+  try {
+    const [roster, missions] = await Promise.all([readAll("roster"), readAll("giverMissions")]);
+    const n = await publishPartBoard(Object.entries(roster).map(([pid, r]) => ({ pid, ...r })), missions, week);
+    return n ? "단서를 공개하고 파트 순위도 새로 발표했어요." : "단서를 공개했어요. 파트가 입력되지 않아 파트 순위는 비어 있어요.";
+  } catch {
+    return "단서는 공개했지만 파트 순위는 발표하지 못했어요. 아래 '파트 순위만 다시 발표'를 눌러 주세요.";
+  }
+}
+
+const SCHEDULE_REF = () => doc(db, "meta", "schedule");
+const AUTO_TICK_MS = 15000;
+
+// 예약 실행기(화면 없음). App이 운영자·공동 운영자 계정에 띄운다: 사이트가 열려 있는 동안 예약 시각이 지난 것을 실행한다.
+// 여러 운영자 화면이 동시에 열려 있어도 한 번만 실행되게, 실행 전에 트랜잭션으로 "내가 맡음"(claimedMs)을 적는다.
+export function AutoRunner() {
+  const { config, user } = useApp();
+  const [items, setItems] = useState(null);
+  const [tick, setTick] = useState(0);
+  const running = useRef(false);
+  useEffect(() => onSnapshot(SCHEDULE_REF(), (s) => setItems(s.exists() ? s.data().items || {} : {}), () => setItems(null)), []);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), AUTO_TICK_MS);
+    return () => clearInterval(t);
+  }, []);
+  const phase = config.phase, week = config.week || 1, released = config.cluesReleased || 0;
+  useEffect(() => {
+    if (!items || running.current) return;
+    const due = nextDue({ items, config: { phase, week, cluesReleased: released }, now: Date.now() });
+    if (!due) return;
+    running.current = true;
+    (async () => {
+      const ref = SCHEDULE_REF();
+      const mine = await runTransaction(db, async (tx) => {
+        const cur = (await tx.get(ref)).data()?.items?.[due.id];
+        if (!cur || cur.at !== due.at || cur.doneAt || Date.now() - (cur.claimedMs || 0) < CLAIM_MS) return false;
+        tx.update(ref, { [`items.${due.id}.claimedMs`]: Date.now(), [`items.${due.id}.claimedBy`]: user.uid, [`items.${due.id}.tries`]: (cur.tries || 0) + 1 });
+        return true;
+      }).catch(() => false);
+      if (!mine) return;
+      try {
+        const result = due.type === "week" ? await openWeek(due.target) : await releaseCluesTo(due.target, week);
+        await updateDoc(ref, { [`items.${due.id}.doneAt`]: serverTimestamp(), [`items.${due.id}.result`]: result, [`items.${due.id}.error`]: deleteField() });
+      } catch (err) {
+        await updateDoc(ref, { [`items.${due.id}.error`]: `실행하지 못했어요(${err?.code || err?.message || "알 수 없는 오류"}). 2분 뒤 다시 해 봐요.` }).catch(() => {});
+      }
+    })().finally(() => { running.current = false; });
+  }, [items, tick, phase, week, released, user]);
+  return null;
+}
+
+// 예약 패널(미션 진행 단계): 다섯 가지(2·3주차 열기, 단서 공개 세 번)에 시각을 정한다.
+function ScheduleBox() {
+  const { config } = useApp();
+  const [items, setItems] = useState(null);
+  const [form, setForm] = useState(null); // { id: "2026-11-20T09:00" }
+  const [msg, setMsg] = useState("");
+  const [, setNow] = useState(0);
+  useEffect(() => onSnapshot(SCHEDULE_REF(), (s) => setItems(s.exists() ? s.data().items || {} : {}), () => setItems({})), []);
+  useEffect(() => { const t = setInterval(() => setNow((n) => n + 1), AUTO_TICK_MS); return () => clearInterval(t); }, []);
+  useEffect(() => {
+    if (items && form === null) setForm(Object.fromEntries(AUTO_ITEMS.map((it) => [it.id, msToLocalInput(items[it.id]?.at)])));
+  }, [items, form]);
+  if (!items || !form) return null;
+  const plan = autoPlan({ items, config, now: Date.now() });
+  const when = (ms) => new Date(ms).toLocaleString("ko-KR", { month: "numeric", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit" });
+  const stateText = (r) => ({
+    done: r.doneAt ? `예약으로 실행했어요${r.doneAt?.toDate ? ` (${when(r.doneAt.toDate().getTime())})` : ""}. ${r.result}` : "이미 됐어요.",
+    none: "예약 없음",
+    waiting: `예약됨: ${when(r.at)}`,
+    due: "예약 시각이 됐어요. 실행하는 중이에요…",
+    blocked: `예약 시각(${r.at ? when(r.at) : ""})이 지났지만 기다리는 중: ${r.why}`,
+    failed: r.why,
+    off: r.why,
+  }[r.state]);
+  const fill = () => setForm((f) => Object.fromEntries(AUTO_ITEMS.map((it) => [it.id, f[it.id] || (it.date && plan.find((r) => r.id === it.id).state !== "done" ? `${it.date}T09:00` : "")])));
+
+  async function save() {
+    setMsg("");
+    const next = {};
+    const past = [];
+    for (const r of plan) {
+      const at = localInputToMs(form[r.id]);
+      if (r.state === "done") { if (items[r.id]) next[r.id] = items[r.id]; continue; }
+      if (at == null) continue; // 비워 두면 예약 취소
+      // 시각을 바꾸면 실패 기록을 지우고 새로 시작한다
+      next[r.id] = items[r.id]?.at === at ? items[r.id] : { at };
+      if (at <= Date.now()) past.push(r.label);
+    }
+    if (past.length && !window.confirm(`이미 지난 시각이에요: ${past.join(", ")}\n\n저장하면 곧바로 실행돼요(단서 공개는 되돌릴 수 없어요). 저장할까요?`)) return;
+    try {
+      await setDoc(SCHEDULE_REF(), { items: next });
+      setMsg("예약을 저장했어요.");
+    } catch {
+      setMsg("예약을 저장하지 못했어요. 잠시 뒤 다시 눌러 주세요.");
+    }
+  }
+
+  return (
+    <Panel title="예약 (자동 진행)">
+      <p className="small">
+        시각을 정해 두면 그때 자동으로 실행돼요(위의 버튼을 누른 것과 같아요: 주차를 열면 수호천사 자동 연결, 단서를 공개하면 파트 순위 발표도 같이).
+        칸을 비우고 저장하면 예약이 취소돼요. 시각은 이 기기의 시계 기준이에요.
+      </p>
+      <p className="small warn-text">
+        사이트에는 서버가 없어서, 예약 시각에 운영자나 공동 운영자 중 누군가 이 사이트를 열어 두고 있어야 그 시각에 실행돼요.
+        아무도 열어 두지 않았으면 그 뒤 운영자가 사이트를 여는 순간 실행돼요(PC가 절전 상태이면 열려 있는 것이 아니에요).
+      </p>
+      <ul className="plain auto-list">
+        {plan.map((r) => (
+          <li key={r.id} className={`auto-item is-${r.state}`}>
+            <label>
+              <span className="panel-label">{r.label}</span>
+              <input type="datetime-local" className="pk-input" value={form[r.id]} disabled={r.state === "done"}
+                onChange={(e) => setForm((f) => ({ ...f, [r.id]: e.target.value }))} aria-label={`${r.label} 예약 시각`} />
+            </label>
+            <span className="small auto-state">{stateText(r)}{r.error && r.state !== "failed" ? ` ${r.error}` : ""}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="reveal-row">
+        <button type="button" className="pk-btn" onClick={save}>예약 저장</button>
+        <button type="button" className="pk-btn sm" onClick={fill}>빈 칸을 일정표 날짜(오전 9시)로 채우기</button>
+      </div>
+      {msg && <p className="note" role="status">{msg}</p>}
+      <p className="small muted">미션 마감(12/8)과 집계·공개(12/9)는 되돌릴 수 없어서 예약하지 않아요. 맨 아래 "다음 단계로"를 직접 눌러 주세요.</p>
     </Panel>
   );
 }
