@@ -550,6 +550,42 @@ const step = (s) => console.log("▶", s);
     console.log(`  가나가 1주차에 쪽지 2건을 더 보냄 → ${target["가나"]}의 받은 것 3건(완료 알림 1 + 쪽지 2), 운영 화면 짝 현황: "${row.w[0]}"`);
   }
 
+  step("운영 화면 '백업 내려받기': 전체 백업(JSON)과 메시지·후기 모음(CSV)");
+  {
+    const fs = require("node:fs");
+    await tab(admin, "운영");
+    const bk = panel(admin, "백업 내려받기");
+    await bk.getByRole("button", { name: "백업 만들기" }).click();
+    await bk.getByText(/백업을 만들었어요: 문서 [\d,]+건, 메시지·후기 \d+건/).waitFor();
+    assert.equal(await bk.getByText("읽지 못한 것").count(), 0, "처음 운영자는 모든 자료를 읽는다");
+    const grab = async (name) => {
+      const [dl] = await Promise.all([admin.waitForEvent("download"), bk.getByRole("button", { name }).click()]);
+      return { file: dl.suggestedFilename(), text: fs.readFileSync(await dl.path(), "utf8") };
+    };
+    const full = await grab("전체 백업 파일 받기 (JSON)");
+    assert.match(full.file, /^manito-backup-\d{8}-\d{4}\.json$/);
+    const j = JSON.parse(full.text);
+    assert.deepEqual(j.failed, []);
+    assert.equal(Object.keys(j.collections.assignments).length, N, "짝 6쌍");
+    assert.equal(Object.keys(j.collections.codes).length, N * 3, "코드");
+    assert.equal(Object.keys(j.collections.redemptions).length, N, "1주차 인증 6건");
+    assert.equal(Object.keys(j.collections.roster).length, N);
+    assert.equal(j.docs["config/app"].phase, 1);
+    assert.match(Object.values(j.collections.redemptions)[0].createdAt, /^\d{4}-\d\d-\d\dT/, "시각은 ISO 글자");
+    const msgs = await grab("메시지·후기 모음 받기 (엑셀용 CSV)");
+    assert.match(msgs.file, /^manito-messages-\d{8}-\d{4}\.csv$/);
+    assert.equal(msgs.text.charCodeAt(0), 0xfeff, "엑셀에서 한글이 깨지지 않게 BOM");
+    const lines = msgs.text.slice(1).trim().split("\r\n");
+    assert.equal(lines[0], '"종류","주차","쓴 사람","받은 사람","내용","고른 카드","공감 수","시각","비고"');
+    // 1주차: 완료 쪽지 6 + 후기 6 + 감사 답장 1 + 추가 쪽지 2
+    const count = (label) => lines.filter((l) => l.startsWith(`"${label}"`)).length;
+    assert.deepEqual([count("미션 완료 쪽지"), count("인증 후기"), count("감사 답장"), count("추가 쪽지")], [N, N, 1, 2], lines.join("\n"));
+    // 누가 누구에게: 가나가 보낸 완료 쪽지는 가나 → 가나의 대상
+    assert.ok(lines.some((l) => l.startsWith(`"미션 완료 쪽지","1","가나","${target["가나"]}","가나가 보낸 1주차 쪽지"`)), "가나의 쪽지 줄");
+    assert.ok(lines.some((l) => l.startsWith(`"감사 답장","1","사아","${giverOf["사아"]}","덕분에 한 주가 든든했어요!"`)), "감사 답장 줄");
+    console.log(`  백업: ${full.file}(문서 ${Object.values(j.counts).reduce((a, b) => a + (b || 0), 0)}건), ${msgs.file}(메시지·후기 ${lines.length - 1}줄)`);
+  }
+
   step("운영: 최근 접속, 공동 운영자 지정·해제");
   {
     await tab(admin, "운영");
