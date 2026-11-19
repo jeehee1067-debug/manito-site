@@ -1289,3 +1289,36 @@ test("백업: 메시지·후기 모음(누가 누구에게), CSV(한글 BOM·수
   // 메시지 모음에 쓰는 컬렉션은 모두 백업 목록에 들어 있어야 한다
   for (const n of Object.keys(data)) assert.ok(BACKUP_COLLECTIONS.includes(n), n);
 });
+
+test("예약(자동 진행): 시각이 지난 것만, 앞 단계가 된 뒤에, 이른 것부터 하나씩", async () => {
+  const { AUTO_ITEMS, CLAIM_MS, MAX_TRIES, autoPlan, nextDue, localInputToMs, msToLocalInput } = await import("../src/lib/schedule.js");
+  assert.deepEqual(AUTO_ITEMS.map((i) => `${i.id}:${i.date}`), ["clues2:2026-11-20", "week2:2026-11-24", "clues4:2026-11-27", "week3:2026-12-01", "clues6:2026-12-04"], "일정표의 날짜와 같은 순서");
+  const T = 1_000_000_000_000;
+  const st = (items, config, now = T) => Object.fromEntries(autoPlan({ items, config, now }).map((r) => [r.id, r.state]));
+  const run = { phase: 1, week: 1, cluesReleased: 0 };
+  // 예약 없음 / 시각 전 / 시각이 됨
+  assert.deepEqual(st({}, run), { clues2: "none", week2: "none", clues4: "none", week3: "none", clues6: "none" });
+  assert.deepEqual(st({ clues2: { at: T + 1 }, week2: { at: T } }, run), { clues2: "waiting", week2: "due", clues4: "none", week3: "none", clues6: "none" });
+  // 앞 단계가 먼저: 3주차는 2주차 뒤에, 단서 3·4번은 2주차가 열리고 1·2번이 공개된 뒤에
+  const all = Object.fromEntries(AUTO_ITEMS.map((i) => [i.id, { at: T - 10 }]));
+  assert.deepEqual(st(all, run), { clues2: "due", week2: "due", clues4: "blocked", week3: "blocked", clues6: "blocked" });
+  assert.deepEqual(st(all, { phase: 1, week: 2, cluesReleased: 0 }), { clues2: "due", week2: "done", clues4: "blocked", week3: "due", clues6: "blocked" });
+  assert.deepEqual(st(all, { phase: 1, week: 2, cluesReleased: 2 }), { clues2: "done", week2: "done", clues4: "due", week3: "due", clues6: "blocked" });
+  assert.deepEqual(st(all, { phase: 1, week: 3, cluesReleased: 6 }), { clues2: "done", week2: "done", clues4: "done", week3: "done", clues6: "done" });
+  // 직접 눌러서 이미 된 것은 예약이 있어도 실행하지 않는다. 주차를 다시 내려도 예약으로 한 번 실행한 것(doneAt)은 다시 하지 않는다
+  assert.equal(st({ week2: { at: T - 10, doneAt: { seconds: 1 } } }, run).week2, "done");
+  // 미션 진행 단계에서만
+  assert.equal(st({ clues6: { at: T - 10 } }, { phase: 2, week: 3, cluesReleased: 4 }).clues6, "off");
+  // 여러 번 실패하면 멈춘다
+  assert.equal(st({ clues2: { at: T - 10, tries: MAX_TRIES, error: "거부" } }, run).clues2, "failed");
+  // 실행할 것: 예약 시각이 이른 것부터 하나
+  assert.equal(nextDue({ items: { clues2: { at: T - 5 }, week2: { at: T - 9 } }, config: run, now: T }).id, "week2");
+  assert.equal(nextDue({ items: { clues2: { at: T + 5 } }, config: run, now: T }), null);
+  // 다른 브라우저가 방금 맡았으면 건너뛰고, 시간이 지나면 다시 해 본다
+  assert.equal(nextDue({ items: { clues2: { at: T - 5, claimedMs: T - 1000 } }, config: run, now: T }), null);
+  assert.equal(nextDue({ items: { clues2: { at: T - 5, claimedMs: T - CLAIM_MS } }, config: run, now: T }).id, "clues2");
+  // 입력 칸 값 ↔ ms
+  const ms = localInputToMs("2026-11-20T09:00");
+  assert.equal(msToLocalInput(ms), "2026-11-20T09:00");
+  assert.deepEqual([localInputToMs(""), msToLocalInput(null)], [null, ""]);
+});
