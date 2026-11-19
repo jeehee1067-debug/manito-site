@@ -318,6 +318,8 @@ function Session({ user, logout }) {
     tabs.push(["profile", "내 프로필"]);
   }
   if (ctx.myPid || ctx.isAdmin) tabs.push(["rules", "규칙"]);
+  // 운영자·공동 운영자(참여하지 않는 계정)도 익명 피드와 "공감 많은 후기"를 본다(사용자가 정함: "나도 볼 수 있게"). 보기만 하고 공감은 못 누른다.
+  if (ctx.isAdmin && !ctx.myPid) tabs.push(["feed", "피드"]);
   // 연결 전 계정(참여자도 운영자도 아님)에는 메뉴가 없다
   if ((phase >= PHASE.REVEAL && ctx.myPid) || ctx.isAdmin) tabs.push(["reveal", "결과"]);
   if (ctx.isAdmin) tabs.push(["admin", "운영"]);
