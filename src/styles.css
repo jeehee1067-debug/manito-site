@@ -342,6 +342,8 @@ ul.plain.redeem-status li { flex: 0 0 auto; width: auto; margin: 0; }
 .how-line.how-site { border-color: var(--green); }
 .how-line.how-real { border-color: #d9772b; }
 .pick-counts { line-height: 2; }
+/* 피드 맨 위 "공감 많은 후기" */
+.top-rank { font-weight: 700; color: #8a5a00; margin: 0 0 2px; }
 /* 예약(자동 진행) 목록 */
 .auto-list { gap: 8px; }
 .auto-item { border: 2px solid #c3bfae; border-radius: 8px; padding: 8px 10px; background: #fff; display: grid; gap: 4px; }
