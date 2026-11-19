@@ -158,6 +158,17 @@ const step = (s) => console.log("▶", s);
     }
     await H.tab(r, "내 미션"); await H.tab(r, "피드");
     await H.panel(r, "익명 피드").locator(".dialogue", { hasText: "서랍 속 간식 덕분에" }).getByText("♥ 공감 2").waitFor();
+    // 피드 맨 위 "공감 많은 후기": 공감을 받은 글이 모여 보인다(이름 없이). "새 글 확인"을 누르면 다시 읽는다
+    await H.panel(r, "익명 피드").getByRole("button", { name: "새 글 확인" }).click();
+    const topPanel = H.panel(r, "공감 많은 후기");
+    const topPost = topPanel.locator(".dialogue", { hasText: "서랍 속 간식 덕분에" });
+    await topPost.getByText("공감 1위").waitFor();
+    await topPost.getByText("♥ 공감 2").waitFor();
+    assert.equal(await topPanel.locator(".dialogue").count(), 1, "공감을 받은 글만 나온다");
+    for (const n of NAMES) assert.equal(await topPanel.getByText(n, { exact: true }).count(), 0, "공감 많은 후기에도 이름이 없다");
+    // 다른 탭에 갔다 와도 그대로 보인다(읽어 둔 것을 쓴다)
+    await H.tab(r, "규칙"); await H.tab(r, "피드");
+    await H.panel(r, "공감 많은 후기").locator(".dialogue", { hasText: "서랍 속 간식 덕분에" }).waitFor();
     console.log(`  ${R}: 1주차 추측(가나) → 할 일에서 사라짐, 인증 → 피드 글에 두 사람이 공감(♥ 2, 같은 사람은 한 번만)`);
   }
   step("수호천사: 지원 순서 → 2주차를 열 때 자동 연결(운영자가 고르지 않음, 자기 미션을 안 한 지원자는 건너뜀) → 미션 → 받는 사람 확인");

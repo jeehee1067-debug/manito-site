@@ -1322,3 +1322,21 @@ test("예약(자동 진행): 시각이 지난 것만, 앞 단계가 된 뒤에, 
   assert.equal(msToLocalInput(ms), "2026-11-20T09:00");
   assert.deepEqual([localInputToMs(""), msToLocalInput(null)], [null, ""]);
 });
+
+test("피드 '공감 많은 후기': 공감 많은 순 3건, 무효·가린 글·공감 없는 글은 빼고, 동점이면 먼저 쓴 글", async () => {
+  const { pickTop, TOP_COUNT } = await import("../src/lib/feedTop.js");
+  const at = (n) => ({ seconds: n });
+  const docs = [
+    { id: "a", likes: 2, createdAt: at(30) },
+    { id: "b", likes: 5, createdAt: at(20) },
+    { id: "c", likes: 5, createdAt: at(10) }, // b와 동점, 먼저 씀
+    { id: "d", likes: 9, voided: true, createdAt: at(1) },
+    { id: "e", likes: 8, hidden: true, createdAt: at(2) },
+    { id: "f", createdAt: at(3) }, // 공감 없음
+    { id: "g", likes: 1, createdAt: at(4) },
+  ];
+  assert.equal(TOP_COUNT, 3);
+  assert.deepEqual(pickTop(docs).map((r) => r.id), ["c", "b", "a"]);
+  assert.deepEqual(pickTop(docs, 5).map((r) => r.id), ["c", "b", "a", "g"]);
+  assert.deepEqual(pickTop([]), []);
+});

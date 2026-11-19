@@ -102,6 +102,7 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
   - 규칙 탭 "마니또와 대상"에 "인증 코드도 두 가지"를 적었다.
   - **코드 칸의 안내 글자는 코드처럼 보이지 않게 쓴다**(`Detective.jsx` `CODE_PLACEHOLDER` = "쪽지에 적힌 4자리", `.code-input::placeholder`는 작은 글씨). 예전 예시 "K7Q2"가 진짜 코드와 같은 크기로 후기 칸 바로 위에 보여서 그것을 따라 써 넣은 것이 위 문의의 가장 유력한 원인이다(실패한 입력은 어디에도 저장되지 않아 확정은 못 함). 지금도 "K7Q2"를 넣으면 예시 글자였다고 따로 알린다(`EXAMPLE_MSG`). E2E는 입력 칸을 이 안내 글자로 찾는다.
 - **운영 화면 "고른 미션 카드"**(사용자가 정함: "실제 어떤 카드를 각자 뽑아서 하고 있는지 내가 보게". `Admin.jsx` `CardPicks`, `pairs.js` `cardPicks`, 짝 현황 아래): 주차를 고르면 난이도별·방법별 인원과 카드별 표(고름·완료·인증, 이름 없음)가 보이고, "사람별 보기"를 눌러야 누가 어떤 카드를 골랐는지(마니또·대상·카드·상태)가 보인다. 짝 현황과 같은 구독(`usePairs`)을 쓴다. 패널 제목에 "주차"라는 낱말을 넣지 않는다(E2E가 "주차" 패널을 제목으로 찾는다).
+- **피드 "공감 많은 후기"**(사용자가 정함: "좋은 후기가 익명으로 모여 보이면 좋겠다"): 피드 탭 맨 위 패널(`Feed.jsx`, 고르기는 `src/lib/feedTop.js` `pickTop`). 공감(`feed.likes`) 많은 순 3건, 무효·가린 글과 공감 없는 글은 빼고, 동점이면 먼저 쓴 글. 이름은 여기서도 없다. 읽기: `orderBy("likes","desc") limit(6)` 한 번을 5분 동안 기억하고(`topCache`, 피드 탭은 들어올 때마다 새로 만들어지므로) "새 글 확인"을 누르면 다시 읽는다 — 보안 규칙·색인 변경 없음. **여기 숫자는 화면의 공감 수라 시상 순위(당사자 두 사람의 공감을 뺀 `rankReviews`)와 다를 수 있다.** 공감 많은 글이 위에 보이면 공감이 더 몰릴 수 있고 3등(공감 1위 후기)·2등 동점 기준이 공감 수라는 점을 사용자에게 알렸다.
 - **예약(자동 진행)**(사용자가 정함: "단서 공개하거나 2주차로 넘어가는 작업을 시간 설정해 두면 자동으로 되게"): 운영 화면(미션 진행 단계) "예약 (자동 진행)" 패널(`Admin.jsx` `ScheduleBox`)에서 다섯 가지(단서 1·2번, 2주차 열기, 단서 3·4번, 3주차 열기, 단서 5·6번 — `src/lib/schedule.js` `AUTO_ITEMS`)에 시각을 정한다. 예약은 `meta/schedule`(`items: { id: { at(ms), doneAt, result, claimedMs, claimedBy, tries, error } }`, 운영자만 읽고 씀 — 보안 규칙 변경 없음)에 둔다.
   - **서버가 없어서 실행은 운영자·공동 운영자의 브라우저가 한다**(`Admin.jsx` `AutoRunner`, `App.jsx`가 운영자 계정에 띄움. 15초마다 확인). 예약 시각에 누군가 사이트를 열어 두고 있으면 그때, 아니면 그 뒤 운영자가 사이트를 여는 순간 실행된다. **사용자에게 "완전 자동"이라고 하지 말 것** — 아무도 열지 않으면 실행되지 않는다. 완전 무인으로 하려면 서버 쪽 실행기(예: GitHub Actions 예약 작업 + Firestore 권한이 있는 서비스 계정 키)가 필요하고, 아직 만들지 않았다.
   - 실행 내용은 버튼과 같다(`openWeek`: 주차 올리기 + 수호천사 자동 연결, `releaseCluesTo`: 단서 공개 + 파트 순위 발표). 순서는 보안 규칙과 같은 조건으로 기다린다(`autoPlan`: 주차는 한 칸씩, 단서는 앞 단서가 공개되고 2 × 주차 이내일 때). 직접 눌러 이미 된 것은 건너뛰고, 예약으로 한 번 실행한 것(`doneAt`)은 주차를 내려도 다시 실행하지 않는다. 여러 운영자 화면이 열려 있어도 한 번만 실행되게 트랜잭션으로 맡는다(`claimedMs`, 2분). 5번 실패하면 멈춘다.
@@ -196,7 +197,7 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 | `src/pages/PartBoard.jsx` | 파트 순위 탭(운영자가 발표한 `public/board`만 읽음) |
 | `src/pages/InviteMail.jsx`, `src/lib/inviteMail.js` | 운영 화면 "가입 안내 메일": 받는 사람(`inviteRecipients`)·본문(`inviteMessage`)·가입 링크(`joinUrl`, `?join`)·메일 앱 주소(`mailtoHref`) |
 | `src/pages/Claim.jsx` | "연결 전" 화면: 회사 메일 인증 확인(`claimWithMail`, 창으로 돌아오면 스스로 확인), 초대 코드 연결(예비), 공동 운영자로 지정받을 계정의 계정 번호 |
-| `src/pages/Feed.jsx` | 익명 피드(`feed` 문서만 읽음) |
+| `src/pages/Feed.jsx`, `src/lib/feedTop.js` | 익명 피드(`feed` 문서만 읽음), 맨 위 "공감 많은 후기" 3건(`pickTop`) |
 | `src/pages/Admin.jsx` | 운영 화면: 단계, 명단·배정, 주차·단서, 짝 현황(`Pairs`), 고른 미션 카드(`CardPicks`), 받은 게 없어요·집계 전 확인(`Unresolved`), 수호천사 연결(`Angels`), 인증 검토(`Moderation`), 쪽지 검토(`NotesReview`), 쓰기 횟수(`WriteCounts`), 백업 내려받기(`Backup`), 집계·검산, 공동 운영자, 규칙 버전 경고(`RulesCheck`) |
 | `src/ui.jsx` | 패널·대사창·캐릭터 공통 컴포넌트, 역할 낱말 강조(`Giver`·`Target`·`RoleNote`), 카드 방법 표시(`HowTag`). 패널 제목 앞 아이콘은 제목의 낱말로 고른다(`icons.jsx` `iconForTitle`) |
 | `src/icons.jsx`, `src/assets/icons/`, `tools/icons/make_icons.py` | 픽셀 아이콘(16×16 SVG): 메뉴(탭)와 패널 제목. 그림은 Python 스크립트의 글자 격자에서 만든다(고치면 `python3 tools/icons/make_icons.py`). 시즌과 무관한 기본 디자인이다 |
