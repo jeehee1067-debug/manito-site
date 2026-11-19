@@ -26,7 +26,8 @@ const likedCache = new Map(); // pid → Set(글ID)
 // 공감 수가 글 문서에 들어 있어서, 구독하면 누가 공감을 누를 때마다 피드를 열어 둔 모든 사람에게 1건씩 읽기가 생긴다
 // (공감이 상에 반영되면서 많이 눌릴 수 있고, 무료 한도는 하루 읽기 5만 건이다).
 export default function Feed() {
-  const { myPid, config } = useApp();
+  const { myPid, config, isAdmin } = useApp();
+  const viewOnly = isAdmin && !myPid; // 운영자 계정: 보기만(공감은 참여자만 — 보안 규칙도 같다)
   const [count, setCount] = useState(PAGE);
   const [tick, setTick] = useState(0); // "새 글 확인"
   const [busy, setBusy] = useState(false);
@@ -111,13 +112,14 @@ export default function Feed() {
     <>
     {top.length > 0 && (
       <Panel title="공감 많은 후기">
-        <p className="small">지금까지 공감(♥)을 많이 받은 후기 {top.length}건이에요. 누가 썼는지는 여기서도 비밀이에요. 아래 피드에서 마음에 드는 후기에 공감을 눌러 주세요.</p>
+        <p className="small">지금까지 공감(♥)을 많이 받은 후기 {top.length}건이에요. 누가 썼는지는 여기서도 비밀이에요.{viewOnly ? "" : " 아래 피드에서 마음에 드는 후기에 공감을 눌러 주세요."}</p>
         <div className="stack top-reviews">
           {top.map((r, i) => post(r, `top-${r.id}`, <p className="small top-rank">공감 {i + 1}위</p>))}
         </div>
       </Panel>
     )}
     <Panel title="익명 피드">
+      {viewOnly && <p className="small view-only">운영자 계정은 참여자가 보는 피드를 그대로 보기만 해요(공감은 누를 수 없어요). 무효 처리·가리기는 운영 탭 "인증 검토"에서 해요.</p>}
       <p className="small">누가 누구에게 했는지는 송년회까지 비밀이에요. 최근 것부터 {PAGE}건씩 보여요. 새 글과 공감 수는 "새 글 확인"을 누르면 다시 불러와요.</p>
       <button type="button" className="pk-btn sm" disabled={busy} onClick={() => setTick((t) => t + 1)}>새 글 확인</button>
       {loaded && items.length === 0 && <p className="muted">첫 인증이 올라오면 여기에 보여요.</p>}

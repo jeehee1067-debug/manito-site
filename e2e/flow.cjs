@@ -630,10 +630,23 @@ const step = (s) => console.log("▶", s);
     await co.getByRole("button", { name: "지정됐는지 다시 확인" }).click(); // 연결 전 화면은 다시 확인을 눌러야(또는 다른 창에 갔다 오면) 바뀐다
     await co.locator("nav.tabs button", { hasText: "운영" }).waitFor();
     // 메뉴가 다 그려질 때까지 잠깐 기다린 뒤 확인한다(그려지는 도중에 읽어 한 번 실패한 적이 있다)
-    await co.waitForFunction(() => [...document.querySelectorAll("nav.tabs button")].map((b) => b.innerText.trim()).join("|") === "규칙|결과|운영", null, { timeout: 10000 }).catch(() => {});
-    assert.deepEqual((await co.locator("nav.tabs button").allInnerTexts()).map((t) => t.trim()), ["규칙", "결과", "운영"], "운영자 메뉴(참여자 메뉴 없음)");
+    await co.waitForFunction(() => [...document.querySelectorAll("nav.tabs button")].map((b) => b.innerText.trim()).join("|") === "규칙|피드|결과|운영", null, { timeout: 10000 }).catch(() => {});
+    assert.deepEqual((await co.locator("nav.tabs button").allInnerTexts()).map((t) => t.trim()), ["규칙", "피드", "결과", "운영"], "운영자 메뉴(참여자 메뉴는 없고 피드는 보기만)");
     await panel(co, `짝 현황 (${N}쌍)`).waitFor();
     assert.equal(await co.locator(".hud-who").innerText(), "운영자");
+    // 운영자 계정의 피드 탭: 참여자가 보는 익명 피드를 그대로 보기만 한다(공감 버튼 없음)
+    await tab(co, "피드");
+    const coFeed = panel(co, "익명 피드");
+    await coFeed.getByText("운영자 계정은 참여자가 보는 피드를 그대로 보기만 해요").waitFor();
+    await coFeed.locator(".dialogue").first().waitFor();
+    assert.ok(await coFeed.locator(".dialogue").count() > 0, "운영자도 피드 글을 본다");
+    assert.equal(await co.locator(".tab-page:not([hidden]) button.like-btn").count(), 0, "운영자 계정에는 공감 버튼이 없다");
+    assert.ok(await co.locator(".tab-page:not([hidden]) .like-btn.static").count() > 0, "공감 수는 보인다");
+    await panel(co, "공감 많은 후기").locator(".top-rank").first().waitFor();
+    await shot(co, "admin-feed");
+    console.log(`  운영자 피드 탭: 글 ${await coFeed.locator(".dialogue").count()}건, 공감 많은 후기 ${await panel(co, "공감 많은 후기").locator(".dialogue").count()}건, 공감 버튼 없음`);
+    await tab(co, "운영");
+    await panel(co, `짝 현황 (${N}쌍)`).waitFor();
     assert.equal((await getAs(await tokenOf("coadmin@example.com"), "assignments?pageSize=5")).ok, true);
     // 운영자 계정은 초대 코드를 알아도 명단에 연결할 수 없다(규칙): 직접 요청해 본다
     const body = { fields: { personId: { stringValue: pidOf["가나"] }, eliminated: { arrayValue: {} } } };
