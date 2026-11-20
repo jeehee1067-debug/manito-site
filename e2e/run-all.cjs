@@ -1,6 +1,7 @@
 // 화면 흐름 검증을 차례로 돌린다. 먼저 다른 터미널에서 `npm run dev:emu`를 띄워 둘 것.
 // 각 스크립트는 로컬 에뮬레이터(demo-manito 프로젝트)의 데이터를 지우고 시작한다. 실제 Firebase 프로젝트에는 붙지 않는다.
 // 필요한 것: Playwright와 Chromium (`npm i --no-save playwright && npx playwright install chromium`)
+// restore.cjs는 Python 패키지도 필요하다: pip install google-cloud-firestore (다른 Python을 쓰려면 PYTHON=경로 npm run test:e2e)
 const { spawnSync } = require("node:child_process");
 const path = require("node:path");
 
@@ -18,6 +19,7 @@ const SCRIPTS = [
   ["latejoin.cjs", "가입 유예와 회사 메일 인증: 가입 전 배정(엑셀 붙여 넣기 명단: 이름·파트·아이디), 미션 시작 뒤 메일 인증으로 가입한 사람의 인증·미션, 명단에 없는 아이디, 수호천사 지원은 미션 시작부터"],
   ["schedule.cjs", "예약(자동 진행): 정한 시각에 단서 공개·주차 열기가 실행되는지, 앞 단계 순서, 참여자 화면 반영"],
   ["awards.cjs", "현장 시상(24명): 2등·3등 순위, 4·5등 종이로 뽑힌 이름 입력, 1등이 겹칠 때 자리 다시 채우기와 다시 뽑기, 6등 사이트 추첨·검증, 뽑은 뒤 고치기 거부"],
+  ["restore.cjs", "백업 되살리기(tools/restore): 통째로 지운 뒤 되살리면 문서가 백업과 같음, 기본은 없어진 것만·덮어쓰기는 설정 제외, 되살린 뒤 사이트 동작"],
 ];
 
 async function main() {
