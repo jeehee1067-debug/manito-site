@@ -1718,6 +1718,7 @@ function Backup() {
             </button>
           </div>
           <p className="small muted">메시지·후기 모음은 엑셀에서 바로 열려요(종류·주차·쓴 사람·받은 사람·내용·고른 카드·공감 수·시각). 전체 백업은 모든 기록이 그대로 들어 있는 보관용 파일이에요.</p>
+          <p className="small muted">자료가 지워졌을 때는 전체 백업 파일로 되살릴 수 있어요(운영자 PC에서 저장소의 <code>tools/restore/restore_backup.py</code> 실행 — 방법은 README "백업과 되살리기"). 기본은 없어진 문서만 되살리고 아무것도 지우지 않아요.</p>
         </div>
       )}
     </Panel>

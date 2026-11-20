@@ -5,3 +5,5 @@ dist/
 .firebase/
 # 화면 흐름 검증 스크린샷
 e2e/shots/
+__pycache__/
+*.pyc
