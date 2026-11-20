@@ -4,6 +4,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { forgetFeed } from "../lib/feedCache.js";
+import { patchFeedDigest } from "../lib/feedDigest.js";
 import { useApp } from "../App.jsx";
 import { HowTag, Panel } from "../ui.jsx";
 import { PHASE, PHASES, CARD_HOW, CLUE_COUNT, LEVEL_LABEL, MAIL_DOMAIN, PART_HINT_IDX, PRAISE_SLOT, RULES_VERSION } from "../lib/constants.js";
@@ -187,7 +188,54 @@ async function publishRoster(rows) {
   await setDoc(doc(db, "public", "roster"), { people: rosterSummary(rows), at: serverTimestamp() });
 }
 
+// 운영 화면 가볍게 열기(읽기 줄이기, 11/20): 미션 기간(단계 1 이상)에 운영 탭을 새로 열면 단계·공지·예약만 보이고,
+// 짝 현황·인증 검토·고른 카드·집계처럼 컬렉션을 통째로 구독하는 패널은 "운영 자료 불러오기"를 눌러야 읽는다
+// (54명 기준 한 번에 약 750건, 주차가 지날수록 늘어남. 무료 한도는 하루 5만 건). 준비 단계에서 연 화면은 처음부터 다 보이고,
+// 한 번 불러오면 그 페이지를 닫거나 새로 고칠 때까지 그대로다(탭은 숨겨 둘 뿐 닫지 않는다).
+// localStorage manito:adminFull = "1"은 검증 스크립트(e2e)용: 미션 단계에서 새로 고친 운영 화면을 바로 다 보이게 한다.
+const ADMIN_FULL_KEY = "manito:adminFull";
+function adminFullByDefault() {
+  try {
+    return localStorage.getItem(ADMIN_FULL_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export default function Admin() {
+  const { config } = useApp();
+  const [full, setFull] = useState(() => config.phase === PHASE.SETUP || adminFullByDefault());
+  if (full || config.phase === PHASE.SETUP) return <AdminFull />;
+  return <AdminLight onLoad={() => setFull(true)} />;
+}
+
+function AdminLight({ onLoad }) {
+  const { config, roster } = useApp();
+  const phase = config.phase;
+  const n = roster.length;
+  const est = Math.max(50, Math.round((n * 14) / 50) * 50);
+  return (
+    <>
+      <RulesCheck />
+      <Panel title="운영 단계">
+        <div className="phase-bar">
+          {PHASES.map((p, i) => <span key={p} className={i === phase ? "on" : i < phase ? "past" : ""}>{p}</span>)}
+        </div>
+        {phase < PHASE.REVEAL && <p className="small muted">지금은 <b>{PHASES[phase]}</b> 단계예요.</p>}
+      </Panel>
+      <Panel title="운영 자료 불러오기">
+        <p>짝 현황·고른 미션 카드·받은 게 없어요·인증 검토·수호천사·집계·단계 넘기기는 <b>운영 자료를 불러와야</b> 보여요.</p>
+        <p className="small">사이트 읽기 무료 한도(하루 5만 건)를 아끼려고 처음에는 불러오지 않아요. 한 번 불러오면 참여자 {n}명 기준 대략 {est}건을 읽어요(주차가 지날수록 늘어나요).
+          불러온 뒤에는 이 페이지를 닫거나 새로 고칠 때까지 그대로 보여요. 피드만 보거나 예약만 확인할 때는 불러오지 않아도 돼요.</p>
+        <button className="pk-btn main" onClick={onLoad}>운영 자료 불러오기</button>
+      </Panel>
+      <Notice />
+      {phase === PHASE.RUNNING && <ScheduleBox />}
+    </>
+  );
+}
+
+function AdminFull() {
   const { config, roster: summaryList, rosterReady } = useApp();
   const phase = config.phase;
   const fullRoster = useFullRoster();
@@ -1114,28 +1162,38 @@ function Moderation() {
     if (r.feedId) b.update(doc(db, "feed", r.feedId), { voided: !r.voided });
     await b.commit();
     forgetFeed(); // 이 기기의 피드 탭에 바로 반영되게
+    if (r.feedId) await patchFeedDigest(r.feedId, { voided: !r.voided }).catch(() => {}); // 참여자가 읽는 피드 요약에도 바로
   };
   // 피드에서만 가리기(응모권과 무관): 막말 후기로 마니또의 응모권을 깎으려는 경우에도 쓸 수 있게 무효 처리와 따로 둔다.
   // 피드 글은 참여자 누구나 읽을 수 있어서, 가릴 때는 후기를 비우고 원문은 운영자만 읽는 hiddenFeed로 옮긴다(보안 규칙이 확인).
   const toggleHide = async (r) => {
     const f = feed[r.feedId];
     const b = writeBatch(db);
+    let patch;
     if (!f.hidden) {
       b.set(doc(db, "hiddenFeed", r.feedId), { review: f.review });
       b.update(doc(db, "feed", r.feedId), { hidden: true, review: "" });
+      patch = { hidden: true, review: "" };
     } else if (f.review === "") {
       const orig = await getDoc(doc(db, "hiddenFeed", r.feedId));
       if (!orig.exists()) return window.alert("가린 후기의 원문을 찾지 못했어요.");
       b.update(doc(db, "feed", r.feedId), { hidden: false, review: orig.data().review });
       b.delete(doc(db, "hiddenFeed", r.feedId));
+      patch = { hidden: false, review: orig.data().review };
     } else {
       b.update(doc(db, "feed", r.feedId), { hidden: false }); // 예전 방식으로 가린 글(후기가 남아 있음)
+      patch = { hidden: false };
     }
-    await b.commit().then(forgetFeed, () => window.alert("바꾸지 못했어요. 잠시 뒤 다시 눌러 주세요."));
+    const ok = await b.commit().then(() => true, () => { window.alert("바꾸지 못했어요. 잠시 뒤 다시 눌러 주세요."); return false; });
+    if (!ok) return;
+    forgetFeed();
+    // 참여자가 읽는 피드 요약(public/feed)에도 바로 반영한다(가린 후기가 요약에 남아 보이지 않게)
+    await patchFeedDigest(r.feedId, patch).catch(() => window.alert("피드 요약에 반영하지 못했어요. 잠시 뒤 운영 화면을 열어 두면 다시 맞춰져요."));
   };
   const removeThanks = (r) => {
     if (!window.confirm("이 감사 답장을 지울까요? 받는 사람은 다시 쓸 수 없어요.")) return;
-    return updateDoc(doc(db, "feed", r.feedId), { thanks: deleteField() }).then(forgetFeed);
+    return updateDoc(doc(db, "feed", r.feedId), { thanks: deleteField() })
+      .then(() => { forgetFeed(); return patchFeedDigest(r.feedId, { thanks: undefined }).catch(() => {}); });
   };
   // 받는 사람이 "카드와 달라요"로 인증했거나, 완료 알림보다 먼저 인증해 카드를 확인하지 않은 것: 두 사람에게 확인한 뒤 "같음"으로 고칠 수 있다(카드 추가분)
   const setCardSame = (r) => {

@@ -89,6 +89,11 @@ async function tokenOf(email) {
     // 피드에서 가리기: 피드 글의 후기는 비우고 원문은 운영자만 읽는 hiddenFeed로 옮긴다(직접 요청으로도 내용이 안 보이게)
     const REVIEW = "응원 쪽지 잘 받았어요. 덕분에 힘이 났어요!";
     const feedPanel = H.panel(r, "익명 피드");
+    // 피드 요약(public/feed): 운영자 화면이 최근 글을 한 문서에 모아 두고 참여자는 그것을 읽는다(읽기 줄이기)
+    const digestPost = async (pick) => ((await H.readDoc("public/feed")).recent || []).find(pick);
+    let inDigest;
+    for (let k = 0; k < 60 && !inDigest; k++) { inDigest = await digestPost((x) => x.review === REVIEW); if (!inDigest) await r.waitForTimeout(500); }
+    assert.ok(inDigest, "운영자 화면이 피드 요약에 글을 모아 둔다");
     await mod.getByRole("button", { name: "피드에서 가리기" }).click();
     await mod.locator("span.small.muted", { hasText: "· 피드에서 가림" }).waitFor();
     // 화면의 "가림" 표시는 저장이 서버에 닿기 전에도 뜬다. 서버의 글이 비워질 때까지 잠깐 기다린다.
@@ -102,6 +107,11 @@ async function tokenOf(email) {
     assert.equal(fd.fields.review.stringValue, "");
     assert.equal(fd.fields.hidden.booleanValue, true);
     assert.equal((await (await fetch(`${FS}/hiddenFeed/${fid}`, { headers: owner })).json()).fields.review.stringValue, REVIEW);
+    // 가리면 피드 요약에서도 바로 후기가 비워진다(가린 후기가 요약에 남아 참여자에게 보이지 않게)
+    let dp;
+    for (let k = 0; k < 25; k++) { dp = await digestPost((x) => x.id === fid); if (dp?.hidden) break; await r.waitForTimeout(200); }
+    assert.equal(dp.hidden, true, "요약에도 가림");
+    assert.equal(dp.review, "", "요약의 후기도 빈 값");
     // 피드는 실시간으로 바뀌지 않는다: 열어 둔 화면에는 "새 글 확인"을 누르기 전까지 그대로 보인다
     await feedPanel.getByRole("button", { name: "새 글 확인" }).click();
     await feedPanel.getByText("첫 인증이 올라오면 여기에 보여요.").waitFor();
@@ -114,6 +124,8 @@ async function tokenOf(email) {
     await feedPanel.getByRole("button", { name: "새 글 확인" }).click();
     await feedPanel.getByText(REVIEW).waitFor();
     assert.equal((await fetch(`${FS}/hiddenFeed/${fid}`, { headers: owner })).status, 404);
+    for (let k = 0; k < 25; k++) { dp = await digestPost((x) => x.id === fid); if (dp && !dp.hidden) break; await r.waitForTimeout(200); }
+    assert.equal(dp.review, REVIEW, "다시 보이면 요약에도 원문");
     console.log("  '피드에 다시 보이기' → 원문으로 되돌아오고 hiddenFeed는 지워짐");
   }
 

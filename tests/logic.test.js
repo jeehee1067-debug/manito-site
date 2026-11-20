@@ -1352,7 +1352,29 @@ test("피드 기억: LIST_TTL 안에서만 쓰고, 더 많이 필요하거나 fo
   assert.equal(freshList(60, 1001), null, "더 보기(더 많이)는 새로 읽는다");
   assert.equal(freshList(10, 1001).length, 10);
   feedCache.top = { at: 1000, docs: [{ id: "x" }] };
+  feedCache.forceFull = false;
   forgetFeed();
   assert.equal(freshList(30, 1001), null, "인증·감사 답장을 보낸 뒤에는 지운다");
   assert.deepEqual(feedCache.top, { at: 0, docs: [] });
+  assert.equal(feedCache.forceFull, true, "다음에 열 때는 요약 문서 대신 feed를 직접 읽는다");
+});
+
+test("피드 요약: 새 글을 앞에 붙이고, 바뀐 것만 다시 쓰고, 운영자의 가리기·답장 지우기를 반영한다", async () => {
+  const { mergeDigest, digestKey, patchPosts } = await import("../src/lib/feedCache.js");
+  const ts = (s) => ({ seconds: s, nanoseconds: 0 });
+  const recent = [3, 2, 1].map((i) => ({ id: `f${i}`, slot: 1, review: `후기${i}`, voided: false, createdAt: ts(i) }));
+  const fresh = [{ id: "f5", slot: 1, review: "새 글5", voided: false, createdAt: ts(5) }, { id: "f4", slot: 1, review: "새 글4", voided: false, createdAt: ts(4) }];
+  assert.deepEqual(mergeDigest(recent, fresh, 30).map((d) => d.id), ["f5", "f4", "f3", "f2", "f1"]);
+  assert.deepEqual(mergeDigest(recent, fresh, 3).map((d) => d.id), ["f5", "f4", "f3"], "PAGE건까지만");
+  assert.deepEqual(mergeDigest(recent, [{ ...recent[0], likes: 2 }], 30).filter((d) => d.id === "f3").map((d) => d.likes), [2], "같은 글은 새로 읽은 쪽");
+  assert.deepEqual(mergeDigest(recent, [], 30), recent, "새 글이 없으면 요약 그대로");
+  const k = digestKey(recent, []);
+  assert.equal(digestKey(recent.map((d) => ({ ...d })), []), k, "내용이 같으면 다시 쓰지 않는다");
+  assert.notEqual(digestKey(patchPosts(recent, "f2", { likes: 1 }), []), k, "공감 수가 바뀌면 다시 쓴다");
+  assert.notEqual(digestKey(recent, [recent[0]]), k, "공감 많은 글이 바뀌면 다시 쓴다");
+  const hidden = patchPosts(recent, "f2", { hidden: true, review: "" });
+  assert.deepEqual(hidden.find((d) => d.id === "f2"), { id: "f2", slot: 1, review: "", voided: false, createdAt: ts(2), hidden: true });
+  assert.equal(hidden.find((d) => d.id === "f3"), recent[0], "다른 글은 그대로");
+  const withThanks = patchPosts(recent, "f1", { thanks: "고마워요" });
+  assert.equal("thanks" in patchPosts(withThanks, "f1", { thanks: undefined }).find((d) => d.id === "f1"), false, "답장 지우기는 칸을 없앤다");
 });

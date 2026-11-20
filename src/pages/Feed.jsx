@@ -1,23 +1,23 @@
 import { useEffect, useState } from "react";
-import { collection, doc, getDocs, increment, limit, orderBy, query, serverTimestamp, where, writeBatch } from "firebase/firestore";
+import { collection, doc, getDocs, increment, query, serverTimestamp, where, writeBatch } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp } from "../App.jsx";
 import { PHASE } from "../lib/constants.js";
 import { Dialogue, Panel } from "../ui.jsx";
 import { pickTop } from "../lib/feedTop.js";
-import { TOP_TTL, feedCache, freshList } from "../lib/feedCache.js";
+import { feedCache, freshList } from "../lib/feedCache.js";
+import { PAGE, loadFeed } from "../lib/feedDigest.js";
 
 // 익명 피드. 인증 문서(redemptions)가 아니라 따로 만든 feed 문서를 읽는다.
 // feed 문서에는 받는 사람 정보도 인증 코드도 없다({ slot, review, voided, createdAt, thanks?, hidden?, likes? }, 문서 ID는 무작위).
 // 인증 문서는 인증한 사람·그 코드의 마니또·운영자만 읽을 수 있다(보안 규칙).
 // 읽기 줄이기: 최근 PAGE건씩. 감사 답장은 같은 문서에 들어 있어서 따로 읽지 않는다.
-const PAGE = 30;
+// 처음 열 때는 운영자 화면이 모아 둔 요약 문서 public/feed 1건 + 그 뒤 새 글만 읽는다(lib/feedDigest.js).
 
 // 공감 많은 후기(사용자가 정함: "좋은 후기가 익명으로 모여 보이는 곳이 있으면 좋겠다"): 피드 맨 위에 공감 수가 많은 글 몇 건(lib/feedTop.js).
 // 공감 수로 정렬해 조금 넉넉히 읽고(무효·가린 글을 빼야 해서) 화면에서 고른다. 공감이 하나도 없는 글은 likes 칸이 없어 나오지 않는다.
-// 피드 탭은 들어올 때마다 새로 만들어지므로, 읽기를 줄이려고 TOP_TTL 동안은 읽어 둔 것을 쓴다("새 글 확인"을 누르면 다시 읽는다).
-// 최근 글 목록도 같은 방식이다(lib/feedCache.js: LIST_TTL).
-const TOP_FETCH = 6;
+// 요약 문서에 같이 들어 있고, "새 글 확인"을 누르면 feed에서 다시 읽는다. 피드 탭은 들어올 때마다 새로 만들어지므로
+// 읽어 둔 목록을 LIST_TTL 동안 쓴다(lib/feedCache.js).
 
 // 내가 공감한 글 목록은 사이트를 열고 처음 피드에 들어올 때 한 번만 읽는다(탭을 오갈 때마다 다시 읽지 않게).
 const likedCache = new Map(); // pid → Set(글ID)
@@ -74,35 +74,23 @@ export default function Feed() {
     const cached = tick === 0 ? freshList(count) : null;
     if (cached) {
       setDocs(cached);
+      setTopDocs(feedCache.top.docs);
       setLoaded(true);
       return undefined;
     }
     let live = true;
     setBusy(true);
-    getDocs(query(collection(db, "feed"), orderBy("createdAt", "desc"), limit(count)))
-      .then((s) => {
-        const list = s.docs.map((d) => ({ id: d.id, ...d.data() }));
-        feedCache.list = { at: Date.now(), count, docs: list };
-        if (live) setDocs(list);
+    loadFeed({ count, refresh: tick > 0 })
+      .then(({ list, top }) => {
+        if (!live) return;
+        setDocs(list);
+        if (top) setTopDocs(top);
       })
       .catch(() => {})
       .finally(() => { if (live) { setLoaded(true); setBusy(false); } });
     return () => { live = false; };
   }, [count, tick]);
 
-  // 공감 많은 후기: 읽어 둔 지 오래됐거나 "새 글 확인"을 눌렀을 때만 다시 읽는다
-  useEffect(() => {
-    if (tick === 0 && Date.now() - feedCache.top.at < TOP_TTL) return undefined;
-    let live = true;
-    getDocs(query(collection(db, "feed"), orderBy("likes", "desc"), limit(TOP_FETCH)))
-      .then((s) => {
-        const list = s.docs.map((d) => ({ id: d.id, ...d.data() }));
-        feedCache.top = { at: Date.now(), docs: list };
-        if (live) setTopDocs(list);
-      })
-      .catch(() => {});
-    return () => { live = false; };
-  }, [tick]);
   const top = pickTop(topDocs);
 
   const items = docs.filter((r) => !r.voided && !r.hidden); // 무효 처리했거나 운영진이 가린 글은 빼고

@@ -54,8 +54,9 @@ async function readDoc(path) {
   const r = await fetch(`${FS}/v1/projects/${PROJECT}/databases/(default)/documents/${path}`, { headers: { Authorization: "Bearer owner" } });
   return r.json();
 }
-async function newUser(browser, label) {
+async function newUser(browser, label, { adminFull = true } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 420, height: 900 }, deviceScaleFactor: 1 });
+  if (adminFull) await ctx.addInitScript(() => { try { localStorage.setItem("manito:adminFull", "1"); } catch {} }); // 검증용: 미션 단계에서 새로 연 운영 화면도 바로 다 보이게(실제 기본은 "운영 자료 불러오기"를 눌러야 함)
   const page = await ctx.newPage();
   page.on("dialog", (d) => { dialogsSeen.push(d.message()); d.accept(); });
   page.on("console", (m) => {
@@ -607,7 +608,7 @@ const step = (s) => console.log("▶", s);
   }
 
   step("공동 운영자: 참여하지 않는 계정을 '연결 전' 화면의 계정 번호로 지정");
-  const co = await newUser(browser, "공동 운영자");
+  const co = await newUser(browser, "공동 운영자", { adminFull: false }); // 실제 기본: 미션 단계에 새로 연 운영 화면은 가볍게 열린다
   {
     await co.goto(BASE + "?setup");
     await co.getByRole("button", { name: "운영자·공동 운영자 계정 만들기" }).click();
@@ -640,6 +641,12 @@ const step = (s) => console.log("▶", s);
     // 메뉴가 다 그려질 때까지 잠깐 기다린 뒤 확인한다(그려지는 도중에 읽어 한 번 실패한 적이 있다)
     await co.waitForFunction(() => [...document.querySelectorAll("nav.tabs button")].map((b) => b.innerText.trim()).join("|") === "규칙|피드|결과|운영", null, { timeout: 10000 }).catch(() => {});
     assert.deepEqual((await co.locator("nav.tabs button").allInnerTexts()).map((t) => t.trim()), ["규칙", "피드", "결과", "운영"], "운영자 메뉴(참여자 메뉴는 없고 피드는 보기만)");
+    // 미션 단계에 새로 연 운영 화면은 가볍게 열린다(읽기 줄이기): 무거운 패널은 "운영 자료 불러오기"를 눌러야 구독한다
+    await panel(co, "운영 자료 불러오기").waitFor();
+    await panel(co, "예약 (자동 진행)").waitFor();
+    assert.equal(await co.locator("section.panel:visible h2.panel-title", { hasText: "짝 현황" }).count(), 0, "불러오기 전에는 짝 현황이 없다");
+    assert.equal(await co.getByRole("button", { name: /다음 단계로/ }).count(), 0, "불러오기 전에는 단계 넘기기도 없다");
+    await panel(co, "운영 자료 불러오기").getByRole("button", { name: "운영 자료 불러오기" }).click();
     await panel(co, `짝 현황 (${N}쌍)`).waitFor();
     assert.equal(await co.locator(".hud-who").innerText(), "운영자");
     // 운영자 계정의 피드 탭: 참여자가 보는 익명 피드를 그대로 보기만 한다(공감 버튼 없음)
