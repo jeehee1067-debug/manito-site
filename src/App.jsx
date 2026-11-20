@@ -14,6 +14,7 @@ import Feed from "./pages/Feed.jsx";
 import PartBoard from "./pages/PartBoard.jsx";
 import Reveal from "./pages/Reveal.jsx";
 import Admin, { AutoRunner } from "./pages/Admin.jsx";
+import { FeedDigestWriter } from "./lib/feedDigest.js";
 import Rules from "./pages/Rules.jsx";
 import { Garland, XmasFooter } from "./xmas.jsx";
 import { Icon, TAB_ICON } from "./icons.jsx";
@@ -446,6 +447,7 @@ function Session({ user, logout }) {
         {config.notice && (ctx.myPid || ctx.isAdmin) && <p className="notice-banner" role="status"><b>공지</b>{config.notice}</p>}
         {/* 예약(자동 진행) 실행기: 운영자·공동 운영자의 화면이 열려 있는 동안 예약 시각이 지난 작업을 실행한다 */}
         {ctx.isAdmin && <AutoRunner />}
+        {ctx.isAdmin && <FeedDigestWriter />}
         <main>{body}</main>
         <XmasFooter />
       </div>

@@ -13,7 +13,9 @@ const BASE = "http://localhost:5173/", P = "demo-manito", FS = `http://127.0.0.1
   const b = await chromium.launch();
   const errs = [], dialogs = [];
   const mk = async (label) => {
-    const p = await (await b.newContext({ viewport: { width: 1100, height: 900 } })).newPage();
+    const ctx = await b.newContext({ viewport: { width: 1100, height: 900 } });
+    await ctx.addInitScript(() => { try { localStorage.setItem("manito:adminFull", "1"); } catch {} }); // 검증용: 미션 단계에서 새로 연 운영 화면도 바로 다 보이게(실제 기본은 "운영 자료 불러오기"를 눌러야 함)
+    const p = await ctx.newPage();
     p.on("dialog", (d) => { dialogs.push(d.message()); d.accept(); });
     p.on("console", (m) => (m.type() === "error" || m.type() === "warning") && !m.text().includes("TUNNEL") && errs.push(`[${label}] ${m.text().slice(0, 140)}`));
     return p;
