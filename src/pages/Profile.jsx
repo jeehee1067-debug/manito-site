@@ -25,7 +25,7 @@ export default function Profile() {
     });
   }, [myPid]);
 
-  useEffect(() => loadAvatar(myPid), [myPid, loadAvatar]);
+  useEffect(() => loadAvatar(myPid, true), [myPid, loadAvatar]);
   const pickAvatar = (i) => setDoc(doc(db, "avatars", myPid), { avatar: i, ...bump() }, { merge: true }).then(() => setAvatarLocal(myPid, i));
 
   // 이미 공개된 단서 칸은 바꿀 수 없다(대상이 본 단서가 나중에 바뀌지 않게). 비어 있던 칸은 늦게라도 쓸 수 있다.

@@ -3,6 +3,7 @@ import {
   arrayRemove, arrayUnion, collection, doc, getDoc, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch,
 } from "firebase/firestore";
 import { db } from "../firebase.js";
+import { forgetFeed } from "../lib/feedCache.js";
 import { useApp } from "../App.jsx";
 import { Avatar, Dialogue, Giver, HowTag, Panel, RoleNote } from "../ui.jsx";
 import { cardHow, LEVEL_LABEL, PHASE, PRAISE_SLOT, PROFILE_QUESTIONS, REVIEW_MIN, CLUE_COUNT, PART_HINT_IDX, clueScheduleText } from "../lib/constants.js";
@@ -352,6 +353,7 @@ function CodeEntry({ myPid, items, prefill }) {
       });
       batch.set(doc(db, "feed", feedId), { slot, review: review.trim(), voided: false, createdAt: serverTimestamp() });
       await batch.commit();
+      forgetFeed(); // 피드 탭에 들어가면 방금 쓴 후기가 바로 보이게
       setCode("");
       setReview("");
       setShowForm(false); // 열린 주차를 다 인증했으면 다시 "인증 완료"만 보이게
@@ -501,7 +503,7 @@ function Thanks({ feedId }) {
       e.preventDefault();
       if (!text.trim()) return;
       setError("");
-      await updateDoc(doc(db, "feed", feedId), { thanks: text.trim() }).catch(() => setError("보내지 못했어요."));
+      await updateDoc(doc(db, "feed", feedId), { thanks: text.trim() }).then(forgetFeed, () => setError("보내지 못했어요."));
     }}>
       <input className="pk-input" value={text} maxLength={200} onChange={(e) => setText(e.target.value)} placeholder="마니또에게 익명으로 전해져요 (피드에도 보여요)" />
       <button className="pk-btn main sm">보내기</button>

@@ -1340,3 +1340,19 @@ test("피드 '공감 많은 후기': 공감 많은 순 3건, 무효·가린 글�
   assert.deepEqual(pickTop(docs, 5).map((r) => r.id), ["c", "b", "a", "g"]);
   assert.deepEqual(pickTop([]), []);
 });
+
+test("피드 기억: LIST_TTL 안에서만 쓰고, 더 많이 필요하거나 forgetFeed 뒤에는 새로 읽는다", async () => {
+  const { LIST_TTL, feedCache, freshList, forgetFeed } = await import("../src/lib/feedCache.js");
+  forgetFeed();
+  assert.equal(freshList(30), null, "읽은 적 없으면 새로 읽는다");
+  const docs = Array.from({ length: 30 }, (_, i) => ({ id: `f${i}` }));
+  feedCache.list = { at: 1000, count: 30, docs };
+  assert.deepEqual(freshList(30, 1000 + LIST_TTL - 1)?.length, 30, "기억 시간 안에는 읽어 둔 것");
+  assert.equal(freshList(30, 1000 + LIST_TTL), null, "기억 시간이 지나면 새로 읽는다");
+  assert.equal(freshList(60, 1001), null, "더 보기(더 많이)는 새로 읽는다");
+  assert.equal(freshList(10, 1001).length, 10);
+  feedCache.top = { at: 1000, docs: [{ id: "x" }] };
+  forgetFeed();
+  assert.equal(freshList(30, 1001), null, "인증·감사 답장을 보낸 뒤에는 지운다");
+  assert.deepEqual(feedCache.top, { at: 0, docs: [] });
+});
