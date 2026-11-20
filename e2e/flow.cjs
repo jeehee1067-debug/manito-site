@@ -511,10 +511,18 @@ const step = (s) => console.log("▶", s);
     await tab(gv, "피드");
     await tab(gv, "내 미션");
     await panel(gv, "1주차 미션 ✔").getByText("덕분에 한 주가 든든했어요!").waitFor();
+    // 답장을 보낸 사람(사아)은 피드에 들어가면 바로 보인다(보낼 때 이 기기에 읽어 둔 피드를 지운다)
+    await tab(r, "피드");
+    await panel(r, "익명 피드").getByText("마니또에게 보낸 답장: 덕분에 한 주가 든든했어요!").waitFor();
+    // 다른 사람(카타)은 피드에 다시 들어갔을 뿐이면(3분 안) 읽어 둔 목록을 보여 주고(읽기 줄이기), "새 글 확인"을 누르면 보인다
     await tab(page, "내 미션");
     await tab(page, "피드");
-    await panel(page, "익명 피드").getByText("마니또에게 보낸 답장: 덕분에 한 주가 든든했어요!").waitFor();
-    console.log(`  감사 답장: 사아 → 피드 글에 붙음 → 마니또(${giverOf["사아"]})의 내 미션 화면과 피드에 보임`);
+    const feedP = panel(page, "익명 피드");
+    await feedP.locator(".dialogue").first().waitFor();
+    assert.equal(await feedP.getByText("마니또에게 보낸 답장: 덕분에 한 주가 든든했어요!").count(), 0, "다시 들어간 피드는 읽어 둔 목록");
+    await feedP.getByRole("button", { name: "새 글 확인" }).click();
+    await feedP.getByText("마니또에게 보낸 답장: 덕분에 한 주가 든든했어요!").waitFor();
+    console.log(`  감사 답장: 사아 → 피드 글에 붙음 → 마니또(${giverOf["사아"]})의 내 미션 화면과 피드에 보임(사아는 바로, 카타는 '새 글 확인' 뒤)`);
     await shot(page, "feed");
   }
 

@@ -3,6 +3,7 @@ import {
   arrayRemove, arrayUnion, collection, deleteDoc, deleteField, doc, getDoc, getDocs, onSnapshot, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, writeBatch,
 } from "firebase/firestore";
 import { db } from "../firebase.js";
+import { forgetFeed } from "../lib/feedCache.js";
 import { useApp } from "../App.jsx";
 import { HowTag, Panel } from "../ui.jsx";
 import { PHASE, PHASES, CARD_HOW, CLUE_COUNT, LEVEL_LABEL, MAIL_DOMAIN, PART_HINT_IDX, PRAISE_SLOT, RULES_VERSION } from "../lib/constants.js";
@@ -1112,6 +1113,7 @@ function Moderation() {
     b.update(doc(db, "redemptions", r.code), { voided: !r.voided });
     if (r.feedId) b.update(doc(db, "feed", r.feedId), { voided: !r.voided });
     await b.commit();
+    forgetFeed(); // 이 기기의 피드 탭에 바로 반영되게
   };
   // 피드에서만 가리기(응모권과 무관): 막말 후기로 마니또의 응모권을 깎으려는 경우에도 쓸 수 있게 무효 처리와 따로 둔다.
   // 피드 글은 참여자 누구나 읽을 수 있어서, 가릴 때는 후기를 비우고 원문은 운영자만 읽는 hiddenFeed로 옮긴다(보안 규칙이 확인).
@@ -1129,11 +1131,11 @@ function Moderation() {
     } else {
       b.update(doc(db, "feed", r.feedId), { hidden: false }); // 예전 방식으로 가린 글(후기가 남아 있음)
     }
-    await b.commit().catch(() => window.alert("바꾸지 못했어요. 잠시 뒤 다시 눌러 주세요."));
+    await b.commit().then(forgetFeed, () => window.alert("바꾸지 못했어요. 잠시 뒤 다시 눌러 주세요."));
   };
   const removeThanks = (r) => {
     if (!window.confirm("이 감사 답장을 지울까요? 받는 사람은 다시 쓸 수 없어요.")) return;
-    return updateDoc(doc(db, "feed", r.feedId), { thanks: deleteField() });
+    return updateDoc(doc(db, "feed", r.feedId), { thanks: deleteField() }).then(forgetFeed);
   };
   // 받는 사람이 "카드와 달라요"로 인증했거나, 완료 알림보다 먼저 인증해 카드를 확인하지 않은 것: 두 사람에게 확인한 뒤 "같음"으로 고칠 수 있다(카드 추가분)
   const setCardSame = (r) => {
