@@ -1175,11 +1175,18 @@ function Moderation() {
     const v = window.prompt(`${what}\n\n이유를 적어 주세요. 쓴 사람에게만 보여요(마니또에게는 안 보여요). 비워 둬도 돼요.`, "");
     return v === null ? null : v.trim().slice(0, 300);
   };
-  const setNote = (b, r, kind, reason) =>
-    b.set(doc(db, "modNotes", r.code), { receiverPid: r.receiverPid, slot: r.slot, [kind]: { reason, at: serverTimestamp() } }, { merge: true });
-  const clearNote = (b, r, kind) => { if (notes[r.code]?.[kind]) b.update(doc(db, "modNotes", r.code), { [kind]: deleteField() }); };
-  // 가리거나 무효 처리하면 글쓴이의 고친 횟수를 0으로 되돌린다(운영진이 지운 뒤에도 다시 고쳐 쓸 수 있게)
-  const resetEdits = (r) => (r.edits ? { edits: 0 } : {});
+  // 이유는 원래 작업(가리기 등)이 저장된 뒤에 따로 쓴다: 콘솔의 보안 규칙이 예전 것이어도 가리기·지우기는 되게(이유만 실패하면 알린다)
+  const NOTE_FAIL = "이유는 저장하지 못했어요. 콘솔의 보안 규칙이 예전 것일 수 있어요(맨 위 규칙 버전 경고 확인).";
+  const writeNote = (r, kind, reason) =>
+    setDoc(doc(db, "modNotes", r.code), { receiverPid: r.receiverPid, slot: r.slot, [kind]: { reason, at: serverTimestamp() } }, { merge: true })
+      .catch(() => window.alert(`${NOTE_LABEL[kind]} 것은 저장했어요. ${NOTE_FAIL}`));
+  const clearNote = (r, kind) => (notes[r.code]?.[kind]
+    ? updateDoc(doc(db, "modNotes", r.code), { [kind]: deleteField() }).catch(() => window.alert(`${NOTE_LABEL[kind]} 이유를 지우지 못했어요. 잠시 뒤 다시 확인해 주세요.`))
+    : null);
+  // 가리거나 무효 처리하면 글쓴이의 고친 횟수를 0으로 되돌린다(운영진이 지운 뒤에도 다시 고쳐 쓸 수 있게). 이것도 원래 작업 뒤에 따로.
+  const resetEdits = (r) => (r.edits
+    ? updateDoc(doc(db, "redemptions", r.code), { edits: 0 }).catch(() => window.alert(`고칠 수 있는 횟수를 되돌리지 못했어요. ${NOTE_FAIL.replace("이유는 저장하지 못했어요. ", "")}`))
+    : null);
 
   // 인증 문서와 익명 피드 글(받는 사람 정보가 없는 별도 문서)을 같이 바꾼다.
   const toggleVoid = async (r) => {
@@ -1189,14 +1196,13 @@ function Moderation() {
       if (reason === null) return;
     }
     const b = writeBatch(db);
-    b.update(doc(db, "redemptions", r.code), { voided: !r.voided, ...(r.voided ? {} : resetEdits(r)) });
+    b.update(doc(db, "redemptions", r.code), { voided: !r.voided });
     if (r.feedId) b.update(doc(db, "feed", r.feedId), { voided: !r.voided });
-    if (!r.voided) setNote(b, r, "void", reason);
-    else clearNote(b, r, "void");
     const ok = await b.commit().then(() => true, () => { window.alert("바꾸지 못했어요. 잠시 뒤 다시 눌러 주세요."); return false; });
     if (!ok) return;
     forgetFeed(); // 이 기기의 피드 탭에 바로 반영되게
     if (r.feedId) await patchFeedDigest(r.feedId, { voided: !r.voided }).catch(() => {}); // 참여자가 읽는 피드 요약에도 바로
+    if (!r.voided) { await resetEdits(r); await writeNote(r, "void", reason); } else await clearNote(r, "void");
   };
   // 피드에서만 가리기(응모권과 무관): 막말 후기로 마니또의 응모권을 깎으려는 경우에도 쓸 수 있게 무효 처리와 따로 둔다.
   // 피드 글은 참여자 누구나 읽을 수 있어서, 가릴 때는 후기를 비우고 원문은 운영자만 읽는 hiddenFeed로 옮긴다(보안 규칙이 확인).
@@ -1212,38 +1218,34 @@ function Moderation() {
     if (!f.hidden) {
       b.set(doc(db, "hiddenFeed", r.feedId), { review: f.review });
       b.update(doc(db, "feed", r.feedId), { hidden: true, review: "" });
-      if (r.edits) b.update(doc(db, "redemptions", r.code), resetEdits(r));
-      setNote(b, r, "hide", reason);
       patch = { hidden: true, review: "" };
     } else if (f.review === "") {
       const orig = await getDoc(doc(db, "hiddenFeed", r.feedId));
       if (!orig.exists()) return window.alert("가린 후기의 원문을 찾지 못했어요.");
       b.update(doc(db, "feed", r.feedId), { hidden: false, review: orig.data().review });
       b.delete(doc(db, "hiddenFeed", r.feedId));
-      clearNote(b, r, "hide");
       patch = { hidden: false, review: orig.data().review };
     } else {
       b.update(doc(db, "feed", r.feedId), { hidden: false }); // 예전 방식으로 가린 글(후기가 남아 있음)
-      clearNote(b, r, "hide");
       patch = { hidden: false };
     }
     const ok = await b.commit().then(() => true, () => { window.alert("바꾸지 못했어요. 잠시 뒤 다시 눌러 주세요."); return false; });
     if (!ok) return;
     forgetFeed();
-    // 참여자가 읽는 피드 요약(public/feed)에도 바로 반영한다(가린 후기가 요약에 남아 보이지 않게)
+    // 참여자가 읽는 피드 요약(public/feed)에도 바로 반영한다(가린 후기가 요약에 남아 보이지 않게). 이유 기록보다 먼저.
     await patchFeedDigest(r.feedId, patch).catch(() => window.alert("피드 요약에 반영하지 못했어요. 잠시 뒤 운영 화면을 열어 두면 다시 맞춰져요."));
+    if (!f.hidden) { await resetEdits(r); await writeNote(r, "hide", reason); } else await clearNote(r, "hide");
   };
   // 감사 답장 지우기: 쓴 사람은 새로 다시 쓸 수 있다(사용자가 정함: "내가 지워도 다시 쓸 수 있게"). 지운 이유는 쓴 사람에게 보인다.
   const removeThanks = async (r) => {
     const reason = askReason(`${nameOf(r.receiverPid)}님의 ${r.slot}주차 감사 답장을 지울까요? 쓴 사람은 새로 다시 쓸 수 있어요(다시 못 쓰게 하려면 "피드에서 가리기").`);
     if (reason === null) return;
-    const b = writeBatch(db);
-    b.update(doc(db, "feed", r.feedId), { thanks: deleteField() });
-    setNote(b, r, "thanks", reason);
-    const ok = await b.commit().then(() => true, () => { window.alert("지우지 못했어요. 잠시 뒤 다시 눌러 주세요."); return false; });
+    const ok = await updateDoc(doc(db, "feed", r.feedId), { thanks: deleteField() })
+      .then(() => true, () => { window.alert("지우지 못했어요. 잠시 뒤 다시 눌러 주세요."); return false; });
     if (!ok) return;
     forgetFeed();
     await patchFeedDigest(r.feedId, { thanks: undefined }).catch(() => {});
+    await writeNote(r, "thanks", reason);
   };
   // 받는 사람이 "카드와 달라요"로 인증했거나, 완료 알림보다 먼저 인증해 카드를 확인하지 않은 것: 두 사람에게 확인한 뒤 "같음"으로 고칠 수 있다(카드 추가분)
   const setCardSame = (r) => {
