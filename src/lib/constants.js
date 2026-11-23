@@ -54,7 +54,8 @@ export const SCHEDULE = [
   { date: "2026-11-17", kind: "join", text: "가입 시작 (회사 메일 인증, 프로필 작성)" },
   { date: "2026-11-18", kind: "week", text: "마니또 배정 · 1주차 미션 시작" },
   { date: "2026-11-20", kind: "clue", text: "단서 2개 공개" },
-  { date: "2026-11-24", time: "11:00", kind: "week", text: "1주차 미션 마감 · 2주차 미션 시작" },
+  // 2주차는 12:00에 연다(1주차도 그때 실제로 닫힌다). 1주차 마감은 11:00으로 안내한다(사용자가 정함, 11/23: "11시까지라고 홍보해 뒀고 진작 하시란 의미로")
+  { date: "2026-11-24", time: "12:00", due: "11:00", kind: "week", text: "2주차 미션 시작 (1주차 미션은 11:00 마감)" },
   { date: "2026-11-27", kind: "clue", text: "단서 2개 공개" },
   { date: "2026-12-01", time: "11:00", kind: "week", text: "2주차 미션 마감 · 3주차 시작 (전원 칭찬 한 줄 + 원하면 카드 미션)" },
   { date: "2026-12-04", kind: "clue", text: "단서 2개 공개" },
@@ -77,12 +78,20 @@ export function scheduleLabel({ date, time, text }) {
 // 주차별 미션 마감(사용자가 정함, 11/23: "지난 주차를 마니또가 몰아서 하는 것은 안 된다"): 그 주차 미션(카드 고르기·완료 알리기)은
 // 다음 주차가 열릴 때(일정표의 다음 "week" 날짜·시각), 3주차는 미션 마감("close") 때 닫힌다. 보안 규칙은 열린 주차(config.week)만 받는다.
 // 받는 사람의 인증은 지난 주차도 최종 지목이 마감될 때까지 된다.
-// 반환 { date, time, label: "11/24(월) 11:00" } 또는 null
+// 일정에 due가 있으면 그것이 안내하는 마감 시각이다(실제로 닫히는 것은 다음 주차를 여는 time — 11/24는 11:00 안내, 12:00에 닫힘).
+// 반환 { date, time, label: "11/24(화) 11:00" } 또는 null
 export function weekDeadline(week) {
   const weeks = SCHEDULE.filter((e) => e.kind === "week");
   const e = week < weeks.length ? weeks[week] : SCHEDULE.find((x) => x.kind === "close");
   if (!e) return null;
-  return { date: e.date, time: e.time || "", label: `${shortDate(e.date)}${e.time ? ` ${e.time}` : ""}` };
+  const t = e.due || e.time || "";
+  return { date: e.date, time: t, label: `${shortDate(e.date)}${t ? ` ${t}` : ""}` };
+}
+// 안내한 마감 시각이 지났는지(이 기기의 시계 기준). 지났어도 다음 주차가 열리기 전까지는 실제로 할 수 있다.
+export function deadlinePassed(week, now = new Date()) {
+  const d = weekDeadline(week);
+  if (!d) return false;
+  return now.getTime() >= new Date(`${d.date}T${d.time || "23:59"}:00`).getTime();
 }
 // 두 날짜("YYYY-MM-DD") 사이의 날 수(to - from). 타임라인의 "D-2" 표시에 쓴다.
 export function daysBetween(from, to) {

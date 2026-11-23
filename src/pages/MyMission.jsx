@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { collection, doc, getDoc, increment, onSnapshot, query, serverTimestamp, setDoc, where, writeBatch } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp, Loading } from "../App.jsx";
-import { CARD_HOW, cardHow, DROP_TIP, DROP_TIP_SHORT, EXTRA_NOTES_MAX, FIRST_CLUE_DATE, PROFILE_DUE, shortDate, LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT, SCHEDULE, SPEND_GUIDE_WON, scheduleLabel, todayYmd, weekDeadline } from "../lib/constants.js";
+import { CARD_HOW, cardHow, DROP_TIP, DROP_TIP_SHORT, EXTRA_NOTES_MAX, FIRST_CLUE_DATE, PROFILE_DUE, shortDate, LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT, SCHEDULE, SPEND_GUIDE_WON, scheduleLabel, todayYmd, weekDeadline, deadlinePassed } from "../lib/constants.js";
 import { DEAL_COUNT, dealCards } from "../lib/cards.js";
 import { syncClues } from "../lib/sync.js";
 import { Avatar, Dialogue, Giver, HowTag, Panel, RoleNote, Target } from "../ui.jsx";
@@ -122,7 +122,8 @@ export default function MyMission({ active = true }) {
   if (extra.prefs === false) todo.push({ text: "내 마니또에게 알려 줄 것(좋아하는 간식, 못 먹는 음식) 적기", href: "#profile" });
   if (running) {
     const due = weekDeadline(week)?.label;
-    if (!missions.done?.[week]) todo.push({ text: (week === PRAISE_SLOT ? `${week}주차 칭찬 한 줄 보내기(원하면 카드 미션도)` : missions.choices?.[week] ? `${week}주차 미션 하고 "완료 알리기"` : `${week}주차 미션 카드 고르기`) + (due ? ` — ${due} 마감` : ""), href: null });
+    const dueNote = !due ? "" : deadlinePassed(week) ? ` — 마감 시각(${due})이 지났어요, 곧 닫혀요` : ` — ${due} 마감`;
+    if (!missions.done?.[week]) todo.push({ text: (week === PRAISE_SLOT ? `${week}주차 칭찬 한 줄 보내기(원하면 카드 미션도)` : missions.choices?.[week] ? `${week}주차 미션 하고 "완료 알리기"` : `${week}주차 미션 카드 고르기`) + dueNote, href: null });
     if (pending.length > 0) todo.push({ text: `받은 미션 ${pending.length}건 인증하기`, href: "#detective" });
     if (extra.mid && !extra.mid[week]) todo.push({ text: `${week}주차 추측 남기기 (용의자 보드)`, href: "#detective" });
   }
@@ -347,7 +348,11 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
         </p>
       )}
       {open && !done && deadline && (
-        <p className="small deadline-line">⏰ {slot}주차 미션 마감: <b>{deadline}</b> — 마감 뒤에는 이 주차 미션을 할 수 없어요.</p>
+        <p className="small deadline-line">
+          {deadlinePassed(slot)
+            ? <>⏰ {slot}주차 미션 마감 시각(<b>{deadline}</b>)이 지났어요. 곧 닫히니 지금 완료를 알려 주세요.</>
+            : <>⏰ {slot}주차 미션 마감: <b>{deadline}</b> — 마감 뒤에는 이 주차 미션을 할 수 없어요.</>}
+        </p>
       )}
 
       {picking && (
