@@ -41,7 +41,7 @@ service cloud.firestore {
     // 게시된 규칙의 버전 확인용. 운영 화면이 이 경로를 읽어 보고, 거부되면 "콘솔의 규칙이 예전 것"이라고 알려 준다.
     // 화면이 쓰는 경로·값의 모양을 바꿀 때 src/lib/constants.js의 RULES_VERSION과 같이 올린다.
     match /rulesVersion/{v} {
-      allow get: if isAdmin() && v == '20261121';
+      allow get: if isAdmin() && v == '20261124';
     }
 
     // ── 설정 ──────────────────────────────────────────────────────────────
@@ -396,9 +396,10 @@ service cloud.firestore {
         && shortStr(request.resource.data.message, 500)
         && (request.resource.data.get('code', null) == null
             || (request.resource.data.code is string && request.resource.data.code.size() == 4))
-        && (((request.resource.data.kind == 'mission' && request.resource.data.slot < 3
+        // 완료 알림(mission·praise)은 지금 열린 주차만(지난 주차는 마감). 추가 쪽지(note)는 완료한 지난 주차에도 된다
+        && (((request.resource.data.kind == 'mission' && request.resource.data.slot < 3 && request.resource.data.slot == week()
                && missionCardOk(string(request.resource.data.slot)))
-             || (request.resource.data.kind == 'praise' && request.resource.data.slot == 3
+             || (request.resource.data.kind == 'praise' && request.resource.data.slot == 3 && request.resource.data.slot == week()
                && request.resource.data.message.size() >= 10
                && praiseCardOk()))
             && id == myReceiver() + '_' + string(request.resource.data.slot)
@@ -427,7 +428,9 @@ service cloud.firestore {
     }
 
     // 미션 슬롯 잠금 (도전 미션 응모권 보호)
-    //  - 미션 진행 단계에만, 열린 주차의 슬롯만 바꿀 수 있다(아직 안 열린 주차의 카드 고르기·완료 표시는 거부).
+    //  - 미션 진행 단계에만, 지금 열린 주차(config.week)의 슬롯만 바꿀 수 있다. 아직 안 열린 주차도, 지난 주차도 거부한다
+    //    (사용자가 정함, 11/23: 주차마다 마감 — 다음 주차를 열면 그 전 주차의 카드 고르기·완료 표시가 막힌다. 몰아서 하기 방지.
+    //     받는 사람의 인증은 지난 주차도 그대로 된다. 완료한 주차의 추가 쪽지(notes)도 그대로 된다)
     //  - 완료 표시(done)는 되돌릴 수 없고, 그 주차 완료 알림(deliveries/받는사람_주차)과 한 묶음으로만 켤 수 있다.
     //  - 완료했거나, 완료 표시 전이라도 그 슬롯 코드가 이미 인증된 1·2주차 슬롯은 고른 카드(난이도)를 바꿀 수 없다.
     //    (쪽지로 코드를 먼저 보내 인증받은 뒤 도전 카드로 바꾸는 것을 막는다)
@@ -476,7 +479,7 @@ service cloud.firestore {
     }
     function slotOkWith(pid, before, s, levels) {
       return slotSame(before, s)
-        || (int(s) <= week()
+        || (int(s) == week()
             && !(doneIn(before, s) && !doneIn(request.resource.data, s))
             && choiceShapeOk(choiceIn(request.resource.data, s), levels)
             && doneWithDelivery(before, s)
@@ -747,36 +750,6 @@ service cloud.firestore {
         && request.resource.data.message is string
         && request.resource.data.message.trim().size() > 0 && request.resource.data.message.size() <= 200
         && request.resource.data.createdAt == request.time;
-    }
-
-    // 투표 카드에는 카드 주인을 짐작할 정보(파트)를 넣지 않는다.
-    match /voteCards/{cardId} {
-      allow read: if member() && phase() >= 3;
-      allow write: if isAdmin() && phase() == 3
-        && (request.resource == null || request.resource.data.keys().hasOnly(['reviews']));
-    }
-    // 파트별로 보이는 카드 목록 { part, cardIds }. 내 파트의 목록만 읽는다(다른 파트 카드의 주인 파트는 알 수 없다).
-    function myRosterPart() { return get(/databases/$(database)/documents/public/roster).data.people[myPid()].part; }
-    match /voteViews/{viewId} {
-      allow read: if linked() && phase() >= 3 && resource.data.part == myRosterPart();
-      allow read: if isAdmin();
-      allow write: if isAdmin() && phase() == 3;
-    }
-    match /cardOwners/{cardId} {
-      allow read, write: if isAdmin() && phase() >= 3;
-    }
-    match /adminEval/{cardId} {
-      allow read, write: if isAdmin() && phase() >= 3;
-    }
-    match /votes/{pid} {
-      allow get: if linked() && myPid() == pid;
-      allow read: if isAdmin() && phase() >= 4;
-      allow create, update: if linked() && myPid() == pid && phase() == 3
-        && request.resource.data.keys().hasOnly(['cardIds', 'createdAt', 'n'])
-        && request.resource.data.cardIds is list
-        && request.resource.data.cardIds.size() <= 3
-        && request.resource.data.createdAt == request.time
-        && bumped();
     }
 
     // 운영 메모: 재배정 시 지울 코드 목록

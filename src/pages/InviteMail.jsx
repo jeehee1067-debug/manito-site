@@ -3,7 +3,7 @@ import { useApp } from "../App.jsx";
 import { Panel } from "../ui.jsx";
 import { firebaseConfig } from "../firebase.config.js";
 import { MAILTO_SAFE_LEN, inviteMessage, inviteRecipients, joinUrl, mailtoHref, profileMessage, profileRecipients } from "../lib/inviteMail.js";
-import { FIRST_CLUE_DATE, PHASE, PROFILE_DUE, SCHEDULE, shortDate } from "../lib/constants.js";
+import { FIRST_CLUE_DATE, PHASE, PROFILE_DUE, shortDate, weekDeadline } from "../lib/constants.js";
 import { reminderMessage, reminderTargets } from "../lib/reminders.js";
 
 // 운영자의 회사 메일에서 보내는 안내 메일 작성기. 사이트에는 서버가 없어 직접 보내지 못한다:
@@ -142,8 +142,8 @@ export function ReminderMail({ roster, rows, week, phase }) {
   const [kind, setKind] = useState("verify");
   const k = canMission ? kind : "verify";
   const url = window.location.origin + window.location.pathname;
-  const close = SCHEDULE.find((e) => e.kind === "close")?.date;
-  const initial = useMemo(() => reminderMessage({ kind: k, url, closeDay: close ? shortDate(close) : "" }), [k, url, close]);
+  const deadline = weekDeadline(week)?.label || "";
+  const initial = useMemo(() => reminderMessage({ kind: k, url, deadline }), [k, url, deadline]);
   const verify = reminderTargets(rows, roster, { kind: "verify", week });
   const mission = canMission ? reminderTargets(rows, roster, { kind: "mission", week }) : [];
   const targets = k === "verify" ? verify : mission;
@@ -164,7 +164,7 @@ export function ReminderMail({ roster, rows, week, phase }) {
       <p className="small">
         {k === "verify"
           ? "마니또가 완료를 알렸는데 아직 인증하지 않은 주차가 있는 사람이에요(3주차 칭찬 카드 포함, \"받은 게 없어요\"로 신고했거나 운영진이 확인한 주차는 빼요)."
-          : "열린 주차 중 아직 완료를 알리지 않은 주차가 있는 사람이에요(지난 주차도 미션 마감 전까지 할 수 있어요)."}
+          : `${week}주차 미션을 아직 완료하지 않은 사람이에요(${deadline} 마감. 지난 주차는 마감돼서 넣지 않아요).`}
         {" "}가입 안 한 사람과 중도 이탈로 표시한 사람은 빼요.
       </p>
       <p className="small reminder-who">

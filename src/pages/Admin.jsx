@@ -959,7 +959,7 @@ function Running() {
     if (week === config.week) return;
     if (week < config.week && !window.confirm(`${config.week}주차 → ${week}주차로 내릴까요?\n\n${week + 1}주차부터는 다시 잠겨서, 그 주차의 카드 고르기·완료 알리기·인증이 막혀요. 실수로 올린 것을 되돌릴 때만 쓰세요.`)) return;
     // 주차를 올리면 그때까지 아무것도 받지 못한 사람에게 수호천사가 자동으로 연결된다(되돌릴 수 없어서 한 번 묻는다)
-    if (week > config.week && !window.confirm(`${week}주차를 열까요?\n\n지금까지 마니또에게 아무것도 받지 못한 사람이 있으면, 수호천사 지원자가 먼저 지원한 순서대로 자동 연결돼요(운영자가 고르지 않아요). 정해진 날에만 눌러 주세요.`)) return;
+    if (week > config.week && !window.confirm(`${week}주차를 열까요?\n\n· ${config.week}주차 미션이 마감돼요. 아직 완료를 알리지 않은 마니또는 ${config.week}주차를 더 할 수 없어요(받은 미션 인증은 그대로 돼요).\n· 지금까지 마니또에게 아무것도 받지 못한 사람이 있으면, 수호천사 지원자가 먼저 지원한 순서대로 자동 연결돼요(운영자가 고르지 않아요).\n\n정해진 시각에만 눌러 주세요.`)) return;
     try {
       if (week > config.week) setBoardMsg(await openWeek(week));
       else await updateDoc(doc(db, "config", "app"), { week });
@@ -1524,6 +1524,17 @@ async function openWeek(week) {
     : made.length ? `${week}주차를 열었어요. 수호천사 ${made.length}명을 지원 순서대로 연결했어요(아래 "수호천사"에서 볼 수 있어요).`
       : `${week}주차를 열었어요. 수호천사를 연결할 사람은 없었어요.`;
 }
+// 미션 마감(단계 1 → 2, 최종 지목 시작): "다음 단계로" 버튼과 같다(파트 순위를 마지막으로 한 번 더 발표한 뒤 단계를 넘긴다).
+async function closeMissions(week) {
+  try {
+    const [roster, missions] = await Promise.all([readAll("roster"), readAll("giverMissions")]);
+    await publishPartBoard(Object.entries(roster).map(([pid, r]) => ({ pid, ...r })), missions, week);
+  } catch {
+    // 파트 순위를 못 발표해도 단계는 넘긴다(버튼과 같음)
+  }
+  await updateDoc(doc(db, "config", "app"), { phase: PHASE.GUESSING });
+  return "미션을 마감하고 최종 지목을 시작했어요(파트 순위도 마지막으로 발표).";
+}
 async function releaseCluesTo(count, week) {
   await updateDoc(doc(db, "config", "app"), { cluesReleased: count });
   try {
@@ -1545,7 +1556,12 @@ export function AutoRunner() {
   const [items, setItems] = useState(null);
   const [tick, setTick] = useState(0);
   const running = useRef(false);
-  useEffect(() => onSnapshot(SCHEDULE_REF(), (s) => setItems(s.exists() ? s.data().items || {} : {}), () => setItems(null)), []);
+  // 서버가 받은 예약만 본다: 예약을 저장한 직후의 "아직 서버에 안 닿은" 값으로 실행을 맡으려 하면, 서버에는 그 예약이 없어
+  // 트랜잭션이 한 번 충돌(failed-precondition)하고 다시 시도된다(결과는 같지만 콘솔에 오류가 남는다 — 11/23 E2E에서 찾음).
+  useEffect(() => onSnapshot(SCHEDULE_REF(), { includeMetadataChanges: true }, (s) => {
+    if (s.metadata.hasPendingWrites) return;
+    setItems(s.exists() ? s.data().items || {} : {});
+  }, () => setItems(null)), []);
   useEffect(() => {
     const t = setInterval(() => setTick((n) => n + 1), AUTO_TICK_MS);
     return () => clearInterval(t);
@@ -1566,7 +1582,7 @@ export function AutoRunner() {
       }).catch(() => false);
       if (!mine) return;
       try {
-        const result = due.type === "week" ? await openWeek(due.target) : await releaseCluesTo(due.target, week);
+        const result = due.type === "week" ? await openWeek(due.target) : due.type === "close" ? await closeMissions(week) : await releaseCluesTo(due.target, week);
         await updateDoc(ref, { [`items.${due.id}.doneAt`]: serverTimestamp(), [`items.${due.id}.result`]: result, [`items.${due.id}.error`]: deleteField() });
       } catch (err) {
         await updateDoc(ref, { [`items.${due.id}.error`]: `실행하지 못했어요(${err?.code || err?.message || "알 수 없는 오류"}). 2분 뒤 다시 해 봐요.` }).catch(() => {});
@@ -1600,7 +1616,7 @@ function ScheduleBox() {
     failed: r.why,
     off: r.why,
   }[r.state]);
-  const fill = () => setForm((f) => Object.fromEntries(AUTO_ITEMS.map((it) => [it.id, f[it.id] || (it.date && plan.find((r) => r.id === it.id).state !== "done" ? `${it.date}T09:00` : "")])));
+  const fill = () => setForm((f) => Object.fromEntries(AUTO_ITEMS.map((it) => [it.id, f[it.id] || (it.date && plan.find((r) => r.id === it.id).state !== "done" ? `${it.date}T${it.time || "09:00"}` : "")])));
 
   async function save() {
     setMsg("");
@@ -1614,7 +1630,7 @@ function ScheduleBox() {
       next[r.id] = items[r.id]?.at === at ? items[r.id] : { at };
       if (at <= Date.now()) past.push(r.label);
     }
-    if (past.length && !window.confirm(`이미 지난 시각이에요: ${past.join(", ")}\n\n저장하면 곧바로 실행돼요(단서 공개는 되돌릴 수 없어요). 저장할까요?`)) return;
+    if (past.length && !window.confirm(`이미 지난 시각이에요: ${past.join(", ")}\n\n저장하면 곧바로 실행돼요(단서 공개·주차 열기·미션 마감은 되돌릴 수 없어요). 저장할까요?`)) return;
     try {
       await setDoc(SCHEDULE_REF(), { items: next });
       setMsg("예약을 저장했어요.");
@@ -1647,10 +1663,13 @@ function ScheduleBox() {
       </ul>
       <div className="reveal-row">
         <button type="button" className="pk-btn" onClick={save}>예약 저장</button>
-        <button type="button" className="pk-btn sm" onClick={fill}>빈 칸을 일정표 날짜(오전 9시)로 채우기</button>
+        <button type="button" className="pk-btn sm" onClick={fill}>빈 칸을 일정표 날짜·시각으로 채우기</button>
       </div>
       {msg && <p className="note" role="status">{msg}</p>}
-      <p className="small muted">미션 마감(12/8)과 집계·공개(12/9)는 되돌릴 수 없어서 예약하지 않아요. 맨 아래 "다음 단계로"를 직접 눌러 주세요.</p>
+      <p className="small muted">
+        채우기를 누르면 주차 열기·미션 마감은 일정표 시각(11:00), 단서 공개는 오전 9시로 들어가요. 주차를 열면 그 전 주차 미션이 마감되고(지난 주차는 마니또가 나중에 할 수 없어요),
+        미션 마감은 "다음 단계로: 최종 지목"을 누른 것과 같아요(되돌릴 수 없어요). 집계·공개(12/9)는 예약하지 않아요. 맨 아래 "다음 단계로"를 직접 눌러 주세요.
+      </p>
     </Panel>
   );
 }

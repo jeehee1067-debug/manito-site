@@ -1292,19 +1292,22 @@ test("백업: 메시지·후기 모음(누가 누구에게), CSV(한글 BOM·수
 
 test("예약(자동 진행): 시각이 지난 것만, 앞 단계가 된 뒤에, 이른 것부터 하나씩", async () => {
   const { AUTO_ITEMS, CLAIM_MS, MAX_TRIES, autoPlan, nextDue, localInputToMs, msToLocalInput } = await import("../src/lib/schedule.js");
-  assert.deepEqual(AUTO_ITEMS.map((i) => `${i.id}:${i.date}`), ["clues2:2026-11-20", "week2:2026-11-24", "clues4:2026-11-27", "week3:2026-12-01", "clues6:2026-12-04"], "일정표의 날짜와 같은 순서");
+  assert.deepEqual(AUTO_ITEMS.map((i) => `${i.id}:${i.date}`), ["clues2:2026-11-20", "week2:2026-11-24", "clues4:2026-11-27", "week3:2026-12-01", "clues6:2026-12-04", "close:2026-12-08"], "일정표의 날짜와 같은 순서");
+  assert.deepEqual(AUTO_ITEMS.filter((i) => i.time).map((i) => `${i.id}:${i.time}`), ["week2:11:00", "week3:11:00", "close:11:00"], "주차 열기·미션 마감은 일정표 시각(11:00)");
   const T = 1_000_000_000_000;
   const st = (items, config, now = T) => Object.fromEntries(autoPlan({ items, config, now }).map((r) => [r.id, r.state]));
   const run = { phase: 1, week: 1, cluesReleased: 0 };
   // 예약 없음 / 시각 전 / 시각이 됨
-  assert.deepEqual(st({}, run), { clues2: "none", week2: "none", clues4: "none", week3: "none", clues6: "none" });
-  assert.deepEqual(st({ clues2: { at: T + 1 }, week2: { at: T } }, run), { clues2: "waiting", week2: "due", clues4: "none", week3: "none", clues6: "none" });
+  assert.deepEqual(st({}, run), { clues2: "none", week2: "none", clues4: "none", week3: "none", clues6: "none", close: "none" });
+  assert.deepEqual(st({ clues2: { at: T + 1 }, week2: { at: T } }, run), { clues2: "waiting", week2: "due", clues4: "none", week3: "none", clues6: "none", close: "none" });
   // 앞 단계가 먼저: 3주차는 2주차 뒤에, 단서 3·4번은 2주차가 열리고 1·2번이 공개된 뒤에
   const all = Object.fromEntries(AUTO_ITEMS.map((i) => [i.id, { at: T - 10 }]));
-  assert.deepEqual(st(all, run), { clues2: "due", week2: "due", clues4: "blocked", week3: "blocked", clues6: "blocked" });
-  assert.deepEqual(st(all, { phase: 1, week: 2, cluesReleased: 0 }), { clues2: "due", week2: "done", clues4: "blocked", week3: "due", clues6: "blocked" });
-  assert.deepEqual(st(all, { phase: 1, week: 2, cluesReleased: 2 }), { clues2: "done", week2: "done", clues4: "due", week3: "due", clues6: "blocked" });
-  assert.deepEqual(st(all, { phase: 1, week: 3, cluesReleased: 6 }), { clues2: "done", week2: "done", clues4: "done", week3: "done", clues6: "done" });
+  assert.deepEqual(st(all, run), { clues2: "due", week2: "due", clues4: "blocked", week3: "blocked", clues6: "blocked", close: "blocked" });
+  assert.deepEqual(st(all, { phase: 1, week: 2, cluesReleased: 0 }), { clues2: "due", week2: "done", clues4: "blocked", week3: "due", clues6: "blocked", close: "blocked" });
+  assert.deepEqual(st(all, { phase: 1, week: 2, cluesReleased: 2 }), { clues2: "done", week2: "done", clues4: "due", week3: "due", clues6: "blocked", close: "blocked" });
+  // 미션 마감은 3주차가 열린 뒤에. 마감되면(단계 2) 끝난 것으로 본다
+  assert.deepEqual(st(all, { phase: 1, week: 3, cluesReleased: 6 }), { clues2: "done", week2: "done", clues4: "done", week3: "done", clues6: "done", close: "due" });
+  assert.equal(st(all, { phase: 2, week: 3, cluesReleased: 6 }).close, "done");
   // 직접 눌러서 이미 된 것은 예약이 있어도 실행하지 않는다. 주차를 다시 내려도 예약으로 한 번 실행한 것(doneAt)은 다시 하지 않는다
   assert.equal(st({ week2: { at: T - 10, doneAt: { seconds: 1 } } }, run).week2, "done");
   // 미션 진행 단계에서만
@@ -1387,6 +1390,7 @@ test("재촉: 참여자 할 일(인증·완료 알리기)과 운영 화면 재�
   ];
   // 1주차 완료 알림을 받았고 인증 전, 2주차는 운영진이 가림, 3주차는 아직 안 열림
   assert.deepEqual(myReminders({ inbox, mine: [], missions: { done: { 1: true } }, week: 2, phase: PHASE.RUNNING }), { toVerify: [1], toDo: [2] });
+  assert.deepEqual(myReminders({ inbox: [], mine: [], missions: {}, week: 2, phase: PHASE.RUNNING }).toDo, [2], "지난 주차(1주차)는 마감이라 할 일에 넣지 않는다");
   assert.deepEqual(myReminders({ inbox, mine: [{ slot: 1 }], missions: { done: { 1: true, 2: true } }, week: 2, phase: PHASE.RUNNING }), { toVerify: [], toDo: [] });
   assert.deepEqual(myReminders({ inbox, mine: [], missions: {}, week: 3, phase: PHASE.RUNNING }).toVerify, [1, 3], "칭찬 카드도 인증할 것");
   assert.deepEqual(myReminders({ inbox, mine: [], missions: {}, week: 3, phase: PHASE.GUESSING }), { toVerify: [1, 3], toDo: [] }, "최종 지목 단계: 인증만");
@@ -1407,12 +1411,24 @@ test("재촉: 참여자 할 일(인증·완료 알리기)과 운영 화면 재�
   assert.deepEqual(reminderTargets(rows, roster, { kind: "verify", week: 2 }), [{ pid: "b", name: "다라", email: "b@x", slots: [1] }],
     "가입 안 한 마바·신고한 가나는 빼고 인증 대기인 다라만");
   assert.deepEqual(reminderTargets(rows, roster, { kind: "mission", week: 2 }).map((x) => [x.name, x.slots]), [["가나", [2]], ["다라", [2]]],
-    "열린 주차까지, 가입 안 한 마바·중도 이탈 사아는 빼고");
+    "지금 열린 주차만(지난 주차는 마감), 가입 안 한 마바·중도 이탈 사아는 빼고");
+  const missedOld = [{ giverPid: "a", receiverPid: "b", slots: { 1: slot("none", false), 2: slot("sent", true) } }];
+  assert.deepEqual(reminderTargets(missedOld, roster, { kind: "mission", week: 2 }), [], "1주차를 놓쳤어도 2주차를 했으면 재촉하지 않는다");
   const auto = [{ giverPid: "a", receiverPid: "b", slots: { 3: slot("auto", true) } }];
   assert.deepEqual(reminderTargets(auto, roster, { kind: "verify", week: 3 }).map((x) => x.slots), [[3]], "칭찬 카드도 대상의 인증 응모권 때문에 재촉");
   for (const kind of ["verify", "mission"]) {
-    const m = reminderMessage({ kind, url: "https://example.test/", closeDay: "12/8(화)" });
+    const m = reminderMessage({ kind, url: "https://example.test/", deadline: "11/24(화) 11:00" });
     assert.ok(m.subject.startsWith("[S1FA 마니또]") && m.body.includes("https://example.test/"));
     for (const n of ["가나", "다라", "마바", "사아"]) assert.ok(!m.body.includes(n), "본문에 이름 없음");
   }
+});
+
+test("주차별 미션 마감: 1주차는 2주차 시작, 2주차는 3주차 시작, 3주차는 미션 마감 시각에 닫힌다", async () => {
+  const { weekDeadline, SCHEDULE, scheduleLabel } = await import("../src/lib/constants.js");
+  assert.deepEqual([1, 2, 3].map((w) => weekDeadline(w)?.label), ["11/24(화) 11:00", "12/1(화) 11:00", "12/8(화) 11:00"]);
+  const weeks = SCHEDULE.filter((e) => e.kind === "week");
+  assert.equal(weekDeadline(1).date, weeks[1].date);
+  assert.equal(weekDeadline(3).date, SCHEDULE.find((e) => e.kind === "close").date);
+  for (const e of SCHEDULE) if (e.time) assert.match(e.time, /^\d{2}:\d{2}$/, e.text);
+  assert.ok(scheduleLabel(weeks[1]).startsWith("11/24(화) 11:00 "));
 });

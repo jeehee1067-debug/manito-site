@@ -920,6 +920,27 @@ const step = (s) => console.log("▶", s);
 
   step("3주차 (다라): 칭찬 한 줄 + 도전 카드(돈 안 드는 쪽) → 대상이 카드와 같다고 인증 → 카드 추가분 +2");
   await panel(admin, "주차").getByRole("button", { name: "3주차" }).click();
+  // 주차별 마감: 3주차가 열리면 2주차를 안 한 사람의 2주차 칸은 "마감"(지난 주차를 몰아서 할 수 없다), 3주차 칸에는 마감 시각
+  {
+    const { weekDeadline } = await import("../src/lib/constants.js");
+    const k = users["카타"];
+    await k.locator(".hud-chip", { hasText: "미션 진행 3주차" }).waitFor();
+    await tab(k, "규칙");
+    await tab(k, "내 미션");
+    const w2 = panel(k, "2주차 미션");
+    await w2.getByText(`2주차 미션은 마감됐어요(${weekDeadline(2).label}). 지난 주차는 나중에 할 수 없어요.`).waitFor();
+    assert.equal(await w2.locator(".level-pick").count(), 0, "마감된 주차는 난이도를 고를 수 없다");
+    assert.equal(await w2.getByRole("button", { name: "미션 완료 알리기" }).count(), 0);
+    assert.equal(await k.locator(".stamp.is-closed .stamp-state:visible", { hasText: "마감" }).count(), 1, "스탬프 2주차가 '마감'");
+    await panel(k, "3주차 공통 미션").locator(".deadline-line", { hasText: `3주차 미션 마감: ${weekDeadline(3).label}` }).waitFor();
+    // 할 일 알림도 이번 주차(3주차)만 말한다
+    await tab(k, "규칙");
+    const bar = await k.locator(".reminder-bar").innerText();
+    assert.match(bar, /3주차 미션을 아직 완료하지 않았어요/);
+    assert.ok(!bar.includes("2주차 미션"), bar);
+    assert.ok(bar.includes(`${weekDeadline(3).label} 마감`), bar);
+    console.log(`  주차별 마감: 카타의 2주차 칸 '마감됐어요(${weekDeadline(2).label})', 3주차 칸 마감 시각, 할 일 알림은 3주차만`);
+  }
   let daraHard = "";
   {
     const g = users["다라"];

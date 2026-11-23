@@ -10,13 +10,13 @@ import { MISSION_SLOTS, PHASE } from "./constants.js";
  * inbox: 내 앞으로 온 deliveries, mine: 내 인증(redemptions where receiverPid == 나, 아직 못 읽었으면 null),
  * missions: giverMissions/{나}(아직 못 읽었으면 null), week: 열린 주차, phase: 단계
  * 반환 { toVerify: [주차] — 내 마니또가 완료를 알렸는데 내가 아직 인증하지 않은 주차(인증은 단계 1~2),
- *        toDo: [주차] — 열린 주차 중 내가 마니또로서 아직 완료를 알리지 않은 주차(미션은 단계 1) }
+ *        toDo: [주차] — 지금 열린 주차를 내가 마니또로서 아직 완료하지 않았으면 그 주차(미션은 단계 1, 지난 주차는 마감이라 넣지 않는다) }
  */
 export function myReminders({ inbox = [], mine = null, missions = null, week = 1, phase }) {
   const canVerify = phase === PHASE.RUNNING || phase === PHASE.GUESSING;
   const sentSlots = [...new Set(inbox.filter((d) => (d.kind === "mission" || d.kind === "praise") && !d.hidden && d.slot <= week).map((d) => d.slot))];
   const toVerify = canVerify && mine ? sentSlots.filter((s) => !mine.some((r) => r.slot === s)).sort((a, b) => a - b) : [];
-  const toDo = phase === PHASE.RUNNING && missions ? MISSION_SLOTS.filter((s) => s <= week && missions.done?.[s] !== true) : [];
+  const toDo = phase === PHASE.RUNNING && missions ? MISSION_SLOTS.filter((s) => s === week && missions.done?.[s] !== true) : [];
   return { toVerify, toDo };
 }
 
@@ -26,7 +26,7 @@ export function myReminders({ inbox = [], mine = null, missions = null, week = 1
  * kind "verify": 마니또가 완료를 알렸는데 대상이 아직 인증하지 않은 주차가 있는 대상
  *   (상태 sent, 그리고 사이트가 전달한 칭찬 카드 auto — 마니또 쪽은 인정되지만 대상 본인의 인증 응모권은 인증해야 생긴다.
  *    "받은 게 없어요"로 신고했거나 운영자가 확인한 주차는 넣지 않는다)
- * kind "mission": 열린 주차 중 완료를 아직 알리지 않은 마니또
+ * kind "mission": 지금 열린 주차를 아직 완료하지 않은 마니또(지난 주차는 마감이라 넣지 않는다)
  * 가입 안 한 사람과 중도 이탈로 표시한 사람은 뺀다.
  * 반환 [{ pid, name, email, slots: [주차] }] (이름순)
  */
@@ -39,7 +39,7 @@ export function reminderTargets(rows = [], roster = [], { kind, week = 1 }) {
       const slot = Number(k);
       if (slot > week) continue;
       if (kind === "verify" && (s.status === "sent" || s.status === "auto")) add(row.receiverPid, slot);
-      if (kind === "mission" && !s.done) add(row.giverPid, slot);
+      if (kind === "mission" && !s.done && slot === week) add(row.giverPid, slot);
     }
   }
   return [...slotsOf]
@@ -51,9 +51,9 @@ export function reminderTargets(rows = [], roster = [], { kind, week = 1 }) {
 
 /**
  * 재촉 메일 제목·본문(받는 사람 모두에게 같은 글 — 숨은 참조로 한 번에 보내므로 누구의 마니또인지·몇 주차인지 적지 않는다).
- * url: 사이트 주소, closeDay: 미션 마감 날("12/8(화)")
+ * url: 사이트 주소, deadline: 지금 열린 주차의 미션 마감("11/24(화) 11:00", constants.js weekDeadline)
  */
-export function reminderMessage({ kind, url, closeDay }) {
+export function reminderMessage({ kind, url, deadline }) {
   if (kind === "verify") {
     return {
       subject: "[S1FA 마니또] 받은 미션 인증을 기다리고 있어요",
@@ -76,13 +76,13 @@ export function reminderMessage({ kind, url, closeDay }) {
   return {
     subject: "[S1FA 마니또] 아직 완료를 알리지 않은 미션이 있어요",
     body: [
-      "안녕하세요! 마니또 미션 중 아직 \"완료 알리기\"를 하지 않은 주차가 있어 안내드려요.",
+      "안녕하세요! 이번 주차 마니또 미션을 아직 \"완료 알리기\" 하지 않으셔서 안내드려요.",
       "",
       "▶ 사이트 → \"내 미션\"에서 카드를 고르고, 미션을 한 뒤 \"미션 완료 알리기\"를 눌러 주세요.",
       "   \"사이트 쪽지\" 카드는 쪽지 칸에 써서 보내면 끝이에요.",
       `▶ 사이트: ${url}`,
       "",
-      `- 지난 주차 미션도 미션 마감${closeDay ? `(${closeDay})` : ""} 전까지 할 수 있어요.`,
+      `- 이번 주차 미션은 ${deadline || "다음 주차가 열릴 때"} 마감돼요. 마감된 주차는 나중에 몰아서 할 수 없어요.`,
       "- 미션을 하고 대상이 인증하면 내 응모권이 쌓여요.",
       "- 사정이 있어 참여가 어려우면 운영진에게 말씀해 주세요.",
       "(아직 완료하지 않은 분들께 함께 보내는 안내예요.)",

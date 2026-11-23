@@ -4,17 +4,21 @@
 // 여기에는 Firestore를 부르는 코드가 없다 — 무엇을 언제 실행할지만 계산한다(tests/logic.test.js).
 import { PHASE, SCHEDULE } from "./constants.js";
 
-const weekDates = SCHEDULE.filter((e) => e.kind === "week").map((e) => e.date); // [1주차, 2주차, 3주차]
+const weekRows = SCHEDULE.filter((e) => e.kind === "week"); // [1주차, 2주차, 3주차]
 const clueDates = SCHEDULE.filter((e) => e.kind === "clue").map((e) => e.date);
+const closeRow = SCHEDULE.find((e) => e.kind === "close");
 
-// 예약할 수 있는 다섯 가지. target: 주차는 열 주차, 단서는 공개 개수. date: 일정표의 날짜(입력 칸 채우기용).
-// 단계 넘기기(12/8 미션 마감, 12/9 집계·공개)는 되돌릴 수 없어서 예약하지 않는다(운영자가 직접 누른다).
+// 예약할 수 있는 여섯 가지. target: 주차는 열 주차, 단서는 공개 개수, 마감은 넘어갈 단계.
+// date·time: 일정표의 날짜·시각(입력 칸 채우기용. 시각이 없으면 오전 9시).
+// 주차를 열면 그 전 주차 미션이 마감된다(사용자가 정함, 11/23: 지난 주차 몰아서 하기 금지 — 보안 규칙도 열린 주차만 받는다).
+// 미션 마감(12/8 11:00)도 예약할 수 있다(사용자가 정함: "12/8 11:00에 최종 미션 마감해서 그 이후 지목"). 집계·공개(12/9)는 예약하지 않는다.
 export const AUTO_ITEMS = [
   { id: "clues2", type: "clues", target: 2, label: "단서 1·2번 공개", date: clueDates[0] || null },
-  { id: "week2", type: "week", target: 2, label: "2주차 열기", date: weekDates[1] || null },
+  { id: "week2", type: "week", target: 2, label: "2주차 열기 (1주차 미션 마감)", date: weekRows[1]?.date || null, time: weekRows[1]?.time },
   { id: "clues4", type: "clues", target: 4, label: "단서 3·4번 공개", date: clueDates[1] || null },
-  { id: "week3", type: "week", target: 3, label: "3주차 열기", date: weekDates[2] || null },
+  { id: "week3", type: "week", target: 3, label: "3주차 열기 (2주차 미션 마감)", date: weekRows[2]?.date || null, time: weekRows[2]?.time },
   { id: "clues6", type: "clues", target: 6, label: "단서 5·6번 공개", date: clueDates[2] || null },
+  { id: "close", type: "close", target: PHASE.GUESSING, label: "미션 마감 (3주차 마감 · 최종 지목 시작)", date: closeRow?.date || null, time: closeRow?.time },
 ];
 
 export const CLAIM_MS = 2 * 60 * 1000; // 한 브라우저가 실행을 맡은 뒤 이 시간 동안 다른 브라우저는 건드리지 않는다
@@ -33,7 +37,7 @@ export function autoPlan({ items = {}, config = {}, now = Date.now() }) {
   return AUTO_ITEMS.map((it) => {
     const s = items[it.id] || {};
     const at = typeof s.at === "number" ? s.at : null;
-    const reached = it.type === "week" ? week >= it.target : released >= it.target;
+    const reached = it.type === "week" ? week >= it.target : it.type === "close" ? (config.phase ?? 0) >= it.target : released >= it.target;
     const base = { ...it, at, doneAt: s.doneAt || null, result: s.result || "", error: s.error || "" };
     if (reached || s.doneAt) return { ...base, state: "done", why: "" };
     if (at == null) return { ...base, state: "none", why: "" };
@@ -42,6 +46,7 @@ export function autoPlan({ items = {}, config = {}, now = Date.now() }) {
     if (now < at) return { ...base, state: "waiting", why: "" };
     // 시각이 지났다. 보안 규칙과 같은 조건: 주차는 한 칸씩, 단서는 한 번에 2개까지이고 2 × 주차를 넘지 못한다
     if (it.type === "week" && week !== it.target - 1) return { ...base, state: "blocked", why: `${it.target - 1}주차를 먼저 열어야 해요.` };
+    if (it.type === "close" && week !== 3) return { ...base, state: "blocked", why: "3주차를 먼저 열어야 해요." };
     if (it.type === "clues" && released < it.target - 2) return { ...base, state: "blocked", why: "앞의 단서를 먼저 공개해야 해요." };
     if (it.type === "clues" && it.target > 2 * week) return { ...base, state: "blocked", why: `${it.target / 2}주차를 먼저 열어야 해요.` };
     return { ...base, state: "due", why: "" };
