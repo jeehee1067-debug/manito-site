@@ -362,7 +362,7 @@ function Notice() {
   };
   return (
     <Panel title="공지">
-      <p className="small">모든 참여자 화면 위쪽에 보여요. 예: "12/8(화) 오전 9시 미션 마감! 받은 미션은 추리 보드에서 인증해 주세요."</p>
+      <p className="small">모든 참여자 화면 위쪽에 보여요. 예: "12/8(화) 오전 11시 미션 마감! 받은 미션은 추리 보드에서 인증해 주세요."</p>
       <textarea className="pk-input" rows={2} maxLength={200} value={text} onChange={(e) => { setText(e.target.value); setSaved(false); }} placeholder="공지 내용 (200자까지)" aria-label="공지 내용" />
       <div className="inline">
         <button className="pk-btn main sm" onClick={() => save(text)}>공지 올리기</button>
@@ -1667,7 +1667,7 @@ function ScheduleBox() {
       </div>
       {msg && <p className="note" role="status">{msg}</p>}
       <p className="small muted">
-        채우기를 누르면 주차 열기·미션 마감은 일정표 시각(11:00), 단서 공개는 오전 9시로 들어가요. 주차를 열면 그 전 주차 미션이 마감되고(지난 주차는 마니또가 나중에 할 수 없어요),
+        채우기를 누르면 일정표 시각(2주차 열기 11/24 12:00, 3주차 열기·미션 마감 11:00), 단서 공개는 오전 9시로 들어가요. 주차를 열면 그 전 주차 미션이 마감되고(지난 주차는 마니또가 나중에 할 수 없어요),
         미션 마감은 "다음 단계로: 최종 지목"을 누른 것과 같아요(되돌릴 수 없어요). 집계·공개(12/9)는 예약하지 않아요. 맨 아래 "다음 단계로"를 직접 눌러 주세요.
       </p>
     </Panel>
