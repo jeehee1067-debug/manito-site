@@ -1293,7 +1293,7 @@ test("백업: 메시지·후기 모음(누가 누구에게), CSV(한글 BOM·수
 test("예약(자동 진행): 시각이 지난 것만, 앞 단계가 된 뒤에, 이른 것부터 하나씩", async () => {
   const { AUTO_ITEMS, CLAIM_MS, MAX_TRIES, autoPlan, nextDue, localInputToMs, msToLocalInput } = await import("../src/lib/schedule.js");
   assert.deepEqual(AUTO_ITEMS.map((i) => `${i.id}:${i.date}`), ["clues2:2026-11-20", "week2:2026-11-24", "clues4:2026-11-27", "week3:2026-12-01", "clues6:2026-12-04", "close:2026-12-08"], "일정표의 날짜와 같은 순서");
-  assert.deepEqual(AUTO_ITEMS.filter((i) => i.time).map((i) => `${i.id}:${i.time}`), ["week2:12:00", "week3:11:00", "close:11:00"], "주차 열기·미션 마감은 일정표 시각(2주차는 12:00에 연다)");
+  assert.deepEqual(AUTO_ITEMS.filter((i) => i.time).map((i) => `${i.id}:${i.time}`), ["week2:12:00", "week3:12:00", "close:12:00"], "주차 열기·미션 마감은 일정표 시각 12:00(안내 마감 11:00보다 한 시간 뒤)");
   const T = 1_000_000_000_000;
   const st = (items, config, now = T) => Object.fromEntries(autoPlan({ items, config, now }).map((r) => [r.id, r.state]));
   const run = { phase: 1, week: 1, cluesReleased: 0 };
@@ -1430,11 +1430,21 @@ test("주차별 미션 마감: 1주차는 2주차 시작, 2주차는 3주차 시
   assert.equal(weekDeadline(1).date, weeks[1].date);
   assert.equal(weekDeadline(3).date, SCHEDULE.find((e) => e.kind === "close").date);
   for (const e of SCHEDULE) for (const t of [e.time, e.due].filter(Boolean)) assert.match(t, /^\d{2}:\d{2}$/, e.text);
-  // 11/24: 2주차는 12:00에 열지만 1주차 마감은 11:00으로 안내한다(사용자가 정함)
+  // 주차 열기·미션 마감은 12:00에 하지만 마감은 11:00으로 안내한다(사용자가 정함: 11/24, 12/1, 12/8 모두)
+  const close = SCHEDULE.find((e) => e.kind === "close");
   assert.ok(scheduleLabel(weeks[1]).startsWith("11/24(화) 12:00 "));
-  assert.equal(weekDeadline(1).time, "11:00");
+  assert.ok(scheduleLabel(weeks[2]).startsWith("12/1(화) 12:00 "));
+  assert.ok(scheduleLabel(close).startsWith("12/8(화) 12:00 "));
+  for (const e of [weeks[1], weeks[2], close]) {
+    assert.equal(e.time, "12:00"); assert.equal(e.due, "11:00");
+    assert.match(e.text, /11:00 마감/, "타임라인 글에도 안내 마감 11:00이 보인다");
+  }
+  assert.deepEqual([1, 2, 3].map((w) => weekDeadline(w).time), ["11:00", "11:00", "11:00"]);
   const { deadlinePassed } = await import("../src/lib/constants.js");
   assert.equal(deadlinePassed(1, new Date("2026-11-24T10:59:00")), false);
   assert.equal(deadlinePassed(1, new Date("2026-11-24T11:00:00")), true, "11:00이 지나면 '마감 시각이 지났어요'(실제로는 12:00 전까지 할 수 있음)");
+  assert.equal(deadlinePassed(2, new Date("2026-12-01T10:59:00")), false);
+  assert.equal(deadlinePassed(2, new Date("2026-12-01T11:30:00")), true);
   assert.equal(deadlinePassed(3, new Date("2026-12-08T10:00:00")), false);
+  assert.equal(deadlinePassed(3, new Date("2026-12-08T11:30:00")), true);
 });
