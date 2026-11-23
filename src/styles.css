@@ -680,3 +680,9 @@ ul.plain.redeem-status li { flex: 0 0 auto; width: auto; margin: 0; }
 .panel.locked .panel-title { filter: grayscale(0.4); }
 .stamps-title { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 14px; font-weight: 700; color: var(--ink); }
 .stamps-title small { margin-left: auto; font-size: 11.5px; font-weight: 400; color: var(--ink-soft); }
+
+/* 내 후기·감사 답장 고치기(추리 보드 "내가 인증한 것") */
+.my-post-tools { display: grid; gap: 6px; margin-top: 4px; }
+.edit-post { display: grid; gap: 6px; }
+.edit-post textarea { width: 100%; }
+.edited-mark { font-size: 0.8em; }

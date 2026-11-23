@@ -2,13 +2,14 @@
 // 참여자마다 최근 글 30건 + 공감 많은 글 6건을 각자 읽던 것을, 운영자 화면이 한 문서에 모아 두고(최근 PAGE건·공감 많은 TOP_FETCH건)
 // 참여자는 그 1건과 그 뒤로 새로 올라온 글만 읽는다. feed 문서와 같은 내용만 담는다(받는 사람·코드 없음). public/* 쓰기는 원래 운영자만(보안 규칙 변경 없음).
 // - 쓰는 쪽: FeedDigestWriter(App.jsx가 운영자·공동 운영자 계정에 띄움). 바뀐 뒤 DIGEST_DELAY가 지나면 다시 쓴다.
-//   운영자 화면이 열려 있지 않으면 요약이 오래될 수 있다: 새 글은 "그 뒤 새 글" 조회로 보이고, 공감 수·감사 답장은 "새 글 확인"을 눌러야 최신이 된다.
+//   운영자 화면이 열려 있지 않으면 요약이 오래될 수 있다: 새 글은 "그 뒤 새 글" 조회로, 글쓴이가 고친 후기·답장은 "그 뒤 고친 글"(editedAt) 조회로 보이고,
+//   공감 수·처음 쓴 감사 답장은 "새 글 확인"을 눌러야 최신이 된다.
 // - 운영자의 무효·가리기·답장 지우기는 patchFeedDigest로 요약 문서에도 바로 반영한다(가린 후기가 요약에 남아 보이지 않게).
 // - 새 글 확인·더 보기·내가 쓴 뒤(forgetFeed)에는 지금처럼 feed를 직접 읽는다.
 import { useEffect, useRef, useState } from "react";
 import { collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, where } from "firebase/firestore";
 import { db } from "../firebase.js";
-import { digestKey, feedCache, mergeDigest, patchPosts } from "./feedCache.js";
+import { digestKey, feedCache, mergeDigest, overlayPosts, patchPosts } from "./feedCache.js";
 
 export const PAGE = 30;
 export const TOP_FETCH = 6;
@@ -29,9 +30,14 @@ export async function loadFeed({ count = PAGE, refresh = false } = {}) {
     const dg = d?.exists() ? d.data() : null;
     const newest = dg && Array.isArray(dg.recent) ? dg.recent[0]?.createdAt : null;
     if (newest) {
-      const s = await getDocs(query(collection(db, "feed"), where("createdAt", ">", newest), orderBy("createdAt", "desc"), limit(count)));
-      const list = mergeDigest(dg.recent, s.docs.map(toPost), count);
-      const top = Array.isArray(dg.top) ? dg.top : [];
+      // 요약 뒤에 새로 올라온 글, 그리고 요약 뒤에 글쓴이가 고친 글(editedAt, 보통 0건)
+      const [s, e] = await Promise.all([
+        getDocs(query(collection(db, "feed"), where("createdAt", ">", newest), orderBy("createdAt", "desc"), limit(count))),
+        getDocs(query(collection(db, "feed"), where("editedAt", ">", dg.at || new Date(0)), limit(count))).catch(() => null),
+      ]);
+      const edited = e ? e.docs.map(toPost) : [];
+      const list = overlayPosts(mergeDigest(dg.recent, s.docs.map(toPost), count), edited);
+      const top = overlayPosts(Array.isArray(dg.top) ? dg.top : [], edited);
       feedCache.list = { at: now, count, docs: list };
       feedCache.top = { at: now, docs: top };
       return { list, top };

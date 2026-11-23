@@ -3,6 +3,8 @@ export const PHASES = ["준비", "미션 진행", "최종 지목", "마감", "�
 export const PHASE = { SETUP: 0, RUNNING: 1, GUESSING: 2, CLOSED: 3, SCORING: 4, REVEAL: 5 };
 
 export const REVIEW_MIN = 20;
+// 글쓴이가 후기·감사 답장을 고칠 수 있는 횟수(합쳐서, 집계 전까지). firestore.rules의 redemptions edits 한도와 같아야 한다(npm test가 확인).
+export const REVIEW_EDITS_MAX = 3;
 // 근무지: 방탈출과 같은 구분. 옵션으로 같은 근무지끼리만 마니또 짝을 지을 수 있다(실물 미션이 가능하게).
 export const LOCS = ["SR3", "S1L"];
 export const MISSION_SLOTS = [1, 2, 3]; // 1·2주차 미션 카드, 3주차 칭찬 카드
@@ -120,7 +122,7 @@ export const MAIL_LINK = "@mail";
 
 // 게시돼 있어야 하는 보안 규칙 버전. firestore.rules의 rulesVersion과 같아야 한다.
 // 규칙에서 화면이 쓰는 경로·값의 모양을 바꿀 때 양쪽을 같이 올린다. 운영 화면이 이 값으로 "콘솔의 규칙이 예전 것"인지 확인해 알려 준다.
-export const RULES_VERSION = "20261124";
+export const RULES_VERSION = "20261125";
 
 // remote: 다른 근무지에 있는 대상에게도 할 수 있는 미션인지.
 // 대상이 다른 근무지면 remote 카드만 제시한다. 쉬움 카드는 모두 사이트 쪽지로 하는 무비용 미션.

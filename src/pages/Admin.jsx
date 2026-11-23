@@ -7,7 +7,7 @@ import { forgetFeed } from "../lib/feedCache.js";
 import { patchFeedDigest } from "../lib/feedDigest.js";
 import { useApp } from "../App.jsx";
 import { HowTag, Panel } from "../ui.jsx";
-import { PHASE, PHASES, CARD_HOW, CLUE_COUNT, LEVEL_LABEL, MAIL_DOMAIN, PART_HINT_IDX, PRAISE_SLOT, RULES_VERSION } from "../lib/constants.js";
+import { PHASE, PHASES, CARD_HOW, CLUE_COUNT, LEVEL_LABEL, MAIL_DOMAIN, PART_HINT_IDX, PRAISE_SLOT, REVIEW_EDITS_MAX, RULES_VERSION } from "../lib/constants.js";
 import { SLOT_STATUS_LABEL, assignmentHealth, cardPicks, clueAnswers, codeProblems, cluesDoneSet, pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../lib/pairs.js";
 import { assignManito, assignmentMemo, generateCodes, makeInviteCode, previewAssignments } from "../lib/assign.js";
 import { computeTickets, missionLikes, noticedWeeks, partStandings, rankReviews, reviewLikes, weeklyPartBoard } from "../lib/scoring.js";
@@ -1200,7 +1200,7 @@ function Moderation() {
     await patchFeedDigest(r.feedId, patch).catch(() => window.alert("피드 요약에 반영하지 못했어요. 잠시 뒤 운영 화면을 열어 두면 다시 맞춰져요."));
   };
   const removeThanks = (r) => {
-    if (!window.confirm("이 감사 답장을 지울까요? 받는 사람은 다시 쓸 수 없어요.")) return;
+    if (!window.confirm("이 감사 답장을 지울까요? 받는 사람은 새로 다시 쓸 수 있어요(다시 못 쓰게 하려면 \"피드에서 가리기\").")) return;
     return updateDoc(doc(db, "feed", r.feedId), { thanks: deleteField() })
       .then(() => { forgetFeed(); return patchFeedDigest(r.feedId, { thanks: undefined }).catch(() => {}); });
   };
@@ -1225,6 +1225,8 @@ function Moderation() {
           내용 없는 인증은 무효 처리하세요. 무효 처리된 인증은 피드와 응모권에서 빠져요(받는 사람의 인증 응모권과 마니또의 그 미션 응모권).
           후기만 성의 없고 미션은 실제로 받은 것이 확인되면, 집계 단계의 "집계 전 확인"에서 그 주차를 "받았음"으로 눌러 마니또의 미션은 인정할 수 있어요.
           미션은 제대로 했는데 후기나 답장만 문제라면 "피드에서 가리기"·"답장 지우기"를 쓰세요(응모권은 그대로예요).
+          후기·감사 답장은 쓴 사람이 집계 전까지 합쳐서 {REVIEW_EDITS_MAX}번 고칠 수 있어요(추리 보드 "내가 인증한 것", 피드에 "고침" 표시).
+          실수로 이름을 쓴 글은 먼저 "피드에서 가리기"로 가리고 쓴 사람에게 고쳐 달라고 한 뒤, 여기 보이는 후기가 고쳐진 것을 확인하고 "피드에 다시 보이기"를 누르세요(고친 글이 보여요).
           "카드와 다름"은 받는 사람이 받은 것이 마니또가 고른 카드와 다르다고 한 것이에요(보통·도전 카드면 추가 응모권이 빠져요).
           "카드 확인 전"은 받는 사람이 마니또의 완료 알림보다 먼저 인증해서 카드를 아직 확인하지 않은 것이에요(받는 사람이 추리 보드 "내가 인증한 것"에서 확인하면 추가분이 붙고, 확인이 없으면 붙지 않아요).
         </p>
@@ -1236,7 +1238,7 @@ function Moderation() {
                 <p>{r.review}</p>
                 {f?.thanks && <p className="small">감사 답장: {f.thanks}</p>}
                 <span className="small muted">
-                  {nameOf(r.receiverPid)} · {r.slot}주차{f?.hidden ? " · 피드에서 가림" : ""}{r.cardMatch === false ? " · 카드와 다름" : r.cardMatch === undefined && cardSlot(r) ? " · 카드 확인 전" : ""}
+                  {nameOf(r.receiverPid)} · {r.slot}주차{f?.hidden ? " · 피드에서 가림" : ""}{r.edits ? ` · 고침 ${r.edits}번` : ""}{r.cardMatch === false ? " · 카드와 다름" : r.cardMatch === undefined && cardSlot(r) ? " · 카드 확인 전" : ""}
                 </span>
                 <span className="inline">
                   <button className="text-btn" onClick={() => toggleVoid(r)}>{r.voided ? "무효 취소" : "무효 처리"}</button>

@@ -9,7 +9,8 @@ import { feedCache, freshList } from "../lib/feedCache.js";
 import { PAGE, loadFeed } from "../lib/feedDigest.js";
 
 // 익명 피드. 인증 문서(redemptions)가 아니라 따로 만든 feed 문서를 읽는다.
-// feed 문서에는 받는 사람 정보도 인증 코드도 없다({ slot, review, voided, createdAt, thanks?, hidden?, likes? }, 문서 ID는 무작위).
+// feed 문서에는 받는 사람 정보도 인증 코드도 없다({ slot, review, voided, createdAt, thanks?, hidden?, likes?, editedAt? }, 문서 ID는 무작위).
+// editedAt: 글쓴이가 후기·답장을 고친 시각(추리 보드 "내가 인증한 것"). 있으면 "(고침)"을 붙인다.
 // 인증 문서는 인증한 사람·그 코드의 마니또·운영자만 읽을 수 있다(보안 규칙).
 // 읽기 줄이기: 최근 PAGE건씩. 감사 답장은 같은 문서에 들어 있어서 따로 읽지 않는다.
 // 처음 열 때는 운영자 화면이 모아 둔 요약 문서 public/feed 1건 + 그 뒤 새 글만 읽는다(lib/feedDigest.js).
@@ -99,7 +100,7 @@ export default function Feed() {
   const post = (r, key, extra) => (
     <Dialogue key={key} speaker={r.slot === 3 ? "칭찬 카드 받은 사람" : `${r.slot}주차 미션 받은 사람`} tone={extra ? "gold" : ""}>
       {extra}
-      <p>{r.review}</p>
+      <p>{r.review}{r.editedAt && <small className="muted edited-mark"> (고침)</small>}</p>
       {r.thanks && <p className="small reply">마니또에게 보낸 답장: {r.thanks}</p>}
       <p className="like-row">
         {canLike

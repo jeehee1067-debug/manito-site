@@ -939,6 +939,13 @@ test("보안 규칙의 추첨 칸 이름이 상품 설정과 같고, 카드 번�
   }
 });
 
+test("보안 규칙의 후기·답장 고치기 한도가 REVIEW_EDITS_MAX와 같다", async () => {
+  const { REVIEW_EDITS_MAX } = await import("../src/lib/constants.js");
+  const rules = readFileSync(new URL("../firestore.rules", import.meta.url), "utf8");
+  const limits = [...rules.matchAll(/request\.resource\.data\.edits <= (\d+)/g)].map((m) => Number(m[1]));
+  assert.deepEqual(limits, [REVIEW_EDITS_MAX]);
+});
+
 test("보안 규칙의 추가 쪽지 한도가 EXTRA_NOTES_MAX와 같다", () => {
   const rules = readFileSync(new URL("../firestore.rules", import.meta.url), "utf8");
   const limits = [...rules.matchAll(/(?:noteCount\(getAfter\(myMissions\(\)\)\.data, string\(request\.resource\.data\.slot\)\)|n1) <= (\d+)/g)].map((m) => Number(m[1]));
@@ -1380,6 +1387,19 @@ test("피드 요약: 새 글을 앞에 붙이고, 바뀐 것만 다시 쓰고, �
   assert.equal(hidden.find((d) => d.id === "f3"), recent[0], "다른 글은 그대로");
   const withThanks = patchPosts(recent, "f1", { thanks: "고마워요" });
   assert.equal("thanks" in patchPosts(withThanks, "f1", { thanks: undefined }).find((d) => d.id === "f1"), false, "답장 지우기는 칸을 없앤다");
+});
+
+test("피드 요약 뒤에 글쓴이가 고친 글은 요약의 같은 글을 바꿔 넣는다(요약에 없는 글은 더하지 않음)", async () => {
+  const { overlayPosts, digestKey } = await import("../src/lib/feedCache.js");
+  const ts = (s) => ({ seconds: s, nanoseconds: 0 });
+  const recent = [3, 2, 1].map((i) => ({ id: `f${i}`, slot: 1, review: `후기${i}`, voided: false, createdAt: ts(i) }));
+  const edited = [{ ...recent[1], review: "이름을 지운 후기", editedAt: ts(9) }, { id: "f9", slot: 1, review: "요약에 없던 글", createdAt: ts(0), editedAt: ts(9) }];
+  const out = overlayPosts(recent, edited);
+  assert.deepEqual(out.map((d) => d.id), ["f3", "f2", "f1"], "순서·개수는 요약 그대로");
+  assert.equal(out[1].review, "이름을 지운 후기");
+  assert.equal(out[0], recent[0], "다른 글은 그대로");
+  assert.deepEqual(overlayPosts(recent, []), recent);
+  assert.notEqual(digestKey([{ ...recent[0], editedAt: ts(9) }], []), digestKey([recent[0]], []), "고친 표시가 생기면 요약을 다시 쓴다");
 });
 
 test("재촉: 참여자 할 일(인증·완료 알리기)과 운영 화면 재촉 메일 받는 사람", async () => {
