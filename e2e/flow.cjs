@@ -1093,9 +1093,13 @@ const step = (s) => console.log("▶", s);
     assert.equal(direct.status, 403, "집계 결과 없이 공개로 넘기는 직접 요청도 거부");
     console.log("  집계 전에 '다음 단계로: 공개' → 화면이 막고(아직 집계하지 않았어요), 직접 요청도 거부(403)");
   }
+  // 황금 카드 추첨을 안 한 채 집계하면 알려 준다(이 흐름에서는 추첨하지 않는다 — 추첨은 gold.cjs)
+  await panel(admin, "집계").getByText("2·3주차 황금 카드 추첨을 아직 안 했어요.", { exact: false }).waitFor();
   await admin.getByRole("button", { name: "집계하기" }).click();
   await admin.getByText(/^응모권 상위/).waitFor();
   const scoreText = (await panel(admin, "집계").locator("ul.plain").first().innerText()).replace(/\n/g, " / ");
+  assert.match(scoreText, /송년회 칭호: 🏆 도전왕 .* · ✨ 황금손 .* · 💌 쪽지 장인 .* · 🫥 투명 마니또 /);
+  assert.match(scoreText, /황금 카드 커피 쿠폰: 2주차 추첨 전 · 3주차 추첨 전/);
   {
     // 현장 종이 추첨용 이름 종이: 사람마다 응모권 수만큼(인쇄해서 잘라 통에 넣는다)
     const sp = panel(admin, "집계");
@@ -1157,6 +1161,25 @@ const step = (s) => console.log("▶", s);
   await next(); await pres.getByText("명탐정").waitFor();
   console.log("  명탐정:", (await pres.locator(".pres-center").innerText()).replace(/\s+/g, " "));
   await next(); await pres.getByText("칭찬 벽").waitFor();
+  // 송년회 칭호: 받은 사람이 있는 칭호만 한 장면씩(집계가 저장한 것과 같은 사람). 황금 카드 추첨을 안 했으므로 커피 쿠폰 장면은 없다
+  const savedR = fields(await readDoc("results/public"));
+  assert.equal(savedR.goldWinners && Object.keys(savedR.goldWinners).length, 0, "추첨하지 않은 주차는 저장하지 않는다");
+  const titleNames = Object.fromEntries(PEOPLE.map((x) => [pidOf[x.name], x.name]));
+  const shownT = (savedR.titles || []).filter((t) => t.winners.length > 0);
+  assert.equal((savedR.titles || []).length, 4, "칭호 4개를 모두 저장(받은 사람이 없는 것도)");
+  for (const t of shownT) {
+    await next();
+    await pres.locator(".pres-title", { hasText: t.label }).waitFor();
+    const onStage = (await pres.locator(".pres-person b").allInnerTexts()).map((x) => x.trim()).sort();
+    assert.deepEqual(onStage, t.winners.map((pid) => titleNames[pid]).sort(), `${t.label} 장면의 사람`);
+  }
+  console.log("  칭호 장면:", (savedR.titles || []).map((t) => `${t.emoji} ${t.label} [${t.winners.map((pid) => titleNames[pid]).join(", ")}]${t.value ? ` ${t.value}` : ""}`).join(" / "));
+  if (shownT.length) {
+    // 참여자 결과 탭 "그 밖의 기록"에도 무대에서 지난 칭호가 보인다
+    const rec = panel(users["가나"], "그 밖의 기록");
+    for (const t of shownT) await rec.getByText(`${t.emoji} ${t.label}`).waitFor();
+    console.log("  가나의 결과 탭 '그 밖의 기록':", (await rec.innerText()).replace(/\s+/g, " "));
+  }
   // 시상: 숫자 정하기 → 2등(한 명씩) → 3등 → 4등·5등(종이로 뽑힌 이름 입력) → 1등(종이, 겹쳐도 됨) → 겹친 자리 다시 채우기 → 6등(사이트 추첨)
   // 6명뿐이라 상이 사람보다 많다(자리가 남는다). 사람이 넉넉한 경우의 다시 뽑기는 awards.cjs가 확인한다.
   const S = await import("../src/lib/scoring.js"); // 저장된 값(숫자·종이로 뽑힌 이름)에서 정해지는 수상자를 같은 규칙으로 계산해 화면과 비교한다

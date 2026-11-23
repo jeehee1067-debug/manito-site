@@ -1575,3 +1575,82 @@ test("주차별 미션 마감: 1주차는 2주차 시작, 2주차는 3주차 시
   assert.equal(deadlinePassed(3, new Date("2026-12-08T10:00:00")), false);
   assert.equal(deadlinePassed(3, new Date("2026-12-08T11:30:00")), true);
 });
+
+test("송년회 칭호: 도전왕·황금손·쪽지 장인·투명 마니또를 기록으로 정하고, 동점은 모두, 불참·수상 제외는 빠진다", async () => {
+  const { computeTitles, TITLES, shownTitles, titleValue } = await import("../src/lib/titles.js");
+  const card = (id) => { const c = Object.entries(MISSION_CARDS).flatMap(([level, cs]) => cs.map((x) => ({ ...x, level }))).find((x) => x.id === id); return { cardId: c.id, level: c.level, text: c.text }; };
+  const people = ["A", "B", "C", "D", "E", "F"].map((pid) => ({ pid, joined: true }));
+  people.push({ pid: "G", joined: false }); // 가입 안 함
+  people.find((p) => p.pid === "F").disqualified = true;
+  // 원: A→B→C→D→E→F→A (G는 짝 없음)
+  const assignments = { A: "B", B: "C", C: "D", D: "E", E: "F", F: "A" };
+  const giverCodes = Object.fromEntries(Object.keys(assignments).map((g) => [g, { 1: `${g}1`, 2: `${g}2`, 3: `${g}3` }]));
+  const missions = {
+    A: { choices: { 1: card("h1"), 2: card("h14"), 3: card("h2") } }, // 도전 3(황금 1) — 단 3주차는 카드와 다름
+    B: { choices: { 1: card("h1"), 2: card("h15") } }, // 도전 2(황금 1)
+    C: { choices: { 1: card("h1"), 2: card("h2") } }, // 도전 2
+    D: { choices: { 1: { cardId: "h1", level: "hard", text: "위조" }, 2: card("n1") } }, // 목록과 다른 카드는 안 센다
+    F: { choices: { 1: card("h1"), 2: card("h2"), 3: card("h3") } }, // 수상 제외: 도전 3이어도 빠진다
+  };
+  const ok = { cardMatch: true };
+  const redemptions = {
+    A1: ok, A2: ok, A3: { cardMatch: false },
+    B1: ok, B2: ok,
+    C1: ok, C2: ok,
+    D1: ok, D2: ok,
+    F1: ok, F2: ok, F3: ok,
+  };
+  const deliveries = [
+    { receiverPid: "C", slot: 1, kind: "mission", message: "쪽지" }, // B의 쪽지
+    { receiverPid: "C", slot: 1, kind: "note", message: "더" },
+    { receiverPid: "C", slot: 1, kind: "note", message: "더 더" },
+    { receiverPid: "D", slot: 1, kind: "mission", message: "x" }, // C
+    { receiverPid: "D", slot: 1, kind: "note", message: "y" },
+    { receiverPid: "D", slot: 1, kind: "note", message: "z" },
+    { receiverPid: "D", slot: 1, kind: "note", message: "가림", hidden: true }, // 가린 것은 안 센다
+    { receiverPid: "D", slot: 2, kind: "mission", message: "  " }, // 빈 쪽지는 안 센다
+    { receiverPid: "A", slot: 1, kind: "note", message: "1" }, { receiverPid: "A", slot: 1, kind: "note", message: "2" },
+    { receiverPid: "A", slot: 1, kind: "note", message: "3" }, { receiverPid: "A", slot: 1, kind: "note", message: "4" }, // F(수상 제외)
+  ];
+  // 은신: A·B·C·E가 은신 응모권을 받음. B는 대상 C가 2주차에 B를 찍은 적이 있다. E의 대상 F는 참여 중이라 센다.
+  const tickets = { A: { hidden: 2 }, B: { hidden: 2 }, C: { hidden: 2 }, D: { hidden: 0 }, E: { hidden: 2 }, F: { hidden: 2 } };
+  const midGuesses = { C: { 1: "A", 2: "B" }, D: { 1: "A" } };
+  const titles = computeTitles({ people, assignments, giverCodes, redemptions, missions, deliveries, midGuesses, tickets });
+  assert.deepEqual(titles.map((t) => t.key), TITLES.map((t) => t.key));
+  const by = Object.fromEntries(titles.map((t) => [t.key, t]));
+  assert.deepEqual(by.challenge.winners, ["A", "B", "C"], "도전 2건 동점(A의 3주차는 카드와 달라 빠짐) — 모두 받는다, 위조 카드·수상 제외는 빠짐");
+  assert.equal(by.challenge.value, 2);
+  assert.equal(titleValue(by.challenge), "인증받은 도전 미션 2건");
+  assert.deepEqual(by.gold.winners, ["A", "B"]);
+  assert.equal(titleValue(by.gold), "");
+  assert.deepEqual(by.notes.winners, ["B", "C"], "3통 동점, 가린 쪽지·빈 쪽지·수상 제외는 안 센다");
+  assert.equal(by.notes.value, 3);
+  assert.deepEqual(by.invisible.winners, ["A", "C", "E"], "B는 대상이 주차별 추측에서 한 번 골랐고, D는 은신을 못 받았고, F는 수상 제외");
+  // 대상이 가입하지 않았거나 중도 이탈이면 투명 마니또에서 뺀다(추측할 사람이 없어서)
+  const dropF = people.map((p) => (p.pid === "F" ? { ...p, dropout: true } : p));
+  assert.deepEqual(computeTitles({ people: dropF, assignments, giverCodes, redemptions, missions, deliveries, midGuesses, tickets }).find((t) => t.key === "invisible").winners, ["A", "C"]);
+  // 아무도 없으면 빈 목록, 발표에는 받은 사람이 있는 칭호만
+  const empty = computeTitles({ people, assignments });
+  assert.ok(empty.every((t) => t.winners.length === 0));
+  assert.deepEqual(shownTitles({ titles: empty }), []);
+  assert.deepEqual(shownTitles({ titles }).map((t) => t.key), ["challenge", "gold", "notes", "invisible"]);
+  assert.deepEqual(shownTitles({}), [], "칭호가 없는 예전 집계");
+});
+
+test("발표 화면: 칭호는 받은 사람이 있는 것만 한 장면씩, 그다음 황금 카드 커피 쿠폰, 그 뒤 시상", async () => {
+  const { goldWinnerWeeks } = await import("../src/lib/titles.js");
+  const r = {
+    pairs: [{ giverPid: "A", receiverPid: "B" }, { giverPid: "B", receiverPid: "A" }], praises: [{}],
+    titles: [{ key: "challenge", winners: ["A"] }, { key: "gold", winners: [] }, { key: "notes", winners: ["B"] }, { key: "invisible", winners: ["A", "B"] }],
+    goldWinners: { 3: ["B"], 2: ["A"] },
+  };
+  const ids = buildSlides(r, (x) => x).map((x) => x.id);
+  assert.deepEqual(ids.slice(ids.indexOf("praise"), ids.indexOf("drawGo") + 1), ["praise", "title_challenge", "title_notes", "title_invisible", "gold", "drawGo"]);
+  assert.deepEqual(goldWinnerWeeks(r), [{ week: 2, winners: ["A"] }, { week: 3, winners: ["B"] }]);
+  // 추첨한 주차가 없거나 당첨자가 없으면 쿠폰 장면이 없다. 예전 집계(칭호·쿠폰 없음)는 장면이 그대로
+  assert.ok(!buildSlides({ ...r, goldWinners: { 2: [] } }, (x) => x).some((x) => x.id === "gold"));
+  const old = buildSlides({ pairs: r.pairs, praises: [{}] }, (x) => x).map((x) => x.id);
+  assert.ok(!old.some((x) => x.startsWith("title_") || x === "gold"));
+  // 장면 수는 시상 전후가 같다
+  assert.equal(buildSlides({ ...r, draws: { seed: "1", t6: { winners: ["A"] } } }, (x) => x).length, ids.length);
+});

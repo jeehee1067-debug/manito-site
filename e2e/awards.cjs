@@ -6,6 +6,11 @@
 const { chromium } = require("playwright");
 const assert = require("node:assert/strict");
 const H = require("./helpers.cjs");
+const fs = require("node:fs");
+const path = require("node:path");
+// 칭호·커피 쿠폰 장면 사진: e2e/shots/awards(또는 AWARDS_SHOTS=경로)
+const SHOTS = process.env.AWARDS_SHOTS || path.join(__dirname, "shots", "awards");
+fs.mkdirSync(SHOTS, { recursive: true });
 const FS = `http://127.0.0.1:8080/v1/projects/${H.P}/databases/(default)/documents`;
 const owner = { Authorization: "Bearer owner", "Content-Type": "application/json" };
 const enc = (v) => (v === null ? { nullValue: null } : typeof v === "number" ? { integerValue: String(v) } : typeof v === "string" ? { stringValue: v } : typeof v === "boolean" ? { booleanValue: v }
@@ -25,9 +30,9 @@ const list = (name) => fetch(`${FS}/${name}?pageSize=100`, { headers: owner }).t
   const nm = (k) => NAMES[k - 1]; // nm(1) = "사람01"
 
   step("명단 24명(이름·파트·아이디) → 배정, 사람05만 가입(휴대폰으로 결과를 볼 사람)");
-  const admin = await mk("운영자", { width: 1280, height: 720 });
+  const admin = await mk("운영자", { width: 1280, height: 720 }, { deviceScaleFactor: 2 });
   const inv = await H.setupAdmin(admin, NAMES.map((n, i) => `${n}\t${PARTS[i % 4]}\tuser${i + 1}`));
-  const phone = await mk("사람05");
+  const phone = await mk("사람05", undefined, { deviceScaleFactor: 2 });
   await H.signup(phone, inv[nm(5)], "p05@example.com");
   await phone.locator(".hud-who", { hasText: "사람05님" }).waitFor();
   const pidOf = Object.fromEntries((await list("roster")).map((d) => [d.fields.name.stringValue, d.name.split("/").pop()]));
@@ -43,7 +48,17 @@ const list = (name) => fetch(`${FS}/${name}?pageSize=100`, { headers: owner }).t
     { code: "BBBB", review: "쪽지 덕분에 한 주가 즐거웠어요. 누군지 꼭 알고 싶어요.", receiverPid: P(10), likes: 5 },
     { code: "CCCC", review: "깜짝 선물 정말 감동이었어요!", receiverPid: P(11), likes: 3 },
   ];
-  await put("results/public", { pairs, tickets, ticketDetail: {}, draws: {}, step: 0, praises: [], partBoard: [], tieBreak: {}, bestReview: reviewRank[0], reviewRank, guesses: {}, noticed: {}, story: {}, stats: { people: N } });
+  // 송년회 칭호(집계가 기록으로 정한 것을 흉내)와 황금 카드 커피 쿠폰 당첨자(2주차 5명, 3주차 5명). 쪽지 장인 4명·투명 마니또 14명(많을 때 한 장에 들어가는지), 황금손은 없음(장면이 없어야 함)
+  const T = await import("../src/lib/titles.js");
+  const titleOf = (key, winners, value = 0) => ({ ...T.TITLES.find((t) => t.key === key), winners, value });
+  const titles = [
+    titleOf("challenge", [P(3), P(5)], 2),
+    titleOf("gold", []),
+    titleOf("notes", [P(6), P(7), P(8), P(9)], 7),
+    titleOf("invisible", [4, 5, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20].map(P)),
+  ];
+  const goldWinners = { 2: [5, 6, 7, 8, 9].map(P), 3: [11, 12, 13, 14, 15].map(P) };
+  await put("results/public", { pairs, tickets, ticketDetail: {}, draws: {}, step: 0, praises: [], partBoard: [], tieBreak: {}, bestReview: reviewRank[0], reviewRank, guesses: {}, noticed: {}, story: {}, stats: { people: N }, titles, goldWinners });
   await put("config/app", { phase: 5, week: 3 }, "?updateMask.fieldPaths=phase&updateMask.fieldPaths=week");
 
   step("발표 화면: 짝 공개를 건너뛰고 시상 장면으로");
@@ -57,7 +72,53 @@ const list = (name) => fetch(`${FS}/${name}?pageSize=100`, { headers: owner }).t
   const title = (t) => pres.locator(".pres-title", { hasText: t });
   for (let k = 0; k < 6 && !(await pres.getByRole("button", { name: /남은 짝 건너뛰/ }).count()); k++) await next();
   await pres.getByRole("button", { name: /남은 짝 건너뛰/ }).click();
-  for (let k = 0; k < 6 && !(await title("먼저 숫자 하나!").count()); k++) await next();
+  await pres.locator(".pres-h2", { hasText: "명탐정" }).waitFor();
+
+  step("송년회 칭호: 받은 사람이 있는 칭호만 한 장면씩(황금손은 없어서 건너뜀) → 황금 카드 커피 쿠폰 → 시상");
+  const onStage = async () => (await pres.locator(".pres-person b").allInnerTexts()).map((t) => t.trim()).sort();
+  const byName = (pids) => pids.map((pid) => nameOf[pid]).sort();
+  // 노트북(1280×720)에서도 장면이 스크롤 없이 한 장에 들어가는지
+  const fits = async (label) => {
+    const [sh, ch] = await pres.evaluate((el) => { const st = el.querySelector(".pres-stage"); return [st.scrollHeight, st.clientHeight]; });
+    assert.ok(sh <= ch + 1, `${label}: 한 장에 들어간다(1280×720) — 내용 ${sh}px, 화면 ${ch}px`);
+  };
+  await next(); await title("도전왕").waitFor();
+  assert.deepEqual(await onStage(), byName(titles[0].winners));
+  await pres.getByText("인증받은 도전 미션 2건").waitFor();
+  await fits("도전왕");
+  await admin.waitForTimeout(2300); // 이름·배지가 나타나는 움직임이 끝난 뒤 사진
+  await admin.screenshot({ path: `${SHOTS}/awards-title.png` });
+  await next(); await title("쪽지 장인").waitFor();
+  assert.deepEqual(await onStage(), byName(titles[2].winners));
+  await pres.getByText("보낸 쪽지 7통").waitFor();
+  await fits("쪽지 장인");
+  await next(); await title("투명 마니또").waitFor();
+  assert.deepEqual(await onStage(), byName(titles[3].winners));
+  assert.equal(await pres.getByText("인증받은", { exact: false }).count(), 0, "값이 없는 칭호는 배지가 없다");
+  await admin.waitForTimeout(2300);
+  await admin.screenshot({ path: `${SHOTS}/awards-title-crowd.png` });
+  await fits("투명 마니또 14명");
+  await next(); await pres.locator(".pres-h2", { hasText: "5천원 커피 쿠폰 당첨!" }).waitFor();
+  assert.deepEqual(await onStage(), byName([...goldWinners[2], ...goldWinners[3]]));
+  await fits("커피 쿠폰 2주 10명");
+  const groups = await pres.locator(".pres-group").allInnerTexts();
+  assert.equal(groups.length, 2);
+  assert.match(groups[0].replace(/\s+/g, " "), new RegExp(`^2주차 ${goldWinners[2].map((pid) => nameOf[pid]).join(" ")}$`));
+  assert.match(groups[1].replace(/\s+/g, " "), new RegExp(`^3주차 ${goldWinners[3].map((pid) => nameOf[pid]).join(" ")}$`));
+  await admin.waitForTimeout(2300);
+  await admin.screenshot({ path: `${SHOTS}/awards-gold.png` });
+  // 참여자 휴대폰 결과 탭 "그 밖의 기록": 무대에서 지난 칭호와 커피 쿠폰, 내가 받았으면 "축하해요!"
+  await H.tab(phone, "결과");
+  const rec = H.panel(phone, "그 밖의 기록");
+  await rec.getByText("☕ 황금 카드 5천원 커피 쿠폰").waitFor();
+  const recText = (await rec.innerText()).replace(/\s+/g, " ");
+  assert.ok(!recText.includes("황금손"), "받은 사람이 없는 칭호는 기록에도 없다");
+  for (const t of ["🏆 도전왕", "💌 쪽지 장인", "🫥 투명 마니또"]) assert.ok(recText.includes(t), t);
+  assert.equal(await rec.getByText("· 축하해요!").count(), 3, "사람05는 도전왕·투명 마니또·2주차 커피 쿠폰");
+  console.log("  사람05의 결과 탭 '그 밖의 기록':", recText);
+  await rec.screenshot({ path: `${SHOTS}/awards-phone-records.png` });
+
+  for (let k = 0; k < 3 && !(await title("먼저 숫자 하나!").count()); k++) await next();
   await title("먼저 숫자 하나!").waitFor();
   await pres.locator(".seed-input").fill("2026");
   await pres.getByRole("button", { name: "숫자 정하기" }).click();

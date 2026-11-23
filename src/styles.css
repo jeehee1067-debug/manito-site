@@ -591,6 +591,9 @@ ul.plain.redeem-status li { flex: 0 0 auto; width: auto; margin: 0; }
 .pres-list { list-style: none; margin: 0; padding: 0; width: 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 6px 16px; text-align: left; font-size: clamp(13px, 1.3vw, 18px); }
 .pres-list li { padding: 0 10px; border-left: 4px solid var(--gold); }
 .pres-quote { margin: 0; padding: 16px 22px; border: 3px solid var(--ink); border-radius: 10px; background: #fff; font-size: clamp(18px, 2.6vw, 30px); line-height: 1.5; }
+.pres-emoji { display: inline-block; font-size: 1.15em; line-height: 1; vertical-align: -0.06em; }
+.pres-groups { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 56px; width: 100%; }
+.pres-group { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .pres-spin { margin: 0; font-size: clamp(30px, 5vw, 64px); color: var(--red); }
 /* 칭찬 벽: 높이는 아래 조작 버튼과 제목을 뺀 만큼(작은 화면에서 넘치지 않게). 흘러갈 거리(--wall-shift)와 시간은 Reveal.jsx PraiseWall이 실제 높이로 정한다 */
 .pres-wall { width: 100%; height: min(60vh, calc(100vh - 330px)); min-height: 160px; overflow: hidden; border: 3px solid var(--ink); border-radius: 10px; background: #fff; }

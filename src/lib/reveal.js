@@ -2,6 +2,7 @@
 // 운영자가 넘긴 장면(results/public.step)까지만 참여자 화면에도 보인다.
 import { PRIZES } from "../config/prizes.js";
 import { ONLINE_PRIZE, PAPER_TIERS } from "./scoring.js";
+import { goldWinnerWeeks, shownTitles } from "./titles.js";
 
 /**
  * 원형 배정을 따라 짝을 잇는다: A의 마니또는 B → 그럼 B의 마니또는? → … (공개한 마니또가 다음 차례의 주인공이 된다)
@@ -39,6 +40,9 @@ export function buildSlides(r, nameOf) {
   s.push({ id: "detective", type: "detective" });
   if ((r.angels || []).length > 0) s.push({ id: "angels", type: "angels" });
   if ((r.praises || []).length > 0) s.push({ id: "praise", type: "praise" });
+  // 송년회 칭호(받은 사람이 있는 것만, 칭호마다 한 장면)와 황금 카드 커피 쿠폰 당첨자(추첨한 주차가 있을 때 한 장면). 집계 때 정해져 장면 수가 바뀌지 않는다
+  shownTitles(r).forEach((t) => s.push({ id: `title_${t.key}`, type: "title", key: t.key }));
+  if (goldWinnerWeeks(r).length > 0) s.push({ id: "gold", type: "gold" });
   // 시상·추첨(현장 순서): 숫자 받기(drawGo) → 2등(한 명씩) → 3등 → 4등·5등(종이) → 1등(종이, 겹쳐도 뽑는다)
   //   → 겹친 자리 다시 채우기(refill) → 6등(사이트 추첨, 각자 휴대폰으로 확인).
   // 2·3등을 먼저 발표하는 이유: 종이로 뽑힌 사람이 2·3등 수상자면 다시 뽑아야 하는데, 발표 전이면 그 사람이 수상자라는 것이 미리 드러난다.

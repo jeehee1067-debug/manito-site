@@ -12,8 +12,8 @@ async function reset() {
   await fetch(`http://127.0.0.1:9099/emulator/v1/projects/${P}/accounts`, { method: "DELETE" });
 }
 function maker(browser, errors, dialogs = []) {
-  return async (label, viewport = { width: 420, height: 900 }) => {
-    const ctx = await browser.newContext({ viewport });
+  return async (label, viewport = { width: 420, height: 900 }, extra = {}) => { // extra: 브라우저 창 설정(사진을 2배로 찍을 때 deviceScaleFactor 등)
+    const ctx = await browser.newContext({ viewport, ...extra });
     await ctx.addInitScript(() => { try { localStorage.setItem("manito:adminFull", "1"); } catch {} }); // 검증용: 미션 단계에서 새로 연 운영 화면도 바로 다 보이게(실제 기본은 "운영 자료 불러오기"를 눌러야 함)
     const page = await ctx.newPage();
     // 입력창(prompt)에 넣을 글: dialogs.answers에 넣어 두면 차례로 쓴다(없으면 기본값 그대로 확인)
