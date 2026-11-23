@@ -3,7 +3,8 @@ import { useApp } from "../App.jsx";
 import { Panel } from "../ui.jsx";
 import { firebaseConfig } from "../firebase.config.js";
 import { MAILTO_SAFE_LEN, inviteMessage, inviteRecipients, joinUrl, mailtoHref, profileMessage, profileRecipients } from "../lib/inviteMail.js";
-import { FIRST_CLUE_DATE, PROFILE_DUE, shortDate } from "../lib/constants.js";
+import { FIRST_CLUE_DATE, PHASE, PROFILE_DUE, SCHEDULE, shortDate } from "../lib/constants.js";
+import { reminderMessage, reminderTargets } from "../lib/reminders.js";
 
 // 운영자의 회사 메일에서 보내는 안내 메일 작성기. 사이트에는 서버가 없어 직접 보내지 못한다:
 // 받는 사람(숨은 참조)·제목·본문을 채운 채 메일 앱을 열거나, 칸마다 복사해 새 메일에 붙여 넣는다.
@@ -126,6 +127,49 @@ export function ProfileMail({ roster, progress }) {
         {names.length > 0 && names.length <= 30 && ` 받는 사람: ${names.join(", ")}.`}
         {noEmail.length > 0 && ` 아이디가 없어 메일을 못 받는 사람: ${noEmail.join(", ")}.`}
         {emails.length === 0 && " 지금은 보낼 사람이 없어요."}
+      </p>
+    </MailComposer>
+  );
+}
+
+// 운영 화면 "재촉 메일"(사용자가 정함: "아직 인증 안 해 준 경우는 필요하면 메일 보낼 수 있도록"). 미션 진행·최종 지목 단계.
+//  인증 안 한 대상: 마니또가 완료를 알렸는데 아직 인증하지 않은 주차가 있는 사람(칭찬 카드 포함, 신고했거나 운영자가 확인한 주차 제외)
+//  미션 안 한 마니또(미션 진행 단계만): 열린 주차 중 완료를 아직 알리지 않은 사람
+// 받는 사람 모두에게 같은 글이 숨은 참조로 간다(누가 누구의 마니또인지·몇 주차인지는 본문에 없다). 계산은 lib/reminders.js.
+// rows: 짝 현황(pairs.js pairRows), roster: 명단 원본
+export function ReminderMail({ roster, rows, week, phase }) {
+  const canMission = phase === PHASE.RUNNING;
+  const [kind, setKind] = useState("verify");
+  const k = canMission ? kind : "verify";
+  const url = window.location.origin + window.location.pathname;
+  const close = SCHEDULE.find((e) => e.kind === "close")?.date;
+  const initial = useMemo(() => reminderMessage({ kind: k, url, closeDay: close ? shortDate(close) : "" }), [k, url, close]);
+  const verify = reminderTargets(rows, roster, { kind: "verify", week });
+  const mission = canMission ? reminderTargets(rows, roster, { kind: "mission", week }) : [];
+  const targets = k === "verify" ? verify : mission;
+  const emails = [...new Set(targets.map((t) => t.email).filter(Boolean))].sort();
+  const noEmail = targets.filter((t) => !t.email).map((t) => t.name);
+  return (
+    <MailComposer key={k} title="재촉 메일" emails={emails} initial={initial}>
+      <p className="small">
+        사이트를 열면 그 사람 화면 맨 위에 "할 일"이 이미 떠요. 사이트를 안 여는 사람에게는 <b>내 회사 메일에서</b> 이 안내를 보내 주세요(사이트가 직접 보내지는 못해요).
+        받는 사람은 <b>숨은 참조(BCC)</b>로 들어가고, 본문에는 누가 누구의 마니또인지·몇 주차인지 적지 않았어요.
+      </p>
+      {canMission && (
+        <div className="chip-row">
+          <button className={k === "verify" ? "chip is-on" : "chip"} onClick={() => setKind("verify")}>인증 안 한 대상 {verify.length}명</button>
+          <button className={k === "mission" ? "chip is-on" : "chip"} onClick={() => setKind("mission")}>미션 안 한 마니또 {mission.length}명</button>
+        </div>
+      )}
+      <p className="small">
+        {k === "verify"
+          ? "마니또가 완료를 알렸는데 아직 인증하지 않은 주차가 있는 사람이에요(3주차 칭찬 카드 포함, \"받은 게 없어요\"로 신고했거나 운영진이 확인한 주차는 빼요)."
+          : "열린 주차 중 아직 완료를 알리지 않은 주차가 있는 사람이에요(지난 주차도 미션 마감 전까지 할 수 있어요)."}
+        {" "}가입 안 한 사람과 중도 이탈로 표시한 사람은 빼요.
+      </p>
+      <p className="small reminder-who">
+        {targets.length ? <>받는 사람: {targets.map((t) => `${t.name}(${t.slots.map((x) => `${x}주차`).join("·")})`).join(", ")}</> : "지금은 보낼 사람이 없어요."}
+        {noEmail.length > 0 && ` 아이디가 없어 메일을 못 받는 사람: ${noEmail.join(", ")}.`}
       </p>
     </MailComposer>
   );

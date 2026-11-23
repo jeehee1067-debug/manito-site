@@ -14,7 +14,7 @@ import { computeTickets, missionLikes, noticedWeeks, partStandings, rankReviews,
 import { angelQueue, angelQueueStatus, matchAngels, needyReceivers } from "../lib/angels.js";
 import { PRIZES, TICKET_RULES as R } from "../config/prizes.js";
 import { parseRosterLine, rosterSummary, sameSummary } from "../lib/roster.js";
-import InviteMail, { ProfileMail } from "./InviteMail.jsx";
+import InviteMail, { ProfileMail, ReminderMail } from "./InviteMail.jsx";
 import { AUTO_ITEMS, CLAIM_MS, autoPlan, localInputToMs, msToLocalInput, nextDue } from "../lib/schedule.js";
 import { BACKUP_COLLECTIONS, BACKUP_DOCS, backupDocCount, buildBackup, messageRows, stamp, toCsv } from "../lib/backup.js";
 
@@ -302,6 +302,7 @@ function AdminFull() {
       {phase === PHASE.SETUP && <Setup />}
       {phase === PHASE.RUNNING && <Running />}
       {phase === PHASE.GUESSING && <GuessStatus />}
+      {phase >= PHASE.RUNNING && phase <= PHASE.GUESSING && <Reminders />}
       {phase >= PHASE.RUNNING && phase <= PHASE.CLOSED && <Unresolved />}
       {phase >= PHASE.RUNNING && <Angels />}
       <Pairs />
@@ -1068,11 +1069,19 @@ function Running() {
         </div>
       </Panel>
 
-      {/* 미션 시작 뒤에도 가입할 수 있다: 아직 가입 안 한 사람이 있으면 안내 메일을 다시 보낼 수 있게 */}
-      {roster.some((r) => !r.uid) && <InviteMail roster={roster} />}
+      {/* 가입 안내 메일은 미션 진행 단계에서는 보이지 않는다(사용자가 정함, 11/23: "이제 가입하도록 메일은 보낼 필요 없다"). 준비 단계에는 남아 있다. */}
       {roster.some((r) => !progress[r.pid]?.profileDone) && <ProfileMail roster={roster} progress={progress} />}
     </>
   );
+}
+
+// 재촉 메일: 인증 안 한 대상·미션 안 한 마니또(InviteMail.jsx ReminderMail). 짝 현황과 같은 구독을 쓴다(읽기가 늘지 않음).
+function Reminders() {
+  const { config } = useApp();
+  const roster = useFullRoster();
+  const { ready, rows } = usePairs();
+  if (!roster || !ready) return null;
+  return <ReminderMail roster={roster} rows={rows} week={config.week || 1} phase={config.phase} />;
 }
 
 // 계정 연결 관리(미션 시작 후). 엉뚱한 사람이 연결됐거나, 메일을 잘못 적었거나, 비밀번호를 못 찾을 때 연결을 푼다.

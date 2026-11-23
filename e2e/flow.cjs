@@ -284,6 +284,17 @@ const step = (s) => console.log("▶", s);
 
   step("가나 1주차: 난이도 고르기 → 카드 두 장 → 도전 카드 고르고 완료");
   {
+    // 할 일 알림: 아직 미션을 안 한 사람은 어느 탭에서나 맨 위에 뜨고, 누르면 내 미션으로 간다(내 미션 탭에서는 같은 안내가 있어 숨김)
+    const d = users["다라"];
+    await tab(d, "규칙");
+    const dbar = d.locator(".reminder-bar");
+    await dbar.getByText("1주차 미션").waitFor();
+    assert.match(await dbar.innerText(), /1주차 미션을 아직 완료하지 않았어요/);
+    await shot(d, "reminder-bar", false);
+    await dbar.getByRole("button", { name: "내 미션으로 가기" }).click();
+    await d.locator("nav.tabs button.is-on", { hasText: "내 미션" }).waitFor();
+    assert.equal(await d.locator(".reminder-bar").count(), 0, "내 미션 탭에서는 숨김(받은 미션은 아직 없음)");
+    console.log("  할 일 알림: 미션 안 한 다라 → 규칙 탭 맨 위에 '1주차 미션을 아직 완료하지 않았어요' → 누르면 내 미션");
     const page = users["가나"];
     const slot = panel(page, "1주차 미션");
     // 처음에는 난이도 세 칸만 보이고 카드는 아직 없다
@@ -346,6 +357,16 @@ const step = (s) => console.log("▶", s);
   step("받는 사람: 미인증 알림 → 인증 → 알림 사라짐");
   for (const p of PEOPLE) {
     const page = users[p.name];
+    if (p === PEOPLE[0]) {
+      // 할 일 알림: 받은 미션을 인증하지 않았으면 다른 탭에서도 맨 위에 뜨고, 누르면 추리 보드로 간다
+      await tab(page, "피드");
+      const bar = page.locator(".reminder-bar");
+      await bar.getByText(/내 마니또가 보낸 1주차 미션을 아직 인증하지 않았어요/).waitFor();
+      await bar.getByRole("button", { name: "추리 보드에서 인증하기" }).click();
+      await page.locator("nav.tabs button.is-on", { hasText: "추리 보드" }).waitFor();
+      assert.equal(await page.locator(".reminder-bar").count(), 0, "추리 보드에서는 숨김");
+      console.log(`  할 일 알림: ${p.name} → 피드 탭 맨 위 '1주차 미션을 아직 인증하지 않았어요' → 누르면 추리 보드`);
+    }
     await tab(page, "내 미션");
     await page.getByText("내 마니또가 보낸 미션 1건을 아직 인증하지 않았어요").waitFor();
     // 역할 안내: 내 미션 탭에서는 내가 마니또, 추리 보드에서는 내가 대상
@@ -407,6 +428,7 @@ const step = (s) => console.log("▶", s);
     await page.locator(".target-name:visible").waitFor();
     await page.waitForTimeout(400);
     assert.equal(await shown(page).getByText("아직 인증하지 않았어요").count(), 0, "인증 후 알림 사라짐");
+    await page.locator(".reminder-bar").waitFor({ state: "detached" }); // 할 일 알림도 사라진다(1주차 미션도 이미 완료)
   }
   {
     const g = users["가나"];
@@ -748,6 +770,35 @@ const step = (s) => console.log("▶", s);
     assert.equal((await patch({ fields: { code: { stringValue: sentCode } } }, "code")).status, 200);
     await panel(rr, "마니또에게서 온 것").locator(".warn-line", { hasText: "2주차 인증 코드가 아직 안 왔어요." }).waitFor({ state: "detached" });
     console.log("  코드 없이 보낸 완료 알림: 받는 사람 '코드가 아직 안 왔어요', 운영 화면 '코드 안 보냄 1'과 그 코드");
+  }
+
+  step("재촉 메일(운영 화면): 인증 안 한 대상·미션 안 한 마니또에게 운영자의 회사 메일로");
+  {
+    await tab(admin, "운영");
+    const rm = panel(admin, "재촉 메일");
+    await rm.waitFor();
+    const idOf = (name) => PEOPLE.find((x) => x.name === name).id.split("@")[0];
+    // 2주차: 자차가 완료를 알렸는데 대상이 인증하지 않음 → 인증 재촉 1명
+    assert.match(await rm.locator("h2").innerText(), /받는 사람 1명/);
+    assert.ok((await rm.getByLabel("받는 사람 주소").inputValue()).startsWith(`${idOf(target["자차"])}@`));
+    await rm.locator(".reminder-who").getByText(`${target["자차"]}(2주차)`).waitFor();
+    const vBody = await rm.getByLabel("메일 본문").inputValue();
+    assert.ok(vBody.includes('"추리 보드" → "인증하기"'), vBody);
+    for (const x of PEOPLE) assert.ok(!vBody.includes(x.name), "본문에 이름 없음");
+    // 그 대상의 화면에도 할 일 알림이 떠 있다
+    const rr = users[target["자차"]];
+    await tab(rr, "규칙");
+    await rr.locator(".reminder-bar").getByText(/2주차 미션을 아직 인증하지 않았어요/).waitFor();
+    // 미션 안 한 마니또: 2주차를 아직 안 한 사람(가나·자차 빼고)
+    await rm.getByRole("button", { name: /미션 안 한 마니또/ }).click();
+    assert.match(await rm.locator("h2").innerText(), new RegExp(`받는 사람 ${N - 2}명`));
+    assert.ok((await rm.getByLabel("메일 제목").inputValue()).includes("완료를 알리지 않은 미션"));
+    assert.ok(!(await rm.locator(".reminder-who").innerText()).includes("가나("), "2주차를 한 가나는 없다");
+    await rm.getByRole("button", { name: /인증 안 한 대상/ }).click();
+    await rm.scrollIntoViewIfNeeded();
+    await rm.screenshot({ path: `${SHOT}reminder-mail.png` });
+    assert.equal(await panel(admin, "가입 안내 메일").count(), 0, "미션 진행 단계에는 가입 안내 메일이 없다");
+    console.log(`  재촉 메일: 인증 안 한 대상 1명(${target["자차"]}, 2주차), 미션 안 한 마니또 ${N - 2}명, 본문에 이름 없음 / 가입 안내 메일 없음`);
   }
 
   step("받은 게 없어요: 받는 사람이 신고 → 마니또 화면에 알림 → 운영자가 '못 받음'으로 확인");
