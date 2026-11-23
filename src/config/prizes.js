@@ -22,6 +22,11 @@ export const PRIZES = {
 // 확정해서 알릴 때 key("best", "review", "t4", "t5", "t6")를 더한다. 송년회 발표 화면·결과 탭은 이 값과 상관없이 모두 보인다.
 export const PRIZES_ANNOUNCED = ["grand"];
 
+// 황금 카드 추첨(사용자가 정함, 11/23): 2·3주차에 매주 5명, 5천원 커피 쿠폰. 송년회에서 발표하면서 준다(송년회 1~6등과 별개).
+// 그 주에 황금 카드를 골라 완료를 알렸고, 대상이 인증하면서 "카드와 같아요"를 확인한 마니또 중에서 같은 확률로 뽑는다(lib/gold.js).
+// 추첨은 그 주가 끝난 뒤 운영 화면에서 하고, 뽑힌 마니또만 자기 내 미션 화면에서 확인한다(누가 뽑혔는지는 송년회 전까지 비밀).
+export const GOLD_DRAW = { weeks: [2, 3], perWeek: 5, prize: "5천원 커피 쿠폰" };
+
 export const TICKET_RULES = {
   perRedeemedMission: 1, // 마니또: 미션이 인증될 때마다
   cardBonus: { normal: 1, hard: 2 }, // 마니또: 보통·도전 카드 미션이 받는 사람에게 직접 인증되면 추가 (쉬움·칭찬 카드는 없음)

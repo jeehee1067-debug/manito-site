@@ -6,7 +6,7 @@ import { db } from "../firebase.js";
 import { forgetFeed } from "../lib/feedCache.js";
 import { useApp } from "../App.jsx";
 import { Avatar, Dialogue, Giver, HowTag, Panel, RoleNote } from "../ui.jsx";
-import { cardHow, LEVEL_LABEL, PHASE, PRAISE_SLOT, PROFILE_QUESTIONS, REVIEW_EDITS_MAX, REVIEW_MIN, CLUE_COUNT, PART_HINT_IDX, clueScheduleText } from "../lib/constants.js";
+import { cardHow, isGoldCard, LEVEL_LABEL, PHASE, PRAISE_SLOT, PROFILE_QUESTIONS, REVIEW_EDITS_MAX, REVIEW_MIN, CLUE_COUNT, PART_HINT_IDX, clueScheduleText } from "../lib/constants.js";
 import { normalizeCode } from "../lib/random.js";
 import { bump } from "../lib/writes.js";
 import { TICKET_RULES } from "../config/prizes.js";
@@ -92,7 +92,7 @@ function Inbox({ myPid, items, onUseCode }) {
               : <p>{it.message || (cardHow(it.card) === "site"
                 ? "마니또가 미션을 했다고 알렸는데 쪽지 내용이 비어 있어요. 종이 쪽지로 줬을 수도 있으니 주변을 살펴보세요."
                 : "마니또가 미션을 했대요. 주변을 살펴보세요!")}</p>}
-            {it.card && <p className="small">마니또가 고른 카드: {LEVEL_LABEL[it.card.level] || it.card.level} · {it.card.text}</p>}
+            {it.card && <p className="small">마니또가 고른 카드: {isGoldCard(it.card) && <span className="gold-tag">✨ 황금 카드</span>} {LEVEL_LABEL[it.card.level] || it.card.level} · {it.card.text}</p>}
             {it.card && cardHow(it.card) && <p className="small how-hint"><HowTag card={it.card} /> {howHint(it.card)}</p>}
             {it.code && (
               <p className="small">
@@ -405,7 +405,8 @@ function CodeEntry({ myPid, items, prefill }) {
         </label>
         {card && (
           <div className="card-check">
-            <p className="small">마니또가 고른 카드: <b>{LEVEL_LABEL[card.level] || card.level}</b> · {card.text}</p>
+            <p className="small">마니또가 고른 카드: {isGoldCard(card) && <span className="gold-tag">✨ 황금 카드</span>} <b>{LEVEL_LABEL[card.level] || card.level}</b> · {card.text}</p>
+            {isGoldCard(card) && <p className="small gold-line">황금 카드 미션이에요. 받은 것이 카드와 같으면 "카드와 같아요"를 꼭 확인해 주세요(그래야 내 마니또가 커피 쿠폰 추첨 대상이 돼요).</p>}
             {cardHow(card) && <p className="small how-hint"><HowTag card={card} /> {howHint(card)}</p>}
             <label className="check">
               <input type="checkbox" checked={cardMatch} onChange={(e) => setCardMatch(e.target.checked)} />
@@ -481,7 +482,7 @@ function CardCheck({ code, slot, card }) {
   return (
     <div className="card-check">
       <p className="small">
-        <b>{slot}주차 카드 확인</b> 인증한 뒤에 마니또의 완료 알림이 왔어요. 마니또가 고른 카드: <b>{LEVEL_LABEL[card.level] || card.level}</b> · {card.text} <HowTag card={card} />
+        <b>{slot}주차 카드 확인</b> 인증한 뒤에 마니또의 완료 알림이 왔어요. 마니또가 고른 카드: {isGoldCard(card) && <span className="gold-tag">✨ 황금 카드</span>} <b>{LEVEL_LABEL[card.level] || card.level}</b> · {card.text} <HowTag card={card} />
       </p>
       <p className="small">받은 것이 이 카드 내용과 같았나요? (같았다고 해야 마니또가 카드 추가 응모권을 받아요. 한 번만 고를 수 있어요){isGuessCard(card) ? " 알아내 맞혀 보기 카드는 맞혔을 때만 \"같았어요\"를 눌러 주세요." : ""}</p>
       <span className="inline">

@@ -122,7 +122,7 @@ export const MAIL_LINK = "@mail";
 
 // 게시돼 있어야 하는 보안 규칙 버전. firestore.rules의 rulesVersion과 같아야 한다.
 // 규칙에서 화면이 쓰는 경로·값의 모양을 바꿀 때 양쪽을 같이 올린다. 운영 화면이 이 값으로 "콘솔의 규칙이 예전 것"인지 확인해 알려 준다.
-export const RULES_VERSION = "20261126";
+export const RULES_VERSION = "20261127";
 
 // remote: 다른 근무지에 있는 대상에게도 할 수 있는 미션인지.
 // 대상이 다른 근무지면 remote 카드만 제시한다. 쉬움 카드는 모두 사이트 쪽지로 하는 무비용 미션.
@@ -137,6 +137,12 @@ export const RULES_VERSION = "20261126";
 //   보통(+1) = 공들여 지어 쓰는 사이트 쪽지(시·삼행시·퀴즈·별명·장점) 또는 간단한 실물(포스트잇·간식·음료·핫팩)
 //   도전(+2) = 직접 만든 것을 몰래 전달(상장·그림·소품·포스트잇 아트), 선물, 여러 날 이어서 하는 것, 대상에 대해 알아내 맞혀 보기
 // 쪽지만으로 끝나는 도전 카드는 "3일 연속"과 "알아내 맞혀 보기"(틀리면 추가분 없음)뿐이다. 긴 편지(손편지)는 넣지 않는다(사용자가 정함).
+// from: 이 주차부터 나오는 카드(사용자가 정함, 11/23: 2주차에 새 카드. 1주차 카드 뽑기는 그대로 두려고 1주차에는 넣지 않는다).
+//   2주차부터는 두 장 중 한 장이 새 카드(lib/cards.js dealCards). 미션이 시작된 뒤에는 글·번호를 바꾸지 말고 새 번호로 더하기만 한다.
+// gold: 황금 카드(사용자가 정함, 11/23). 2·3주차에 누구나 고를 수 있는 특별 도전 미션. 응모권은 도전 카드와 같고,
+//   그 주에 황금 카드를 해서 대상이 "카드와 같아요"로 인증한 마니또 중 매주 추첨으로 커피 쿠폰(config/prizes.js GOLD_DRAW, lib/gold.js).
+//   일반 도전 카드 두 장에는 나오지 않고 "황금 카드"를 고르면 따로 두 장(돈이 드는 것 + 안 드는 것)이 나온다(lib/cards.js goldDeal).
+//   remoteOnly: 다른 근무지 대상에게만 나오는 황금 카드. name: 규칙 탭에 적는 짧은 이름(새 카드·황금 카드).
 export const MISSION_CARDS = {
   easy: [
     { id: "e1", remote: true, text: "사이트 쪽지로 오늘 하루 응원 메시지 보내기" },
@@ -145,6 +151,8 @@ export const MISSION_CARDS = {
     { id: "e4", remote: true, text: "직접 쓴 오늘의 운세 쪽지 보내기" },
     { id: "e5", remote: true, text: "대상이 좋아할 만한 점심 메뉴 추천 쪽지 보내기" },
     { id: "e6", remote: true, text: "퇴근길에 힘이 되는 한마디 쪽지 보내기" },
+    // 2주차 새 카드
+    { id: "e7", name: "밸런스 게임", from: 2, remote: true, text: "회사 생활 밸런스 게임 3문제를 쪽지로 보내기 (예: 평생 아아 vs 평생 뜨아. 대상은 '마니또에게 한마디'로 답할 수 있어요)" },
   ],
   normal: [
     // 간단한 실물(돈이 드는 것 3장 + 안 드는 것 1장)
@@ -159,6 +167,10 @@ export const MISSION_CARDS = {
     { id: "n8", remote: true, text: "대상에 대한 O/X 퀴즈 5문제를 쪽지로 보내기 (예: '○○님은 아침형 인간이다'. 내용이 맞는지는 상관없어요)" },
     { id: "n9", remote: true, text: "대상의 장점 3가지를 찾아 쪽지로 보내기" },
     { id: "n10", remote: true, text: "대상에게 어울리는 멋진 별명을 지어 이유와 함께 쪽지로 보내기" },
+    // 2주차 새 카드
+    { id: "n11", name: "방탈출 쪽지", from: 2, remote: true, text: "수수께끼 3개를 풀면 응원 문구가 완성되는 방탈출 쪽지 보내기" },
+    { id: "n12", name: "비밀 지령", from: 2, remote: true, text: "대상에게 오늘 하루 '비밀 지령' 쪽지 보내기 (예: 오후 3시에 기지개 켜기처럼 남에게 티 안 나는 것. 성공했는지는 '마니또에게 한마디'로 보고받기)" },
+    { id: "n13", name: "실황 중계", from: 2, remote: true, text: "대상의 하루를 스포츠 실황 중계처럼 쓴 쪽지 보내기 (출근부터 퇴근까지, 과장 환영)" },
   ],
   hard: [
     // 직접 만든 것을 몰래 전달
@@ -179,6 +191,10 @@ export const MISSION_CARDS = {
     { id: "h11", guess: true, remote: true, text: "대상의 어릴 적 꿈(장래희망)을 알아내 쪽지로 맞혀 보기 (방법은 자유, 틀리면 카드 추가분 없음)" },
     { id: "h12", guess: true, remote: true, text: "대상이 꼭 가 보고 싶은 여행지를 알아내 쪽지로 맞혀 보기 (방법은 자유, 틀리면 카드 추가분 없음)" },
     { id: "h13", guess: true, remote: true, text: "대상이 쉬는 날 주로 하는 일을 알아내 쪽지로 맞혀 보기 (방법은 자유, 틀리면 카드 추가분 없음)" },
+    // 황금 카드(2주차부터, 일반 도전 카드 두 장에는 안 나온다)
+    { id: "h14", name: "타임어택 배달", gold: true, from: 2, real: true, remote: true, text: "타임어택 배달: '오늘 오후 ○시에 선물이 도착합니다'라고 미리 알린 뒤, 그 시각에 맞춰 직접 만든 것(그림·상장·종이접기 등)이 대상 자리에 나타나게 하기 (다른 근무지면 공범이 대신 전달)" },
+    { id: "h15", name: "마니또 카페", gold: true, from: 2, real: true, cost: true, remote: false, text: "마니또 카페: 간식·음료 3가지 메뉴판을 사이트로 보내고, 대상이 '마니또에게 한마디'로 주문하면 그 메뉴를 몰래 배달하기 (5천원 이하. 주문이 없으면 마니또가 골라서)" },
+    { id: "h16", name: "공범 카페", gold: true, from: 2, real: true, cost: true, remote: true, remoteOnly: true, text: "공범 카페: 간식·음료 3가지 메뉴판을 사이트로 보내고, 대상이 '마니또에게 한마디'로 주문하면 공범을 섭외해 그 메뉴를 대신 배달하게 하기 (5천원 이하. 공범에게도 비밀 유지 부탁)" },
   ],
 };
 
@@ -197,6 +213,10 @@ export function findCard(card) {
   const id = card.cardId || card.id;
   return (id && CARD_LIST.find((c) => c.id === id)) || CARD_LIST.find((c) => c.text === card.text) || null;
 }
+// 황금 카드인지(번호나 글로 찾는다. 완료 알림의 card에는 번호가 없다)
+export const isGoldCard = (card) => Boolean(findCard(card)?.gold);
+// 2주차부터 새로 들어온 카드인지
+export const isNewCard = (card) => (findCard(card)?.from || 1) >= 2;
 // "site" | "real" | null(목록에 없는 카드: 3주차 "칭찬만" 등)
 export function cardHow(card) {
   const c = findCard(card);

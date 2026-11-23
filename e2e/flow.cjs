@@ -255,8 +255,14 @@ const step = (s) => console.log("▶", s);
     }
     await panel(page, "파트 대항전").getByText("같은 파트끼리는 마니또가 되지 않아요.").waitFor();
     await panel(page, "응모권 받는 법").getByText("마지막 집계에서 미션 완수율 1위").waitFor();
-    await panel(page, "응모권 받는 법").getByText("끝까지 해야 받는 것이 있어요.").waitFor();
-    await panel(page, "미션 카드 난이도").getByText(/분석실 신발장을 이용해 보세요/).waitFor();
+    await panel(page, "응모권 받는 법").getByText("상대방 때문에 손해 보지 않아요").waitFor();
+    await panel(page, "미션 카드").getByText(/분석실 신발장을 이용해 보세요/).waitFor();
+    // 규칙 탭 순서(11/23 다시 정리): 낱말 → 일정 → 매주 할 일 → 카드 → 새 카드·황금 카드 → 응모권 → 상품
+    {
+      const order = (await page.locator("section.panel:visible h2.panel-title").allInnerTexts()).map((t) => t.trim());
+      const at = (t) => order.findIndex((x) => x.startsWith(t));
+      assert.ok(at("매주 이렇게 해요") === 2 && at("미션 카드") === 3 && at("2주차부터: 새 카드와") === 4 && at("응모권 받는 법") === 5 && at("상품과 추첨") === 6, order.join(" | "));
+    }
     await panel(page, "응모권 받는 법").getByText("내 미션 3건이 모두 인증되고").waitFor();
     await panel(page, "상품과 추첨").getByText("한 사람은 하나만 받아요.").waitFor();
     await panel(page, "상품과 추첨").getByText("각자 응모권 수만큼 자기 이름 종이를 통에 넣고 직접 뽑아요").waitFor();
@@ -303,7 +309,7 @@ const step = (s) => console.log("▶", s);
     await slot.locator(".tip-line", { hasText: "분석실 신발장" }).waitFor(); // 난이도 고르기 화면의 작은 꿀팁
     await shot(page, "levels");
     const dealt = async (level) => {
-      await slot.locator(`.level-pick.level-${level}`).click();
+      await slot.locator(`.level-pick.level-${level}:not(.is-gold)`).click();
       await slot.locator(".dealt .card").first().waitFor();
       const texts = await slot.locator(".dealt .card .card-text").allInnerTexts();
       const free = await slot.locator(".dealt .card:not(:has(.cost-tag))").count();
@@ -325,7 +331,7 @@ const step = (s) => console.log("▶", s);
     const normal2 = await dealt("normal");
     assert.deepEqual(normal2, normal1, "난이도를 다시 골라도 같은 두 장");
     console.log("  보통 카드 두 장(다시 골라도 같음):", normal1.join(" / "));
-    await slot.locator(".level-pick.level-hard").click();
+    await slot.locator(".level-pick.level-hard:not(.is-gold)").click();
     await slot.locator(".dealt .card").first().waitFor();
     await shot(page, "cards");
     await slot.getByRole("button", { name: "난이도 다시 고르기" }).click();
@@ -954,11 +960,11 @@ const step = (s) => console.log("▶", s);
     await tab(g, "추리 보드");
     await tab(g, "내 미션");
     const slot = panel(g, "3주차 공통 미션");
-    // 3주차 고르기: 칭찬만 / 칭찬 + 보통 / 칭찬 + 도전
+    // 3주차 고르기: 칭찬만 / 칭찬 + 보통 / 칭찬 + 도전 / 칭찬 + ✨ 황금 카드(2주차부터)
     await slot.locator(".level-pick").first().waitFor();
-    assert.deepEqual((await slot.locator(".level-pick .card-level").allInnerTexts()), ["칭찬만", "보통", "도전"]);
-    assert.deepEqual((await slot.locator(".level-pick .card-reward").allInnerTexts()), ["응모권 +1", "응모권 +2", "응모권 +3"]);
-    await slot.locator(".level-pick.level-hard").click();
+    assert.deepEqual((await slot.locator(".level-pick .card-level").allInnerTexts()), ["칭찬만", "보통", "도전", "✨ 황금 카드"]);
+    assert.deepEqual((await slot.locator(".level-pick .card-reward").allInnerTexts()), ["응모권 +1", "응모권 +2", "응모권 +3", "응모권 +3"], "황금 카드도 응모권은 도전과 같다");
+    await slot.locator(".level-pick.level-hard:not(.is-gold)").click();
     await slot.locator(".dealt .card:not(:has(.cost-tag))").click();
     daraHard = (await slot.locator(".chosen .chosen-text").innerText()).trim();
     await slot.locator("textarea").fill("올해 늘 웃으며 도와줘서 정말 고마웠어요!");

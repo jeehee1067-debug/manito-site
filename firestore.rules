@@ -41,7 +41,7 @@ service cloud.firestore {
     // 게시된 규칙의 버전 확인용. 운영 화면이 이 경로를 읽어 보고, 거부되면 "콘솔의 규칙이 예전 것"이라고 알려 준다.
     // 화면이 쓰는 경로·값의 모양을 바꿀 때 src/lib/constants.js의 RULES_VERSION과 같이 올린다.
     match /rulesVersion/{v} {
-      allow get: if isAdmin() && v == '20261126';
+      allow get: if isAdmin() && v == '20261127';
     }
 
     // ── 설정 ──────────────────────────────────────────────────────────────
@@ -430,6 +430,20 @@ service cloud.firestore {
         && request.resource.data.receiverPid == get(/databases/$(database)/documents/redemptions/$(code)).data.receiverPid
         && request.resource.data.slot == get(/databases/$(database)/documents/redemptions/$(code)).data.slot
         && modNoteOk('hide') && modNoteOk('thanks') && modNoteOk('void');
+    }
+
+    // 황금 카드 추첨 당첨(사용자가 정함, 11/23): { weeks: { '2': true, '3': true }, at }, 문서 ID = 당첨된 마니또의 명단 번호.
+    // 운영자 화면이 그 주가 끝난 뒤 추첨해서 쓰고, 당첨된 본인과 운영자만 읽는다(누가 뽑혔는지는 송년회 전까지 비밀 —
+    // 황금 카드를 받은 대상이 당첨자 명단으로 자기 마니또를 좁힐 수 있다). 추첨 기록은 meta/goldDraw, 주차별 추첨 여부·인원 수는 public/goldDraw.
+    match /goldWins/{pid} {
+      allow get: if linked() && pid == myPid();
+      allow read, delete: if isAdmin();
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['weeks', 'at'])
+        && request.resource.data.weeks is map
+        && request.resource.data.weeks.keys().hasOnly(['2', '3'])
+        && request.resource.data.weeks.values().hasOnly([true])
+        && request.resource.data.at == request.time;
     }
 
     // 마니또 -> 받는 사람 알림/쪽지. 보낸 사람 정보는 저장하지 않는다.
