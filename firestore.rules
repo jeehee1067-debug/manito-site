@@ -41,7 +41,7 @@ service cloud.firestore {
     // 게시된 규칙의 버전 확인용. 운영 화면이 이 경로를 읽어 보고, 거부되면 "콘솔의 규칙이 예전 것"이라고 알려 준다.
     // 화면이 쓰는 경로·값의 모양을 바꿀 때 src/lib/constants.js의 RULES_VERSION과 같이 올린다.
     match /rulesVersion/{v} {
-      allow get: if isAdmin() && v == '20261125';
+      allow get: if isAdmin() && v == '20261126';
     }
 
     // ── 설정 ──────────────────────────────────────────────────────────────
@@ -301,9 +301,11 @@ service cloud.firestore {
             || (feedAfter(resource.data.feedId).get('hidden', false) == true
               && feedAfter(resource.data.feedId).review == ''
               && getAfter(/databases/$(database)/documents/hiddenFeed/$(resource.data.feedId)).data.review == request.resource.data.review));
-      // 운영자: 무효 처리, "카드와 다름" 판정 고치기(도전 추가분)
+      // 운영자: 무효 처리, "카드와 다름" 판정 고치기(도전 추가분),
+      // 고친 횟수(edits)를 0으로 되돌리기(가리거나 무효 처리할 때: 운영진이 지운 뒤에도 글쓴이가 다시 고쳐 쓸 수 있게, 사용자가 정함 11/23)
       allow update: if isAdmin()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['voided', 'cardMatch'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['voided', 'cardMatch', 'edits'])
+        && (request.resource.data.get('edits', 0) == resource.data.get('edits', 0) || request.resource.data.get('edits', 0) == 0)
         && request.resource.data.voided is bool
         && request.resource.data.get('cardMatch', true) is bool;
     }
@@ -406,6 +408,28 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/feed/$(id)).data.get('hidden', false) == true
         && myEditOf(id, get(/databases/$(database)/documents/feed/$(id)).data.slot)
         && request.resource.data.review == myRedemptionAfter(get(/databases/$(database)/documents/feed/$(id)).data.slot).review;
+    }
+
+    // 운영진이 후기·답장을 가리거나 지우거나 무효 처리한 이유(사용자가 정함, 11/23: "무슨 이유로 삭제했는지 기록해서 그 사람이 보게").
+    // { receiverPid, slot, hide?, thanks?, void? } (각각 { reason, at }), 문서 ID = 인증 코드.
+    // 글쓴이(받는 사람)와 운영자만 읽는다(그 미션의 마니또는 못 읽는다: 이유에 마니또에 대한 추측이 들어 있을 수 있다).
+    function modNoteOk(k) {
+      return !(k in request.resource.data)
+        || (resource != null && k in resource.data && request.resource.data[k] == resource.data[k])
+        || (request.resource.data[k] is map
+          && request.resource.data[k].keys().hasOnly(['reason', 'at'])
+          && request.resource.data[k].reason is string
+          && request.resource.data[k].reason.size() <= 300
+          && request.resource.data[k].at == request.time);
+    }
+    match /modNotes/{code} {
+      allow get, list: if linked() && resource.data.receiverPid == myPid();
+      allow read, delete: if isAdmin();
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['receiverPid', 'slot', 'hide', 'thanks', 'void'])
+        && request.resource.data.receiverPid == get(/databases/$(database)/documents/redemptions/$(code)).data.receiverPid
+        && request.resource.data.slot == get(/databases/$(database)/documents/redemptions/$(code)).data.slot
+        && modNoteOk('hide') && modNoteOk('thanks') && modNoteOk('void');
     }
 
     // 마니또 -> 받는 사람 알림/쪽지. 보낸 사람 정보는 저장하지 않는다.

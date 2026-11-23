@@ -16,7 +16,8 @@ function maker(browser, errors, dialogs = []) {
     const ctx = await browser.newContext({ viewport });
     await ctx.addInitScript(() => { try { localStorage.setItem("manito:adminFull", "1"); } catch {} }); // 검증용: 미션 단계에서 새로 연 운영 화면도 바로 다 보이게(실제 기본은 "운영 자료 불러오기"를 눌러야 함)
     const page = await ctx.newPage();
-    page.on("dialog", (d) => { dialogs.push(d.message()); d.accept(); });
+    // 입력창(prompt)에 넣을 글: dialogs.answers에 넣어 두면 차례로 쓴다(없으면 기본값 그대로 확인)
+    page.on("dialog", (d) => { dialogs.push(d.message()); d.accept(d.type() === "prompt" && dialogs.answers?.length ? dialogs.answers.shift() : undefined); });
     page.on("console", (m) => (m.type() === "error" || m.type() === "warning") && !m.text().includes("TUNNEL") && errors.push(`[${label}] ${m.text().slice(0, 160)}`));
     page.on("pageerror", (e) => errors.push(`[${label}] pageerror ${e.message}`));
     return page;
