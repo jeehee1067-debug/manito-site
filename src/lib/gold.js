@@ -47,3 +47,13 @@ export function goldWeekClosed(week, config = {}) {
   if (week < 3) return (config.week || 1) > week || (config.phase || 0) >= 2;
   return (config.phase || 0) >= 2;
 }
+
+// 사이트에 들어오면 띄울 추첨 결과 팝업(사용자가 정함, 11/23: "당첨 안 된 사람에게도 아쉽다는 메시지, 된 사람은 축하, 들어오자마자 팝업으로").
+// missions: 내 giverMissions 문서, draws: public/goldDraw의 weeks, wins: goldWins/{나}의 weeks, seen: 이 기기에서 이미 본 주차.
+// 황금 카드를 골라 완료를 알린 주차 중 추첨이 끝났고 아직 안 본 것. 반환 [{ week, won }] (주차 순)
+export function goldPopups({ missions = {}, draws = {}, wins = {}, seen = [] }) {
+  return GOLD_DRAW.weeks
+    .filter((w) => isGoldChoice(missions.choices?.[String(w)]) && missions.done?.[String(w)] === true)
+    .filter((w) => draws[String(w)] && !seen.includes(w))
+    .map((w) => ({ week: w, won: wins[String(w)] === true }));
+}
