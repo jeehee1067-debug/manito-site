@@ -18,7 +18,8 @@ import { FeedDigestWriter } from "./lib/feedDigest.js";
 import Rules from "./pages/Rules.jsx";
 import { Garland, XmasFooter } from "./xmas.jsx";
 import { Icon, TAB_ICON } from "./icons.jsx";
-import { Panel } from "./ui.jsx";
+import { Giver, Panel } from "./ui.jsx";
+import { myReminders } from "./lib/reminders.js";
 
 const AppCtx = createContext(null);
 export const useApp = () => useContext(AppCtx);
@@ -149,6 +150,45 @@ function saveAvatarStore(pid, value, at) {
   }
 }
 // 설정(config/app)을 읽을 수 없는 계정: 아직 명단에도 운영자 목록에도 없는 "연결 전" 계정(보안 규칙).
+// 재촉 알림(사용자가 정함: "미션을 안 했거나 받은 미션을 인증 안 한 경우 재촉하는 알림"). 서버가 없어 휴대폰 알림은 못 보내고,
+// 사이트를 열면 어느 탭에서나 맨 위에 뜬다(lib/reminders.js myReminders). 지금 보고 있는 탭이 그 일을 하는 탭이면 그 줄은 숨긴다
+// (내 미션 탭에는 "이번 주 할 일", 추리 보드에는 인증 칸이 이미 있다). "닫기"는 이번에 연 동안만 숨긴다.
+// 내 인증·내 미션 문서는 내 미션·추리 보드 탭과 같은 질의라 Firestore가 하나로 묶어 읽는다(읽기가 늘지 않음).
+function ReminderBar({ myPid, config, inbox, current, go }) {
+  const [mine, setMine] = useState(null);
+  const [missions, setMissions] = useState(null);
+  const [closed, setClosed] = useState(false);
+  useEffect(() => onSnapshot(query(collection(db, "redemptions"), where("receiverPid", "==", myPid)),
+    (s) => setMine(s.docs.map((d) => d.data())), () => setMine(null)), [myPid]);
+  useEffect(() => onSnapshot(doc(db, "giverMissions", myPid),
+    (s) => setMissions(s.exists() ? s.data() : {}), () => setMissions(null)), [myPid]);
+  const { toVerify, toDo } = myReminders({ inbox, mine, missions, week: config.week || 1, phase: config.phase });
+  const showDo = toDo.length > 0 && current !== "mission";
+  const showVerify = toVerify.length > 0 && current !== "detective";
+  if (closed || (!showDo && !showVerify)) return null;
+  const weeks = (list) => list.map((s) => `${s}주차`).join("·");
+  return (
+    <div className="reminder-bar" role="status">
+      <b className="reminder-label">할 일</b>
+      <div className="reminder-lines">
+        {showDo && (
+          <p>
+            <b>{weeks(toDo)} 미션</b>을 아직 완료하지 않았어요(나는 <Giver>마니또</Giver>).{" "}
+            <button type="button" className="text-btn" onClick={() => go("mission")}>내 미션으로 가기</button>
+          </p>
+        )}
+        {showVerify && (
+          <p>
+            <Giver>내 마니또</Giver>가 보낸 <b>{weeks(toVerify)} 미션</b>을 아직 인증하지 않았어요. 인증해야 나와 마니또 모두 응모권이 쌓여요.{" "}
+            <button type="button" className="text-btn" onClick={() => go("detective")}>추리 보드에서 인증하기</button>
+          </p>
+        )}
+      </div>
+      <button type="button" className="text-btn small reminder-close" onClick={() => setClosed(true)} aria-label="할 일 알림 닫기">닫기</button>
+    </div>
+  );
+}
+
 const LOCKED = "locked";
 // 설정을 읽지 못함(권한 거부가 아닌 오류). 가장 흔한 것은 무료 한도(하루 읽기 5만 건, 한국 시간 오후 5시쯤 초기화) 초과: resource-exhausted.
 // 예전에는 이것도 "설정 없음"(null)으로 처리해서, 한도가 차면 모두에게 "운영자 계정 만들기(처음 한 번만 하는 설정)" 화면이 떴다.
@@ -445,6 +485,7 @@ function Session({ user, logout }) {
           )}
         </header>
         {config.notice && (ctx.myPid || ctx.isAdmin) && <p className="notice-banner" role="status"><b>공지</b>{config.notice}</p>}
+        {ctx.myPid && <ReminderBar myPid={ctx.myPid} config={config} inbox={inbox} current={current} go={setTab} />}
         {/* 예약(자동 진행) 실행기: 운영자·공동 운영자의 화면이 열려 있는 동안 예약 시각이 지난 작업을 실행한다 */}
         {ctx.isAdmin && <AutoRunner />}
         {ctx.isAdmin && <FeedDigestWriter />}

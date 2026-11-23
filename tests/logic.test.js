@@ -1378,3 +1378,41 @@ test("피드 요약: 새 글을 앞에 붙이고, 바뀐 것만 다시 쓰고, �
   const withThanks = patchPosts(recent, "f1", { thanks: "고마워요" });
   assert.equal("thanks" in patchPosts(withThanks, "f1", { thanks: undefined }).find((d) => d.id === "f1"), false, "답장 지우기는 칸을 없앤다");
 });
+
+test("재촉: 참여자 할 일(인증·완료 알리기)과 운영 화면 재촉 메일 받는 사람", async () => {
+  const { myReminders, reminderTargets, reminderMessage } = await import("../src/lib/reminders.js");
+  const { PHASE } = await import("../src/lib/constants.js");
+  const inbox = [
+    { kind: "mission", slot: 1 }, { kind: "note", slot: 1 }, { kind: "mission", slot: 2, hidden: true }, { kind: "praise", slot: 3 },
+  ];
+  // 1주차 완료 알림을 받았고 인증 전, 2주차는 운영진이 가림, 3주차는 아직 안 열림
+  assert.deepEqual(myReminders({ inbox, mine: [], missions: { done: { 1: true } }, week: 2, phase: PHASE.RUNNING }), { toVerify: [1], toDo: [2] });
+  assert.deepEqual(myReminders({ inbox, mine: [{ slot: 1 }], missions: { done: { 1: true, 2: true } }, week: 2, phase: PHASE.RUNNING }), { toVerify: [], toDo: [] });
+  assert.deepEqual(myReminders({ inbox, mine: [], missions: {}, week: 3, phase: PHASE.RUNNING }).toVerify, [1, 3], "칭찬 카드도 인증할 것");
+  assert.deepEqual(myReminders({ inbox, mine: [], missions: {}, week: 3, phase: PHASE.GUESSING }), { toVerify: [1, 3], toDo: [] }, "최종 지목 단계: 인증만");
+  assert.deepEqual(myReminders({ inbox, mine: [], missions: {}, week: 3, phase: PHASE.CLOSED }), { toVerify: [], toDo: [] }, "마감 뒤에는 없음");
+  assert.deepEqual(myReminders({ inbox, mine: null, missions: null, week: 1, phase: PHASE.RUNNING }), { toVerify: [], toDo: [] }, "읽는 중에는 띄우지 않음");
+
+  const roster = [
+    { pid: "a", name: "가나", email: "a@x", uid: "u1" }, { pid: "b", name: "다라", email: "b@x", uid: "u2" },
+    { pid: "c", name: "마바", email: "c@x", uid: null }, { pid: "d", name: "사아", email: "d@x", uid: "u4", dropout: true },
+  ];
+  const slot = (status, done) => ({ status, done });
+  const rows = [
+    { giverPid: "a", receiverPid: "b", slots: { 1: slot("sent", true), 2: slot("chosen", false), 3: slot("none", false) } },
+    { giverPid: "b", receiverPid: "c", slots: { 1: slot("sent", true), 2: slot("none", false), 3: slot("none", false) } },
+    { giverPid: "c", receiverPid: "d", slots: { 1: slot("none", false), 2: slot("none", false), 3: slot("none", false) } },
+    { giverPid: "d", receiverPid: "a", slots: { 1: slot("reported", true), 2: slot("redeemed", true), 3: slot("none", false) } },
+  ];
+  assert.deepEqual(reminderTargets(rows, roster, { kind: "verify", week: 2 }), [{ pid: "b", name: "다라", email: "b@x", slots: [1] }],
+    "가입 안 한 마바·신고한 가나는 빼고 인증 대기인 다라만");
+  assert.deepEqual(reminderTargets(rows, roster, { kind: "mission", week: 2 }).map((x) => [x.name, x.slots]), [["가나", [2]], ["다라", [2]]],
+    "열린 주차까지, 가입 안 한 마바·중도 이탈 사아는 빼고");
+  const auto = [{ giverPid: "a", receiverPid: "b", slots: { 3: slot("auto", true) } }];
+  assert.deepEqual(reminderTargets(auto, roster, { kind: "verify", week: 3 }).map((x) => x.slots), [[3]], "칭찬 카드도 대상의 인증 응모권 때문에 재촉");
+  for (const kind of ["verify", "mission"]) {
+    const m = reminderMessage({ kind, url: "https://example.test/", closeDay: "12/8(화)" });
+    assert.ok(m.subject.startsWith("[S1FA 마니또]") && m.body.includes("https://example.test/"));
+    for (const n of ["가나", "다라", "마바", "사아"]) assert.ok(!m.body.includes(n), "본문에 이름 없음");
+  }
+});

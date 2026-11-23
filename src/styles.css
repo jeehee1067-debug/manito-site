@@ -324,6 +324,13 @@ ul.plain.redeem-status li { flex: 0 0 auto; width: auto; margin: 0; }
 .plain.tickets { gap: 2px; font-size: 14px; margin-bottom: 6px; }
 .notice-banner { background: #fff6d8; border: 3px solid var(--ink); border-radius: 10px; padding: 8px 12px; margin-bottom: 14px; white-space: pre-line; }
 .notice-banner b { margin-right: 6px; }
+/* 재촉 알림(App.jsx ReminderBar): 어느 탭에서나 맨 위 */
+.reminder-bar { display: flex; gap: 8px; align-items: flex-start; background: #e8f3ff; border: 3px solid var(--ink); border-radius: 10px; padding: 8px 12px; margin-bottom: 14px; }
+.reminder-bar .reminder-label { flex: none; }
+.reminder-bar .reminder-lines { flex: 1; min-width: 0; }
+.reminder-bar .reminder-lines p { margin: 0 0 4px; }
+.reminder-bar .reminder-lines p:last-child { margin-bottom: 0; }
+.reminder-bar .reminder-close { flex: none; }
 .rules-table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 6px 0 10px; }
 .rules-table th, .rules-table td { border: 2px solid var(--ink); padding: 5px 8px; text-align: left; vertical-align: top; }
 /* 휴대폰 폭에서 표가 화면 밖으로 밀리지 않게: 줄바꿈은 허용하되 낱말 중간에서는 끊지 않는다 */
