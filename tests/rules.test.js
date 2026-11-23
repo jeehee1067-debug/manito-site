@@ -551,6 +551,66 @@ describe("2. 인증은 나에게 온 코드로만, 피드 글은 내 실제 인�
     // 다시 보인 글은 후기가 인증 문서와 같아서 감사 답장도 다시 된다
     await assertSucceeds(updateDoc(doc(me, "feed", FEED_B1), { thanks: "고마워요" }));
   });
+
+  // 운영진이 지운 이유(Admin.jsx Moderation setNote): modNotes/{인증 코드}
+  const note = (db, kind, reason = "이름이 들어 있어서 지웠어요", more = {}) =>
+    setDoc(doc(db, "modNotes", "B1B1"), { receiverPid: "p003", slot: 1, [kind]: { reason, at: serverTimestamp() }, ...more }, { merge: true });
+
+  test("지운 이유(modNotes): 운영자만 쓰고, 글쓴이와 운영자만 읽는다(그 미션의 마니또는 못 읽음)", async () => {
+    const db = admin();
+    await assertFails(note(p("p003"), "thanks")); // 글쓴이가 직접 쓰기
+    await assertFails(setDoc(doc(db, "modNotes", "B1B1"), { receiverPid: "p004", slot: 1, thanks: { reason: "", at: serverTimestamp() } })); // 다른 사람 앞으로
+    await assertFails(setDoc(doc(db, "modNotes", "B1B1"), { receiverPid: "p003", slot: 2, thanks: { reason: "", at: serverTimestamp() } })); // 다른 주차
+    await assertFails(note(db, "thanks", "가".repeat(301)));
+    await assertFails(note(db, "other"));
+    await assertFails(setDoc(doc(db, "modNotes", "B1B1"), { receiverPid: "p003", slot: 1, hide: { reason: "", at: new Date(2026, 10, 1) } })); // 시각 지어내기
+    await assertFails(setDoc(doc(db, "modNotes", "B1B1"), { receiverPid: "p003", slot: 1, hide: { reason: "", at: serverTimestamp(), by: "x" } }));
+    await assertSucceeds(note(db, "thanks"));
+    await assertSucceeds(note(db, "hide", "")); // 이유는 비워도 된다(지웠다는 기록은 남음)
+    await assertSucceeds(updateDoc(doc(db, "modNotes", "B1B1"), { hide: deleteField() })); // 되돌리면 그 칸을 지운다
+    const mine = await assertSucceeds(getDoc(doc(p("p003"), "modNotes", "B1B1")));
+    if (mine.data().thanks.reason !== "이름이 들어 있어서 지웠어요") throw new Error("이유가 다름");
+    await assertSucceeds(getDocs(query(collection(p("p003"), "modNotes"), where("receiverPid", "==", "p003"))));
+    await assertFails(getDoc(doc(p("p002"), "modNotes", "B1B1"))); // 그 미션의 마니또
+    await assertFails(getDoc(doc(p("p004"), "modNotes", "B1B1")));
+    await assertFails(getDocs(query(collection(p("p004"), "modNotes"), where("receiverPid", "==", "p003"))));
+    await assertFails(getDocs(collection(p("p003"), "modNotes"))); // 목록 전체
+  });
+
+  test("운영자가 지운 뒤에도 다시 쓴다: 답장 지우기(이유와 한 묶음) 뒤 새로 쓰기, 가리기·무효 처리하면 고칠 횟수를 0으로", async () => {
+    const db = admin();
+    const me = p("p003");
+    await assertSucceeds(updateDoc(doc(me, "feed", FEED_B1), { thanks: "이름이 들어간 답장" }));
+    {
+      const b = writeBatch(db); // Admin.jsx removeThanks
+      b.update(doc(db, "feed", FEED_B1), { thanks: deleteField() });
+      b.set(doc(db, "modNotes", "B1B1"), { receiverPid: "p003", slot: 1, thanks: { reason: "이름이 들어 있어요", at: serverTimestamp() } }, { merge: true });
+      await assertSucceeds(b.commit());
+    }
+    await assertSucceeds(updateDoc(doc(me, "feed", FEED_B1), { thanks: "이름을 뺀 답장" })); // 새로 다시 쓰기(고치기 횟수와 무관)
+    // 고칠 횟수를 다 쓴 글
+    for (let k = 1; k <= 3; k++) await assertSucceeds(reviewEdit(me, `${k}번째로 고친 후기예요. 이름은 지웠어요.`));
+    await assertFails(reviewEdit(me, fixed));
+    await assertFails(updateDoc(doc(db, "redemptions", "B1B1"), { edits: 5 })); // 운영자도 0으로 되돌리기만
+    await assertFails(updateDoc(doc(me, "redemptions", "B1B1"), { edits: 0 })); // 글쓴이가 스스로 되돌리기
+    {
+      const b = writeBatch(db); // Admin.jsx toggleHide(가리기): 원문 옮기기 + 고친 횟수 0 + 이유
+      const cur = (await getDoc(doc(db, "feed", FEED_B1))).data().review;
+      b.set(doc(db, "hiddenFeed", FEED_B1), { review: cur });
+      b.update(doc(db, "feed", FEED_B1), { hidden: true, review: "" });
+      b.update(doc(db, "redemptions", "B1B1"), { edits: 0 });
+      b.set(doc(db, "modNotes", "B1B1"), { receiverPid: "p003", slot: 1, hide: { reason: "이름이 들어 있어요", at: serverTimestamp() } }, { merge: true });
+      await assertSucceeds(b.commit());
+    }
+    await assertSucceeds(reviewEdit(me, fixed, { hidden: true })); // 다시 고칠 수 있다
+    {
+      const b = writeBatch(db); // Admin.jsx toggleVoid(무효 처리): 고친 횟수 0 + 이유
+      b.update(doc(db, "redemptions", "B1B1"), { voided: true, edits: 0 });
+      b.update(doc(db, "feed", FEED_B1), { voided: true });
+      b.set(doc(db, "modNotes", "B1B1"), { receiverPid: "p003", slot: 1, void: { reason: "후기 내용이 미션과 달라요", at: serverTimestamp() } }, { merge: true });
+      await assertSucceeds(b.commit());
+    }
+  });
 });
 
 // ───────────────────────── 3. 단계·주차·단서·운영자 목록 ─────────────────────────

@@ -26,10 +26,10 @@ export function Avatar({ pid, index, size = 56, dim = false }) {
 }
 
 // icon: 제목 앞 픽셀 아이콘 이름(src/icons.jsx). 주지 않으면 제목의 낱말로 고르고, 맞는 것이 없으면 없다. false면 붙이지 않는다.
-export function Panel({ title, children, className = "", icon }) {
+export function Panel({ title, children, className = "", icon, id }) {
   const name = icon === false ? null : icon || iconForTitle(title);
   return (
-    <section className={`panel ${className}`}>
+    <section className={`panel ${className}`} id={id}>
       {title && <h2 className="panel-title">{name && <Icon name={name} size={22} className="title-icon" />}{title}</h2>}
       {children}
     </section>

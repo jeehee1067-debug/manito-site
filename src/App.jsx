@@ -73,9 +73,9 @@ const seenKey = (uid) => `manito:seen:${uid}`;
 function loadSeen(uid) {
   try {
     const v = JSON.parse(localStorage.getItem(seenKey(uid)) || "{}");
-    return { inbox: v.inbox || [], manito: v.manito || [], angel: v.angel || [] };
+    return { inbox: v.inbox || [], manito: v.manito || [], angel: v.angel || [], mod: v.mod || [] };
   } catch {
-    return { inbox: [], manito: [], angel: [] };
+    return { inbox: [], manito: [], angel: [], mod: [] };
   }
 }
 function saveSeen(uid, seen) {
@@ -155,7 +155,7 @@ function saveAvatarStore(pid, value, at) {
 // 사이트를 열면 어느 탭에서나 맨 위에 뜬다(lib/reminders.js myReminders). 지금 보고 있는 탭이 그 일을 하는 탭이면 그 줄은 숨긴다
 // (내 미션 탭에는 "이번 주 할 일", 추리 보드에는 인증 칸이 이미 있다). "닫기"는 이번에 연 동안만 숨긴다.
 // 내 인증·내 미션 문서는 내 미션·추리 보드 탭과 같은 질의라 Firestore가 하나로 묶어 읽는다(읽기가 늘지 않음).
-function ReminderBar({ myPid, config, inbox, current, go }) {
+function ReminderBar({ myPid, config, inbox, current, go, modNew = 0 }) {
   const [mine, setMine] = useState(null);
   const [missions, setMissions] = useState(null);
   const [closed, setClosed] = useState(false);
@@ -166,7 +166,9 @@ function ReminderBar({ myPid, config, inbox, current, go }) {
   const { toVerify, toDo } = myReminders({ inbox, mine, missions, week: config.week || 1, phase: config.phase });
   const showDo = toDo.length > 0 && current !== "mission";
   const showVerify = toVerify.length > 0 && current !== "detective";
-  if (closed || (!showDo && !showVerify)) return null;
+  // 운영진이 내 후기·답장을 가리거나 지우거나 무효 처리했고 아직 추리 보드에서 보지 않은 것(추리 보드를 열면 본 것으로 친다)
+  const showMod = modNew > 0 && current !== "detective";
+  if (closed || (!showDo && !showVerify && !showMod)) return null;
   const weeks = (list) => list.map((s) => `${s}주차`).join("·");
   return (
     <div className="reminder-bar" role="status">
@@ -187,10 +189,21 @@ function ReminderBar({ myPid, config, inbox, current, go }) {
             <button type="button" className="text-btn" onClick={() => go("detective")}>추리 보드에서 인증하기</button>
           </p>
         )}
+        {showMod && (
+          <p>
+            운영진이 <b>내 후기·감사 답장</b>을 정리하고 이유를 남겼어요.{" "}
+            <button type="button" className="text-btn" onClick={() => { go("detective"); setTimeout(() => document.getElementById("my-posts")?.scrollIntoView({ block: "start" }), 80); }}>이유 보기</button>
+          </p>
+        )}
       </div>
       <button type="button" className="text-btn small reminder-close" onClick={() => setClosed(true)} aria-label="할 일 알림 닫기">닫기</button>
     </div>
   );
+}
+
+// modNotes 문서들 → 본 것 표시용 항목(이유를 새로 남기거나 다시 남기면 새 항목)
+function modNoteItems(docs = []) {
+  return docs.flatMap((d) => ["hide", "thanks", "void"].filter((k) => d[k]).map((k) => ({ id: `${d.code}:${k}:${d[k].at?.seconds ?? 0}`, code: d.code, kind: k })));
 }
 
 const LOCKED = "locked";
@@ -308,6 +321,14 @@ function Session({ user, logout }) {
     return onSnapshot(query(collection(db, "angelGifts"), where("receiverPid", "==", myPidForSeen)), (s) =>
       setAngelInbox(s.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => a.k - b.k)), () => setAngelInbox([]));
   }, [myPidForSeen]);
+  // 운영진이 내 후기·답장을 가리거나 지우거나 무효 처리한 이유(modNotes, 나와 운영자만 읽는다). 추리 보드 "내가 인증한 것"과 할 일 줄이 같이 쓴다.
+  const [modNotes, setModNotes] = useState([]);
+  useEffect(() => {
+    if (!myPidForSeen) return setModNotes([]);
+    return onSnapshot(query(collection(db, "modNotes"), where("receiverPid", "==", myPidForSeen)), (s) =>
+      setModNotes(s.docs.map((d) => ({ code: d.id, ...d.data() }))), () => setModNotes([]));
+  }, [myPidForSeen]);
+  const modItems = useMemo(() => modNoteItems(modNotes), [modNotes]);
   // 내 대상이 나(마니또)에게 보낸 한마디
   const [fromReceiver, setFromReceiver] = useState([]);
   useEffect(() => {
@@ -326,7 +347,8 @@ function Session({ user, logout }) {
     });
   }, [user.uid]);
   const unread = {
-    detective: inbox.filter((d) => !seen.inbox.includes(d.id)).length + angelInbox.filter((g) => !seen.angel.includes(g.id)).length,
+    detective: inbox.filter((d) => !seen.inbox.includes(d.id)).length + angelInbox.filter((g) => !seen.angel.includes(g.id)).length
+      + modItems.filter((m) => !seen.mod.includes(m.id)).length,
     mission: fromReceiver.filter((m) => !seen.manito.includes(m.id)).length,
   };
   const unreadTotal = unread.detective + unread.mission;
@@ -334,8 +356,9 @@ function Session({ user, logout }) {
   useEffect(() => {
     if (tab === "detective" && inbox.length) markSeen("inbox", inbox.map((d) => d.id));
     if (tab === "detective" && angelInbox.length) markSeen("angel", angelInbox.map((g) => g.id));
+    if (tab === "detective" && modItems.length) markSeen("mod", modItems.map((m) => m.id));
     if ((tab === "mission" || !tab) && fromReceiver.length) markSeen("manito", fromReceiver.map((m) => m.id));
-  }, [tab, inbox, angelInbox, fromReceiver, markSeen]);
+  }, [tab, inbox, angelInbox, fromReceiver, modItems, markSeen]);
   useEffect(() => {
     document.title = unreadTotal > 0 ? `(${unreadTotal}) ${BASE_TITLE}` : BASE_TITLE;
     return () => { document.title = BASE_TITLE; };
@@ -404,8 +427,9 @@ function Session({ user, logout }) {
       inbox,
       angelInbox,
       fromReceiver,
+      modNotes,
     };
-  }, [user, config, me, roster, avatars, loadAvatar, setAvatarLocal, myReceiver, inbox, angelInbox, fromReceiver]);
+  }, [user, config, me, roster, avatars, loadAvatar, setAvatarLocal, myReceiver, inbox, angelInbox, fromReceiver, modNotes]);
 
   if (config === FAILED) return <LoadFailed code={failCode} retry={() => { setConfig(undefined); setRecheckNo((n) => n + 1); }} logout={logout} />;
   if (config === undefined || me === undefined || roster === undefined) return <Loading />;
@@ -489,7 +513,7 @@ function Session({ user, logout }) {
           )}
         </header>
         {config.notice && (ctx.myPid || ctx.isAdmin) && <p className="notice-banner" role="status"><b>공지</b>{config.notice}</p>}
-        {ctx.myPid && <ReminderBar myPid={ctx.myPid} config={config} inbox={inbox} current={current} go={setTab} />}
+        {ctx.myPid && <ReminderBar myPid={ctx.myPid} config={config} inbox={inbox} current={current} go={setTab} modNew={modItems.filter((m) => !seen.mod.includes(m.id)).length} />}
         {/* 예약(자동 진행) 실행기: 운영자·공동 운영자의 화면이 열려 있는 동안 예약 시각이 지난 작업을 실행한다 */}
         {ctx.isAdmin && <AutoRunner />}
         {ctx.isAdmin && <FeedDigestWriter />}

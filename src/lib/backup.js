@@ -9,7 +9,7 @@ export const BACKUP_COLLECTIONS = [
   "assignments", "giverCodes", "codes", "receiverCodes", "giverMissions", "progress",
   "deliveries", "noteFlags", "redemptions", "feed", "feedLikes", "hiddenFeed",
   "reports", "verdicts", "clues", "nudges", "guesses", "midGuesses", "toManito",
-  "angelVolunteers", "angels", "angelGifts", "public", "results", "meta",
+  "angelVolunteers", "angels", "angelGifts", "modNotes", "public", "results", "meta",
 ];
 // 문서 하나만 읽는 것(컬렉션 목록 읽기는 규칙이 허용하지 않는다)
 export const BACKUP_DOCS = [["config", "app"]];

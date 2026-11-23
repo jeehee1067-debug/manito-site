@@ -422,7 +422,13 @@ function CodeEntry({ myPid, items, prefill }) {
 }
 
 function MyRedemptions({ myPid, items }) {
-  const { config } = useApp();
+  const { config, modNotes = [] } = useApp();
+  // 운영진이 남긴 이유(modNotes, 나와 운영자만 읽는다. 그 미션의 마니또는 못 읽는다)
+  const noteOf = (code) => modNotes.find((n) => n.code === code) || null;
+  const modReason = (code, kind) => {
+    const n = noteOf(code)?.[kind];
+    return n ? ` 이유: ${n.reason || "(운영진이 적지 않음)"}` : "";
+  };
   const [rows, setRows] = useState([]);
   useEffect(() => {
     return onSnapshot(query(collection(db, "redemptions"), where("receiverPid", "==", myPid)), (s) =>
@@ -439,17 +445,17 @@ function MyRedemptions({ myPid, items }) {
 
   if (!rows.length) return null;
   return (
-    <Panel title="내가 인증한 것">
+    <Panel title="내가 인증한 것" id="my-posts">
       <ul className="plain">
         {rows.map((r) => {
           const card = cardToCheck(r);
           return (
             <li key={r.code} className="row-item my-post">
               <p className="my-review">{r.review}</p>
-              {r.voided && <p className="error small">운영진이 무효 처리한 인증이에요.</p>}
+              {r.voided && <p className="error small">운영진이 무효 처리한 인증이에요.{modReason(r.code, "void")}</p>}
               {card && open && <CardCheck code={r.code} slot={r.slot} card={card} />}
               {r.cardMatch === false && <p className="small muted">받은 것이 마니또가 고른 카드와 달랐다고 표시했어요.</p>}
-              {r.feedId && <MyPost r={r} />}
+              {r.feedId && <MyPost r={r} note={noteOf(r.code)} />}
             </li>
           );
         })}
@@ -491,7 +497,7 @@ function CardCheck({ code, slot, card }) {
 // 감사 답장은 익명 피드 글에 붙는다(처음 쓰기는 글쓴이만 한 번). 마니또는 자기 미션의 피드 글에서 읽는다.
 // 고치기: 집계 전(단계 1~3)까지 후기·답장 합쳐 REVIEW_EDITS_MAX번. 인증 문서와 피드 글을 한 묶음으로 같이 고친다(보안 규칙).
 // 운영진이 피드에서 가린 글이면 피드 글 대신 원문 자리(hiddenFeed)를 고친다 — 운영진이 다시 보이게 하면 고친 글이 보인다.
-function MyPost({ r }) {
+function MyPost({ r, note = null }) {
   const { config } = useApp();
   const [post, setPost] = useState(undefined); // feed 문서(undefined = 불러오는 중, null = 없음)
   const [mode, setMode] = useState(null); // null | "review" | "thanks" | "newThanks"
@@ -562,8 +568,15 @@ function MyPost({ r }) {
   return (
     <div className="my-post-tools">
       {hidden && (
-        <p className="small warn-text">
-          운영진이 이 후기를 피드에서 가렸어요(다른 사람에게 안 보여요).{oldHidden ? " 고치려면 운영진에게 말씀해 주세요." : " 고치면 운영진이 다시 보이게 할 때 고친 글이 보여요."}
+        <p className="small warn-text mod-note">
+          운영진이 이 후기를 피드에서 가렸어요(다른 사람에게 안 보여요).{note?.hide ? ` 이유: ${note.hide.reason || "(운영진이 적지 않음)"}` : ""}
+          {oldHidden ? " 고치려면 운영진에게 말씀해 주세요." : " 고치면 운영진이 다시 보이게 할 때 고친 글이 보여요."}
+        </p>
+      )}
+      {note?.thanks && (
+        <p className="small warn-text mod-note">
+          운영진이 내 감사 답장을 지웠어요{note.thanks.at?.toDate ? `(${note.thanks.at.toDate().getMonth() + 1}/${note.thanks.at.toDate().getDate()})` : ""}. 이유: {note.thanks.reason || "(운영진이 적지 않음)"}
+          {!hidden ? " 답장은 새로 다시 쓸 수 있어요." : ""}
         </p>
       )}
       {sent && <p className="small muted">보낸 감사 답장: {sent}</p>}

@@ -1152,11 +1152,15 @@ function GuessStatus() {
   );
 }
 
+const NOTE_KINDS = ["hide", "thanks", "void"];
+const NOTE_LABEL = { hide: "피드에서 가린", thanks: "감사 답장을 지운", void: "무효 처리한" };
+
 function Moderation() {
   const { nameOf } = useApp();
   const roster = useFullRoster() || [];
   const feed = useColl("feed") || {};
   const deliveries = useColl("deliveries") || {};
+  const notes = useColl("modNotes") || {}; // 가리거나 지우거나 무효 처리한 이유(글쓴이에게 보인다)
   // 카드 확인이 의미 있는 인증: 1·2주차, 그리고 3주차 칭찬과 함께 보통·도전 카드를 고른 것(칭찬 알림에 card가 있다)
   const cardSlot = (r) => r.slot !== PRAISE_SLOT || Boolean(deliveries[`${r.receiverPid}_${r.slot}`]?.card);
   const [items, setItems] = useState([]);
@@ -1164,19 +1168,51 @@ function Moderation() {
     setItems(s.docs.map((d) => ({ code: d.id, ...d.data() })).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)))
   ), []);
 
+  // 이유 기록(사용자가 정함, 11/23: "무슨 이유로 삭제했는지 기록해서 그 사람이 보게"): modNotes/{인증 코드}의 hide·thanks·void 칸.
+  // 글쓴이(받는 사람)만 추리 보드 "내가 인증한 것"에서 보고, 그 미션의 마니또는 못 본다(보안 규칙).
+  // 이유는 비워 둘 수 있다(비워도 "운영진이 지웠다"는 기록은 남는다). 되돌리면(다시 보이기·무효 취소) 그 칸을 지운다.
+  const askReason = (what) => {
+    const v = window.prompt(`${what}\n\n이유를 적어 주세요. 쓴 사람에게만 보여요(마니또에게는 안 보여요). 비워 둬도 돼요.`, "");
+    return v === null ? null : v.trim().slice(0, 300);
+  };
+  // 이유는 원래 작업(가리기 등)이 저장된 뒤에 따로 쓴다: 콘솔의 보안 규칙이 예전 것이어도 가리기·지우기는 되게(이유만 실패하면 알린다)
+  const NOTE_FAIL = "이유는 저장하지 못했어요. 콘솔의 보안 규칙이 예전 것일 수 있어요(맨 위 규칙 버전 경고 확인).";
+  const writeNote = (r, kind, reason) =>
+    setDoc(doc(db, "modNotes", r.code), { receiverPid: r.receiverPid, slot: r.slot, [kind]: { reason, at: serverTimestamp() } }, { merge: true })
+      .catch(() => window.alert(`${NOTE_LABEL[kind]} 것은 저장했어요. ${NOTE_FAIL}`));
+  const clearNote = (r, kind) => (notes[r.code]?.[kind]
+    ? updateDoc(doc(db, "modNotes", r.code), { [kind]: deleteField() }).catch(() => window.alert(`${NOTE_LABEL[kind]} 이유를 지우지 못했어요. 잠시 뒤 다시 확인해 주세요.`))
+    : null);
+  // 가리거나 무효 처리하면 글쓴이의 고친 횟수를 0으로 되돌린다(운영진이 지운 뒤에도 다시 고쳐 쓸 수 있게). 이것도 원래 작업 뒤에 따로.
+  const resetEdits = (r) => (r.edits
+    ? updateDoc(doc(db, "redemptions", r.code), { edits: 0 }).catch(() => window.alert(`고칠 수 있는 횟수를 되돌리지 못했어요. ${NOTE_FAIL.replace("이유는 저장하지 못했어요. ", "")}`))
+    : null);
+
   // 인증 문서와 익명 피드 글(받는 사람 정보가 없는 별도 문서)을 같이 바꾼다.
   const toggleVoid = async (r) => {
+    let reason = "";
+    if (!r.voided) {
+      reason = askReason(`${nameOf(r.receiverPid)}님의 ${r.slot}주차 인증을 무효 처리할까요? (인증 응모권과 마니또의 그 미션 응모권이 빠져요)`);
+      if (reason === null) return;
+    }
     const b = writeBatch(db);
     b.update(doc(db, "redemptions", r.code), { voided: !r.voided });
     if (r.feedId) b.update(doc(db, "feed", r.feedId), { voided: !r.voided });
-    await b.commit();
+    const ok = await b.commit().then(() => true, () => { window.alert("바꾸지 못했어요. 잠시 뒤 다시 눌러 주세요."); return false; });
+    if (!ok) return;
     forgetFeed(); // 이 기기의 피드 탭에 바로 반영되게
     if (r.feedId) await patchFeedDigest(r.feedId, { voided: !r.voided }).catch(() => {}); // 참여자가 읽는 피드 요약에도 바로
+    if (!r.voided) { await resetEdits(r); await writeNote(r, "void", reason); } else await clearNote(r, "void");
   };
   // 피드에서만 가리기(응모권과 무관): 막말 후기로 마니또의 응모권을 깎으려는 경우에도 쓸 수 있게 무효 처리와 따로 둔다.
   // 피드 글은 참여자 누구나 읽을 수 있어서, 가릴 때는 후기를 비우고 원문은 운영자만 읽는 hiddenFeed로 옮긴다(보안 규칙이 확인).
   const toggleHide = async (r) => {
     const f = feed[r.feedId];
+    let reason = "";
+    if (!f.hidden) {
+      reason = askReason(`${nameOf(r.receiverPid)}님의 ${r.slot}주차 후기를 피드에서 가릴까요? (응모권은 그대로예요. 쓴 사람은 고쳐 쓸 수 있고, 다시 보이게 하면 고친 글이 보여요)`);
+      if (reason === null) return;
+    }
     const b = writeBatch(db);
     let patch;
     if (!f.hidden) {
@@ -1196,13 +1232,20 @@ function Moderation() {
     const ok = await b.commit().then(() => true, () => { window.alert("바꾸지 못했어요. 잠시 뒤 다시 눌러 주세요."); return false; });
     if (!ok) return;
     forgetFeed();
-    // 참여자가 읽는 피드 요약(public/feed)에도 바로 반영한다(가린 후기가 요약에 남아 보이지 않게)
+    // 참여자가 읽는 피드 요약(public/feed)에도 바로 반영한다(가린 후기가 요약에 남아 보이지 않게). 이유 기록보다 먼저.
     await patchFeedDigest(r.feedId, patch).catch(() => window.alert("피드 요약에 반영하지 못했어요. 잠시 뒤 운영 화면을 열어 두면 다시 맞춰져요."));
+    if (!f.hidden) { await resetEdits(r); await writeNote(r, "hide", reason); } else await clearNote(r, "hide");
   };
-  const removeThanks = (r) => {
-    if (!window.confirm("이 감사 답장을 지울까요? 받는 사람은 새로 다시 쓸 수 있어요(다시 못 쓰게 하려면 \"피드에서 가리기\").")) return;
-    return updateDoc(doc(db, "feed", r.feedId), { thanks: deleteField() })
-      .then(() => { forgetFeed(); return patchFeedDigest(r.feedId, { thanks: undefined }).catch(() => {}); });
+  // 감사 답장 지우기: 쓴 사람은 새로 다시 쓸 수 있다(사용자가 정함: "내가 지워도 다시 쓸 수 있게"). 지운 이유는 쓴 사람에게 보인다.
+  const removeThanks = async (r) => {
+    const reason = askReason(`${nameOf(r.receiverPid)}님의 ${r.slot}주차 감사 답장을 지울까요? 쓴 사람은 새로 다시 쓸 수 있어요(다시 못 쓰게 하려면 "피드에서 가리기").`);
+    if (reason === null) return;
+    const ok = await updateDoc(doc(db, "feed", r.feedId), { thanks: deleteField() })
+      .then(() => true, () => { window.alert("지우지 못했어요. 잠시 뒤 다시 눌러 주세요."); return false; });
+    if (!ok) return;
+    forgetFeed();
+    await patchFeedDigest(r.feedId, { thanks: undefined }).catch(() => {});
+    await writeNote(r, "thanks", reason);
   };
   // 받는 사람이 "카드와 달라요"로 인증했거나, 완료 알림보다 먼저 인증해 카드를 확인하지 않은 것: 두 사람에게 확인한 뒤 "같음"으로 고칠 수 있다(카드 추가분)
   const setCardSame = (r) => {
@@ -1227,6 +1270,8 @@ function Moderation() {
           미션은 제대로 했는데 후기나 답장만 문제라면 "피드에서 가리기"·"답장 지우기"를 쓰세요(응모권은 그대로예요).
           후기·감사 답장은 쓴 사람이 집계 전까지 합쳐서 {REVIEW_EDITS_MAX}번 고칠 수 있어요(추리 보드 "내가 인증한 것", 피드에 "고침" 표시).
           실수로 이름을 쓴 글은 먼저 "피드에서 가리기"로 가리고 쓴 사람에게 고쳐 달라고 한 뒤, 여기 보이는 후기가 고쳐진 것을 확인하고 "피드에 다시 보이기"를 누르세요(고친 글이 보여요).
+          가리기·답장 지우기·무효 처리를 누르면 이유를 묻고, 그 이유는 쓴 사람의 추리 보드 "내가 인증한 것"에 보여요(그 미션의 마니또에게는 안 보여요).
+          가리거나 무효 처리하면 고칠 수 있는 횟수가 다시 {REVIEW_EDITS_MAX}번이 되고, 답장을 지우면 쓴 사람이 새로 다시 쓸 수 있어요.
           "카드와 다름"은 받는 사람이 받은 것이 마니또가 고른 카드와 다르다고 한 것이에요(보통·도전 카드면 추가 응모권이 빠져요).
           "카드 확인 전"은 받는 사람이 마니또의 완료 알림보다 먼저 인증해서 카드를 아직 확인하지 않은 것이에요(받는 사람이 추리 보드 "내가 인증한 것"에서 확인하면 추가분이 붙고, 확인이 없으면 붙지 않아요).
         </p>
@@ -1237,6 +1282,9 @@ function Moderation() {
               <li key={r.code} className={r.voided ? "row-item voided" : "row-item"}>
                 <p>{r.review}</p>
                 {f?.thanks && <p className="small">감사 답장: {f.thanks}</p>}
+                {NOTE_KINDS.filter((k) => notes[r.code]?.[k]).map((k) => (
+                  <p key={k} className="small warn-text">{NOTE_LABEL[k]} 이유(쓴 사람에게 보임): {notes[r.code][k].reason || "(적지 않음)"}</p>
+                ))}
                 <span className="small muted">
                   {nameOf(r.receiverPid)} · {r.slot}주차{f?.hidden ? " · 피드에서 가림" : ""}{r.edits ? ` · 고침 ${r.edits}번` : ""}{r.cardMatch === false ? " · 카드와 다름" : r.cardMatch === undefined && cardSlot(r) ? " · 카드 확인 전" : ""}
                 </span>

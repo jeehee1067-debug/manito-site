@@ -199,6 +199,39 @@ async function tokenOf(email) {
     red2 = await redDoc();
     assert.equal(Number(red2.edits.integerValue), 3);
     console.log("  감사 답장 보내기 → 답장 고치기 → 후기·답장 합쳐 3번을 다 쓰면 고치기 버튼이 사라짐");
+
+    // 운영자가 지운 이유(modNotes): 쓴 사람에게만 보이고, 지운 뒤에도 다시 쓸 수 있다(11/23 사용자 요청)
+    const R1 = "답장에 이름이 들어 있어서 지웠어요", R2 = "후기에 이름이 들어 있어서 가렸어요";
+    await H.tab(r, "피드");
+    dialogs.answers = [R1];
+    await mod.getByRole("button", { name: "답장 지우기" }).click();
+    await mod.getByText(`감사 답장을 지운 이유(쓴 사람에게 보임): ${R1}`).waitFor();
+    assert.ok(dialogs.some((m) => m.includes("감사 답장을 지울까요?") && m.includes("이유를 적어 주세요")), "지울 때 이유를 묻는다");
+    const bar = r.locator(".reminder-bar");
+    await bar.getByText("운영진이 내 후기·감사 답장을 정리하고 이유를 남겼어요.").waitFor();
+    await bar.getByRole("button", { name: "이유 보기" }).click();
+    await mine.getByText(`이유: ${R1}`).waitFor();
+    await mine.getByText("답장은 새로 다시 쓸 수 있어요.").waitFor();
+    assert.equal(await bar.getByText("이유를 남겼어요").count(), 0, "추리 보드를 열면 본 것으로 친다");
+    await mine.getByRole("button", { name: "마니또에게 감사 답장 보내기" }).click();
+    await mine.getByLabel("감사 답장").fill("이름을 뺀 답장이에요");
+    await mine.getByRole("button", { name: "보내기", exact: true }).click();
+    await mine.getByText("보낸 감사 답장: 이름을 뺀 답장이에요").waitFor();
+    console.log("  '답장 지우기'에 이유 → 쓴 사람 화면 맨 위 할 일 줄 '이유 보기' → 이유가 보이고 답장을 새로 다시 씀(고칠 횟수를 다 썼어도)");
+
+    dialogs.answers = [R2];
+    await mod.getByRole("button", { name: "피드에서 가리기" }).click();
+    await mod.getByText(`피드에서 가린 이유(쓴 사람에게 보임): ${R2}`).waitFor();
+    await mine.getByText(`이유: ${R2}`).waitFor();
+    await mine.getByRole("button", { name: "후기 고치기" }).waitFor();
+    await mine.getByText("후기·답장은 집계 전까지 3번 더 고칠 수 있어요").waitFor();
+    for (let k = 0; k < 25; k++) { red2 = await redDoc(); if (Number(red2.edits?.integerValue) === 0) break; await r.waitForTimeout(200); }
+    assert.equal(Number(red2.edits.integerValue), 0, "가리면 고친 횟수를 0으로");
+    await mod.getByRole("button", { name: "피드에 다시 보이기" }).click();
+    await mod.getByText(`피드에서 가린 이유(쓴 사람에게 보임): ${R2}`).waitFor({ state: "detached" });
+    await mine.getByText(`이유: ${R2}`).waitFor({ state: "detached" });
+    await mine.getByText(`이유: ${R1}`).waitFor(); // 답장을 지운 기록은 남는다
+    console.log("  '피드에서 가리기'에 이유 → 쓴 사람에게 이유가 보이고 고칠 횟수가 다시 3번 → 다시 보이면 가린 이유는 지워짐(답장 지운 기록은 남음)");
   }
 
   step("쪽지 신고: 받는 사람이 신고 → 운영자 '쪽지 검토'에 먼저 보임 → 가리기 → 받는 사람 화면에서 내용이 가려짐");

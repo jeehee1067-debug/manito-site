@@ -672,6 +672,13 @@ const step = (s) => console.log("▶", s);
     await panel(co, `짝 현황 (${N}쌍)`).waitFor();
     assert.equal(await co.locator(".hud-who").innerText(), "운영자");
     // 운영자 계정의 피드 탭: 참여자가 보는 익명 피드를 그대로 보기만 한다(공감 버튼 없음)
+    // 피드는 요약(public/feed)으로 열린다. 요약은 운영자 화면이 바뀐 뒤 10초 안에 다시 쓰므로(feedDigest.js DIGEST_DELAY),
+    // 앞 단계의 공감이 요약에 들어간 뒤에 연다(공감 직후 10초 안에 열면 요약의 "공감 많은 후기"가 아직 비어 있다 — 설계대로)
+    for (let k = 0; k < 60; k++) {
+      const dg = await (await fetch(`${FS}/v1/projects/${PROJECT}/databases/(default)/documents/public/feed`, { headers: { Authorization: "Bearer owner" } })).json();
+      if ((dg.fields?.top?.arrayValue?.values || []).some((v) => Number(v.mapValue.fields.likes?.integerValue || 0) > 0)) break;
+      await co.waitForTimeout(500);
+    }
     await tab(co, "피드");
     const coFeed = panel(co, "익명 피드");
     await coFeed.getByText("운영자 계정은 참여자가 보는 피드를 그대로 보기만 해요").waitFor();
