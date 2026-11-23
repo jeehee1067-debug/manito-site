@@ -450,6 +450,107 @@ describe("2. 인증은 나에게 온 코드로만, 피드 글은 내 실제 인�
     await assertSucceeds(updateDoc(doc(p("p003"), "feed", FEED_B1), { thanks: "고마워요" }));
     await assertFails(updateDoc(doc(p("p003"), "feed", FEED_B1), { thanks: "다시 씀" })); // 한 번만
   });
+
+  // 글쓴이의 고치기(Detective.jsx MyPost)가 보내는 묶음. FEED_B1은 p003이 쓴 글(인증 문서 B1B1)
+  const reviewEdit = (db, text, { hidden = false, bumpBy = 1, editedAt = serverTimestamp(), skipFeed = false, skipRed = false, extraRed = {} } = {}) => {
+    const b = writeBatch(db);
+    if (!skipRed) b.update(doc(db, "redemptions", "B1B1"), { review: text, edits: increment(bumpBy), ...extraRed });
+    if (hidden) {
+      b.update(doc(db, "hiddenFeed", FEED_B1), { review: text });
+      if (!skipFeed) b.update(doc(db, "feed", FEED_B1), { editedAt });
+    } else if (!skipFeed) {
+      b.update(doc(db, "feed", FEED_B1), { review: text, editedAt });
+    }
+    return b.commit();
+  };
+  const thanksEdit = (db, thanks, { bumpRed = true } = {}) => {
+    const b = writeBatch(db);
+    if (bumpRed) b.update(doc(db, "redemptions", "B1B1"), { review: review20, edits: increment(1) });
+    b.update(doc(db, "feed", FEED_B1), { thanks, editedAt: serverTimestamp() });
+    return b.commit();
+  };
+  const fixed = "다".repeat(25); // 이름을 지운 후기
+
+  test("글쓴이의 후기 고치기 (Detective.jsx MyPost): 인증 문서와 피드 글을 한 묶음으로 같은 글로, 고친 시각을 남긴다", async () => {
+    const me = p("p003");
+    await assertFails(reviewEdit(p("p004"), fixed)); // 다른 참여자
+    await assertFails(reviewEdit(p("p002"), fixed)); // 그 미션을 보낸 마니또
+    await assertFails(reviewEdit(admin(), fixed)); // 운영자도 남의 후기를 고칠 수 없다
+    await assertFails(reviewEdit(me, fixed, { skipFeed: true })); // 인증 문서만(피드 글은 예전 후기)
+    await assertFails(reviewEdit(me, fixed, { skipRed: true })); // 피드 글만
+    await assertFails(updateDoc(doc(me, "feed", FEED_B1), { review: fixed })); // 피드 글만, 고친 시각도 없이
+    await assertFails(reviewEdit(me, fixed, { editedAt: new Date(2026, 10, 1) })); // 고친 시각을 지어내기
+    await assertFails(reviewEdit(me, fixed, { bumpBy: 2 })); // 횟수는 1씩
+    await assertFails(reviewEdit(me, "짧은 후기")); // 20자 미만
+    await assertFails(reviewEdit(me, "가".repeat(501)));
+    await assertFails(reviewEdit(me, fixed, { extraRed: { voided: false, cardMatch: true } })); // 다른 칸까지
+    {
+      const b = writeBatch(me); // 인증 문서와 피드 글을 서로 다른 글로
+      b.update(doc(me, "redemptions", "B1B1"), { review: fixed, edits: increment(1) });
+      b.update(doc(me, "feed", FEED_B1), { review: "라".repeat(25), editedAt: serverTimestamp() });
+      await assertFails(b.commit());
+    }
+    await assertSucceeds(reviewEdit(me, fixed));
+    const f = (await assertSucceeds(getDoc(doc(p("p004"), "feed", FEED_B1)))).data();
+    if (f.review !== fixed || !f.editedAt) throw new Error("고친 후기·시각이 피드 글에 없음");
+    const r = (await assertSucceeds(getDoc(doc(me, "redemptions", "B1B1")))).data();
+    if (r.review !== fixed || r.edits !== 1) throw new Error("인증 문서의 후기·횟수가 다름");
+    // 고친 뒤에도 감사 답장(처음 쓰기)·공감은 그대로 된다
+    await assertSucceeds(updateDoc(doc(me, "feed", FEED_B1), { thanks: "고마워요" }));
+  });
+
+  test("고치기는 후기·답장 합쳐 3번까지, 집계 전(단계 1~3)까지만", async () => {
+    const me = p("p003");
+    for (let k = 1; k <= 3; k++) await assertSucceeds(reviewEdit(me, `${k}번째로 고친 후기예요. 이름은 지웠어요.`));
+    await assertFails(reviewEdit(me, "네 번째로 고친 후기예요. 이름은 지웠어요."));
+    await seed();
+    await setPhase(3);
+    await assertSucceeds(reviewEdit(me, fixed)); // 마감(지목 끝, 집계 전)
+    await setPhase(4);
+    await assertFails(reviewEdit(me, "집계 뒤에 고친 후기예요. 이름은 지웠어요."));
+  });
+
+  test("감사 답장 고치기: 이미 쓴 답장만, 인증 문서의 횟수와 한 묶음으로(지우기는 안 됨)", async () => {
+    const me = p("p003");
+    await assertFails(thanksEdit(me, "고친 답장")); // 아직 답장이 없으면 고치기가 아니라 처음 쓰기로
+    await assertSucceeds(updateDoc(doc(me, "feed", FEED_B1), { thanks: "고마워요" }));
+    await assertFails(thanksEdit(me, "고친 답장", { bumpRed: false })); // 횟수 없이
+    await assertFails(thanksEdit(me, ""));
+    await assertFails(thanksEdit(me, "가".repeat(201)));
+    await assertFails(thanksEdit(me, deleteField()));
+    await assertFails(thanksEdit(p("p004"), "남이 고친 답장"));
+    await assertSucceeds(thanksEdit(me, "정말 고마워요"));
+    const f = (await getDoc(doc(me, "feed", FEED_B1))).data();
+    if (f.thanks !== "정말 고마워요" || !f.editedAt) throw new Error("고친 답장이 없음");
+  });
+
+  test("가린 글: 글쓴이는 원문 자리(hiddenFeed)를 고치고 피드 글은 빈 후기 그대로, 운영자가 다시 보이면 고친 글", async () => {
+    const db = admin();
+    const me = p("p003");
+    {
+      const b = writeBatch(db);
+      b.set(doc(db, "hiddenFeed", FEED_B1), { review: review20 });
+      b.update(doc(db, "feed", FEED_B1), { hidden: true, review: "" });
+      await assertSucceeds(b.commit());
+    }
+    await assertFails(reviewEdit(me, fixed)); // 가린 글의 피드 후기를 다시 채우기
+    await assertFails(reviewEdit(me, fixed, { hidden: true, skipFeed: true })); // 고친 시각 없이
+    await assertFails(reviewEdit(p("p004"), fixed, { hidden: true }));
+    await assertFails(updateDoc(doc(me, "hiddenFeed", FEED_B1), { review: fixed })); // 원문 자리만
+    await assertFails(thanksEdit(me, "가린 글의 답장")); // 가린 글은 답장도 못 고친다
+    await assertSucceeds(reviewEdit(me, fixed, { hidden: true }));
+    const f = (await getDoc(doc(p("p004"), "feed", FEED_B1))).data();
+    if (f.review !== "" || f.hidden !== true) throw new Error("가린 글의 후기가 보임");
+    await assertFails(getDoc(doc(me, "hiddenFeed", FEED_B1))); // 글쓴이도 원문 자리는 못 읽는다
+    if ((await getDoc(doc(db, "hiddenFeed", FEED_B1))).data().review !== fixed) throw new Error("원문 자리가 고쳐지지 않음");
+    // 운영자의 "피드에 다시 보이기"(Admin.jsx toggleHide): 원문 자리의 글(고친 글)로
+    const b = writeBatch(db);
+    b.update(doc(db, "feed", FEED_B1), { hidden: false, review: fixed });
+    b.delete(doc(db, "hiddenFeed", FEED_B1));
+    await assertSucceeds(b.commit());
+    // 다시 보인 글은 후기가 인증 문서와 같아서 감사 답장도 다시 된다
+    await assertSucceeds(updateDoc(doc(me, "feed", FEED_B1), { thanks: "고마워요" }));
+  });
 });
 
 // ───────────────────────── 3. 단계·주차·단서·운영자 목록 ─────────────────────────

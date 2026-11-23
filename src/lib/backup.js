@@ -88,6 +88,7 @@ export function messageRows({
     if (r.voided) notes.push("무효 처리된 인증");
     if (f?.hidden) notes.push("피드에서 가린 글");
     if (r.cardMatch === false) notes.push("카드와 달랐다고 표시");
+    if (r.edits) notes.push(`글쓴이가 후기·답장을 ${r.edits}번 고침(지금 글)`);
     const review = r.review || (r.feedId && hiddenFeed[r.feedId]?.review) || f?.review;
     push("review", r.slot, r.receiverPid, giverOfCode[code], review, r.createdAt, { likes: f?.likes ?? 0, note: notes.join(", ") });
     if (f?.thanks) push("thanks", r.slot, r.receiverPid, giverOfCode[code], f.thanks, r.createdAt, { note: "후기에 붙인 답장(시각은 후기 시각)" });

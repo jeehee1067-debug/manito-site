@@ -2,7 +2,7 @@ import { useApp } from "../App.jsx";
 import { Giver, Panel, Target } from "../ui.jsx";
 import { PRIZES, PRIZES_ANNOUNCED, TICKET_RULES as R } from "../config/prizes.js";
 import { DEAL_COUNT } from "../lib/cards.js";
-import { CARD_HOW, DROP_TIP, EXTRA_NOTES_MAX, PROFILE_QUESTIONS, REVIEW_MIN, SCHEDULE, SPEND_GUIDE_WON, clueScheduleText, daysBetween, shortDate, todayYmd, weekDeadline } from "../lib/constants.js";
+import { CARD_HOW, DROP_TIP, EXTRA_NOTES_MAX, PROFILE_QUESTIONS, REVIEW_EDITS_MAX, REVIEW_MIN, SCHEDULE, SPEND_GUIDE_WON, clueScheduleText, daysBetween, shortDate, todayYmd, weekDeadline } from "../lib/constants.js";
 
 // 낱말 정의(규칙 탭 맨 위. 사용자가 정함: "내가 누군가의 마니또이고 대상도 마니또라는 개념이 헷갈리는 분이 있다").
 // 마니또 = 챙겨 주는 쪽, 대상 = 받는 쪽. 한 사람이 두 역할을 다 한다는 것과 어느 탭이 어느 역할인지를 적는다.
@@ -121,6 +121,7 @@ export default function Rules() {
           <li><b>마니또에게 한마디</b>: 추리 보드에서 내 마니또에게 주차마다 한 번 익명으로 말을 걸 수 있어요. 마니또는 쪽지로 답할 수 있어요.</li>
           <li><b>주차별 추측</b>: 용의자 보드에서 매주 "지금 가장 의심되는 사람"을 남겨요. 맞았는지는 알려 주지 않고, 송년회에서 "가장 먼저 알아챈 사람"으로 발표돼요(응모권과는 상관없어요).</li>
           <li><b>공감</b>: 익명 피드의 후기에 글마다 한 번 공감할 수 있어요(취소는 안 돼요). 공감을 가장 많이 받은 후기가 {PRIZES.bestReview.label}을 받아요.</li>
+          <li><b>후기·감사 답장 고치기</b>: 추리 보드 "내가 인증한 것"에서 집계 전까지 합쳐서 {REVIEW_EDITS_MAX}번 고칠 수 있어요. 고친 글은 피드에 "(고침)"으로 표시되고, 받은 공감은 그대로예요. 피드는 모두가 보니 <b>후기·답장에 사람 이름은 쓰지 말아 주세요</b>(내 마니또라고 생각하는 사람 이름도요).</li>
           <li><b>내 마니또에게 알려 줄 것</b>: 내 프로필에 못 먹는 음식·알레르기, 좋아하는 간식을 적어 두면 내 마니또(와 수호천사)만 볼 수 있어요.</li>
           <li><b>수호천사</b>: 응모권을 더 받고 싶으면 내 미션 화면에서 "수호천사 지원하기"를 눌러 주세요(미션이 시작된 뒤부터 지원할 수 있어요). 마니또가 미션을 안 해서 아무것도 받지 못한 사람이 생기면 지원자 중 한 명이 몰래 연결돼요. <b>먼저 지원한 순서대로 자동으로</b> 연결되고 운영진이 고르지 않아요(2주차·3주차가 열릴 때, 그때까지 아무것도 받지 못한 사람에게. 지난 주차의 내 미션을 모두 완료한 지원자만, 한 사람에게 한 명씩). 연결되면 그 사람에게 미션을 {R.maxAngel}번까지 해 주고, 확인될 때마다 응모권 +{R.angelPerMission}장이에요. 도움받는 사람은 누가 수호천사인지 모르고, 송년회에서 공개돼요. 필요한 사람이 없으면 연결되지 않을 수 있어요.</li>
           <li>새 쪽지나 한마디가 오면 메뉴에 숫자가 떠요.</li>

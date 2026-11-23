@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  arrayRemove, arrayUnion, collection, doc, getDoc, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch,
+  arrayRemove, arrayUnion, collection, doc, getDoc, increment, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch,
 } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { forgetFeed } from "../lib/feedCache.js";
 import { useApp } from "../App.jsx";
 import { Avatar, Dialogue, Giver, HowTag, Panel, RoleNote } from "../ui.jsx";
-import { cardHow, LEVEL_LABEL, PHASE, PRAISE_SLOT, PROFILE_QUESTIONS, REVIEW_MIN, CLUE_COUNT, PART_HINT_IDX, clueScheduleText } from "../lib/constants.js";
+import { cardHow, LEVEL_LABEL, PHASE, PRAISE_SLOT, PROFILE_QUESTIONS, REVIEW_EDITS_MAX, REVIEW_MIN, CLUE_COUNT, PART_HINT_IDX, clueScheduleText } from "../lib/constants.js";
 import { normalizeCode } from "../lib/random.js";
 import { bump } from "../lib/writes.js";
 import { TICKET_RULES } from "../config/prizes.js";
@@ -444,12 +444,12 @@ function MyRedemptions({ myPid, items }) {
         {rows.map((r) => {
           const card = cardToCheck(r);
           return (
-            <li key={r.code} className="row-item">
-              <p>{r.review}</p>
+            <li key={r.code} className="row-item my-post">
+              <p className="my-review">{r.review}</p>
               {r.voided && <p className="error small">운영진이 무효 처리한 인증이에요.</p>}
               {card && open && <CardCheck code={r.code} slot={r.slot} card={card} />}
               {r.cardMatch === false && <p className="small muted">받은 것이 마니또가 고른 카드와 달랐다고 표시했어요.</p>}
-              {r.feedId && <Thanks feedId={r.feedId} />}
+              {r.feedId && <MyPost r={r} />}
             </li>
           );
         })}
@@ -487,28 +487,104 @@ function CardCheck({ code, slot, card }) {
   );
 }
 
-// 감사 답장은 익명 피드 글에 붙는다(글쓴이만 한 번 쓸 수 있다). 마니또는 자기 미션의 피드 글에서 읽는다.
-function Thanks({ feedId }) {
-  const [sent, setSent] = useState(undefined); // undefined = 불러오는 중, null = 아직 안 씀
+// 내 후기·감사 답장(사용자가 정함, 11/23: "실수로 이름을 썼을 때 당사자가 고칠 수 있게").
+// 감사 답장은 익명 피드 글에 붙는다(처음 쓰기는 글쓴이만 한 번). 마니또는 자기 미션의 피드 글에서 읽는다.
+// 고치기: 집계 전(단계 1~3)까지 후기·답장 합쳐 REVIEW_EDITS_MAX번. 인증 문서와 피드 글을 한 묶음으로 같이 고친다(보안 규칙).
+// 운영진이 피드에서 가린 글이면 피드 글 대신 원문 자리(hiddenFeed)를 고친다 — 운영진이 다시 보이게 하면 고친 글이 보인다.
+function MyPost({ r }) {
+  const { config } = useApp();
+  const [post, setPost] = useState(undefined); // feed 문서(undefined = 불러오는 중, null = 없음)
+  const [mode, setMode] = useState(null); // null | "review" | "thanks" | "newThanks"
   const [text, setText] = useState("");
-  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  useEffect(() => onSnapshot(doc(db, "feed", feedId), (s) => setSent(s.exists() ? s.data().thanks || null : null), () => setSent(null)), [feedId]);
+  const [done, setDone] = useState("");
+  useEffect(() => onSnapshot(doc(db, "feed", r.feedId), (s) => setPost(s.exists() ? s.data() : null), () => setPost(null)), [r.feedId]);
+  if (post === undefined || post === null) return null;
 
-  if (sent === undefined) return null;
-  if (sent) return <p className="small muted">보낸 감사 답장: {sent}</p>;
-  if (!open) return <button className="text-btn" onClick={() => setOpen(true)}>마니또에게 감사 답장 보내기</button>;
-  return (
-    <form className="inline" onSubmit={async (e) => {
-      e.preventDefault();
-      if (!text.trim()) return;
-      setError("");
-      await updateDoc(doc(db, "feed", feedId), { thanks: text.trim() }).then(forgetFeed, () => setError("보내지 못했어요."));
-    }}>
-      <input className="pk-input" value={text} maxLength={200} onChange={(e) => setText(e.target.value)} placeholder="마니또에게 익명으로 전해져요 (피드에도 보여요)" />
-      <button className="pk-btn main sm">보내기</button>
-      {error && <span className="error small" role="alert">{error}</span>}
+  const hidden = Boolean(post.hidden);
+  const oldHidden = hidden && post.review !== ""; // 예전 방식으로 가린 글(고칠 수 없음)
+  const sent = post.thanks || null;
+  const left = Math.max(0, REVIEW_EDITS_MAX - (r.edits || 0));
+  const phaseOk = config.phase >= PHASE.RUNNING && config.phase <= PHASE.CLOSED;
+  const canEdit = phaseOk && left > 0 && !oldHidden;
+  const open = (m, t) => { setMode(m); setText(t); setError(""); setDone(""); };
+
+  const save = async (e) => {
+    e.preventDefault();
+    const t = text.trim();
+    setError("");
+    if (mode === "review") {
+      if (t.length < REVIEW_MIN) return setError(`후기는 ${REVIEW_MIN}자 이상 써 주세요(지금 ${t.length}자).`);
+      if (t === r.review) return setError("바뀐 내용이 없어요.");
+    } else {
+      if (!t) return setError("답장을 써 주세요.");
+      if (mode === "thanks" && t === sent) return setError("바뀐 내용이 없어요.");
+    }
+    setBusy(true);
+    try {
+      if (mode === "newThanks") {
+        await updateDoc(doc(db, "feed", r.feedId), { thanks: t });
+      } else {
+        const b = writeBatch(db);
+        b.update(doc(db, "redemptions", r.code), { review: mode === "review" ? t : r.review, edits: increment(1) });
+        if (mode === "review" && hidden) {
+          b.update(doc(db, "hiddenFeed", r.feedId), { review: t });
+          b.update(doc(db, "feed", r.feedId), { editedAt: serverTimestamp() });
+        } else if (mode === "review") {
+          b.update(doc(db, "feed", r.feedId), { review: t, editedAt: serverTimestamp() });
+        } else {
+          b.update(doc(db, "feed", r.feedId), { thanks: t, editedAt: serverTimestamp() });
+        }
+        await b.commit();
+      }
+      forgetFeed(); // 이 기기의 피드 탭에 바로 반영되게
+      setDone(mode === "newThanks" ? "답장을 보냈어요." : mode === "review" ? (hidden ? "후기를 고쳤어요. 운영진이 다시 보이게 하면 고친 글이 보여요." : "후기를 고쳤어요.") : "답장을 고쳤어요.");
+      setMode(null);
+    } catch {
+      setError(mode === "newThanks" ? "보내지 못했어요." : "고치지 못했어요. 잠시 뒤 다시 해 주세요.");
+    }
+    setBusy(false);
+  };
+
+  const form = mode && (
+    <form className="edit-post" onSubmit={save}>
+      {mode === "review"
+        ? <textarea className="pk-input" rows={3} value={text} maxLength={500} onChange={(e) => setText(e.target.value)} aria-label="고칠 후기" />
+        : <input className="pk-input" value={text} maxLength={200} onChange={(e) => setText(e.target.value)} aria-label={mode === "newThanks" ? "감사 답장" : "고칠 답장"} placeholder="마니또에게 익명으로 전해져요 (피드에도 보여요)" />}
+      <span className="inline">
+        <button className="pk-btn main sm" disabled={busy}>{mode === "newThanks" ? "보내기" : "고친 내용 저장"}</button>
+        <button type="button" className="text-btn" onClick={() => setMode(null)}>취소</button>
+      </span>
     </form>
+  );
+
+  return (
+    <div className="my-post-tools">
+      {hidden && (
+        <p className="small warn-text">
+          운영진이 이 후기를 피드에서 가렸어요(다른 사람에게 안 보여요).{oldHidden ? " 고치려면 운영진에게 말씀해 주세요." : " 고치면 운영진이 다시 보이게 할 때 고친 글이 보여요."}
+        </p>
+      )}
+      {sent && <p className="small muted">보낸 감사 답장: {sent}</p>}
+      {!mode && (
+        <span className="inline">
+          {canEdit && <button type="button" className="text-btn" onClick={() => open("review", r.review)}>후기 고치기</button>}
+          {canEdit && sent && !hidden && <button type="button" className="text-btn" onClick={() => open("thanks", sent)}>답장 고치기</button>}
+          {!sent && !hidden && <button type="button" className="text-btn" onClick={() => open("newThanks", "")}>마니또에게 감사 답장 보내기</button>}
+        </span>
+      )}
+      {form}
+      {!mode && phaseOk && !oldHidden && (
+        <p className="small muted">
+          {left > 0
+            ? `후기·답장은 집계 전까지 ${left}번 더 고칠 수 있어요(고친 글은 피드에 "고침"으로 표시돼요). 이름은 쓰지 말아 주세요.`
+            : "고칠 수 있는 횟수를 다 썼어요. 더 고쳐야 하면 운영진에게 말씀해 주세요."}
+        </p>
+      )}
+      {done && <p className="small note" role="status">{done}</p>}
+      {error && <p className="error small" role="alert">{error}</p>}
+    </div>
   );
 }
 

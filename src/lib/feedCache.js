@@ -26,9 +26,16 @@ export function mergeDigest(recent = [], fresh = [], count = 30) {
   return [...fresh, ...recent.filter((d) => !ids.has(d.id))].slice(0, count);
 }
 
+// 요약 문서를 만든 뒤 글쓴이가 고친 글(fresh)로 같은 글을 바꿔 넣는다(요약에 없는 글은 더하지 않는다).
+// 요약은 운영자 화면이 열려 있을 때만 새로 쓰여서, 고친 후기(예: 실수로 쓴 이름을 지운 것)가 요약에 예전 글로 남아 있을 수 있다.
+export function overlayPosts(list = [], fresh = []) {
+  const byId = new Map(fresh.map((d) => [d.id, d]));
+  return list.map((d) => byId.get(d.id) || d);
+}
+
 // 요약 문서를 다시 쓸지 비교할 때 쓰는 글자(시각은 초로)
 const sec = (t) => (t && typeof t.seconds === "number" ? t.seconds : t ?? null);
-const postKey = (d) => [d.id, d.slot, d.review, Boolean(d.voided), Boolean(d.hidden), d.thanks || "", d.likes || 0, sec(d.createdAt)];
+const postKey = (d) => [d.id, d.slot, d.review, Boolean(d.voided), Boolean(d.hidden), d.thanks || "", d.likes || 0, sec(d.createdAt), sec(d.editedAt)];
 export function digestKey(recent = [], top = []) {
   return JSON.stringify([recent.map(postKey), top.map(postKey)]);
 }

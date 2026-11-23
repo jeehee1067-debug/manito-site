@@ -127,6 +127,78 @@ async function tokenOf(email) {
     for (let k = 0; k < 25; k++) { dp = await digestPost((x) => x.id === fid); if (dp && !dp.hidden) break; await r.waitForTimeout(200); }
     assert.equal(dp.review, REVIEW, "다시 보이면 요약에도 원문");
     console.log("  '피드에 다시 보이기' → 원문으로 되돌아오고 hiddenFeed는 지워짐");
+
+    // 글쓴이의 후기·답장 고치기(11/23: 후기에 실수로 이름을 쓴 경우). 운영자가 먼저 가리고 → 글쓴이가 고치고 → 다시 보이면 고친 글
+    const EDIT1 = "응원 쪽지 잘 받았어요. 이름은 지웠어요, 덕분에 힘이 났어요!";
+    const EDIT2 = "응원 쪽지 잘 받았어요. 한 번 더 고쳤어요, 덕분에 힘이 났어요!";
+    const redDoc = async () => (await (await fetch(`${FS}/redemptions?pageSize=10`, { headers: owner })).json()).documents[0].fields;
+    const feedDoc = async () => (await (await fetch(`${FS}/feed/${fid}`, { headers: owner })).json()).fields;
+    await mod.getByRole("button", { name: "피드에서 가리기" }).click();
+    await mod.locator("span.small.muted", { hasText: "· 피드에서 가림" }).waitFor();
+    await H.tab(r, "추리 보드");
+    const mine = H.panel(r, "내가 인증한 것");
+    await mine.getByText("운영진이 이 후기를 피드에서 가렸어요").waitFor();
+    await mine.getByRole("button", { name: "후기 고치기" }).click();
+    await mine.getByLabel("고칠 후기").fill(EDIT1);
+    await mine.getByRole("button", { name: "고친 내용 저장" }).click();
+    await mine.getByText("후기를 고쳤어요. 운영진이 다시 보이게 하면 고친 글이 보여요.").waitFor();
+    await mine.locator(".my-review", { hasText: EDIT1 }).waitFor();
+    let fdoc = await feedDoc();
+    assert.equal(fdoc.review.stringValue, "", "가린 글의 피드 후기는 빈 값 그대로");
+    assert.ok(fdoc.editedAt, "고친 시각");
+    assert.equal((await (await fetch(`${FS}/hiddenFeed/${fid}`, { headers: owner })).json()).fields.review.stringValue, EDIT1, "원문 자리가 고친 글");
+    let red2 = await redDoc();
+    assert.equal(red2.review.stringValue, EDIT1);
+    assert.equal(Number(red2.edits.integerValue), 1);
+    await mod.getByText(EDIT1).waitFor();
+    await mod.locator("span.small.muted", { hasText: "· 고침 1번" }).waitFor();
+    await mod.getByRole("button", { name: "피드에 다시 보이기" }).click();
+    await mod.locator("span.small.muted", { hasText: "· 피드에서 가림" }).waitFor({ state: "detached" });
+    for (let k = 0; k < 25; k++) { fdoc = await feedDoc(); if (fdoc.review.stringValue === EDIT1) break; await r.waitForTimeout(200); }
+    assert.equal(fdoc.review.stringValue, EDIT1, "다시 보이면 고친 글");
+    for (let k = 0; k < 25; k++) { dp = await digestPost((x) => x.id === fid); if (dp?.review === EDIT1) break; await r.waitForTimeout(200); }
+    assert.equal(dp.review, EDIT1, "요약에도 고친 글");
+    await H.tab(r, "피드");
+    await feedPanel.getByRole("button", { name: "새 글 확인" }).click();
+    await feedPanel.locator(".dialogue", { hasText: EDIT1 }).locator(".edited-mark").waitFor();
+    assert.equal(await feedPanel.getByText(REVIEW).count(), 0);
+    console.log("  가린 글을 글쓴이가 고침 → 피드 글은 빈 후기 그대로, 원문 자리(hiddenFeed)·인증 문서가 고친 글 → '다시 보이기'로 고친 글이 '(고침)' 표시와 함께 보임");
+
+    // 보이는 글을 고치면: 피드 요약(운영자 화면이 10초 뒤 다시 씀)이 아직 예전 글이어도 다른 참여자는 고친 글을 본다(editedAt 조회)
+    await H.tab(r, "추리 보드");
+    await mine.getByRole("button", { name: "후기 고치기" }).click();
+    await mine.getByLabel("고칠 후기").fill(EDIT2);
+    await mine.getByRole("button", { name: "고친 내용 저장" }).click();
+    await mine.getByText("후기를 고쳤어요.", { exact: true }).waitFor();
+    for (let k = 0; k < 25; k++) { fdoc = await feedDoc(); if (fdoc.review.stringValue === EDIT2) break; await r.waitForTimeout(200); }
+    assert.equal(fdoc.review.stringValue, EDIT2);
+    const other = u["가나"];
+    await other.reload(); await H.tab(other, "피드");
+    await H.panel(other, "익명 피드").locator(".dialogue", { hasText: EDIT2 }).waitFor();
+    const staleDigest = (await digestPost((x) => x.id === fid))?.review;
+    assert.equal(staleDigest, EDIT1, "이 순간 피드 요약은 아직 예전 글(그래도 고친 글이 보여야 한다)");
+    assert.equal(await H.panel(other, "익명 피드").getByText(EDIT1).count(), 0);
+    for (let k = 0; k < 60; k++) { dp = await digestPost((x) => x.id === fid); if (dp?.review === EDIT2) break; await r.waitForTimeout(500); }
+    assert.equal(dp.review, EDIT2, "운영자 화면이 요약도 다시 쓴다");
+    console.log("  보이는 글을 고침 → 피드 요약이 예전 글인 동안에도 다른 참여자 피드에 고친 글(요약 뒤 고친 글 조회), 그 뒤 요약도 고친 글");
+
+    // 감사 답장: 처음 쓰기 → 고치기(후기와 합쳐 3번째) → 횟수를 다 쓰면 고치기 버튼이 없다
+    await mine.getByRole("button", { name: "마니또에게 감사 답장 보내기" }).click();
+    await mine.getByLabel("감사 답장").fill("첫 답장이에요");
+    await mine.getByRole("button", { name: "보내기", exact: true }).click();
+    await mine.getByText("보낸 감사 답장: 첫 답장이에요").waitFor();
+    await mine.getByRole("button", { name: "답장 고치기" }).click();
+    await mine.getByLabel("고칠 답장").fill("고친 답장이에요");
+    await mine.getByRole("button", { name: "고친 내용 저장" }).click();
+    await mine.getByText("보낸 감사 답장: 고친 답장이에요").waitFor();
+    await mine.getByText("고칠 수 있는 횟수를 다 썼어요").waitFor();
+    assert.equal(await mine.getByRole("button", { name: "후기 고치기" }).count(), 0);
+    assert.equal(await mine.getByRole("button", { name: "답장 고치기" }).count(), 0);
+    for (let k = 0; k < 25; k++) { fdoc = await feedDoc(); if (fdoc.thanks?.stringValue === "고친 답장이에요") break; await r.waitForTimeout(200); }
+    assert.equal(fdoc.thanks.stringValue, "고친 답장이에요");
+    red2 = await redDoc();
+    assert.equal(Number(red2.edits.integerValue), 3);
+    console.log("  감사 답장 보내기 → 답장 고치기 → 후기·답장 합쳐 3번을 다 쓰면 고치기 버튼이 사라짐");
   }
 
   step("쪽지 신고: 받는 사람이 신고 → 운영자 '쪽지 검토'에 먼저 보임 → 가리기 → 받는 사람 화면에서 내용이 가려짐");
