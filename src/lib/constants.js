@@ -54,11 +54,11 @@ export const SCHEDULE = [
   { date: "2026-11-17", kind: "join", text: "가입 시작 (회사 메일 인증, 프로필 작성)" },
   { date: "2026-11-18", kind: "week", text: "마니또 배정 · 1주차 미션 시작" },
   { date: "2026-11-20", kind: "clue", text: "단서 2개 공개" },
-  { date: "2026-11-24", kind: "week", text: "2주차 미션 시작" },
+  { date: "2026-11-24", time: "11:00", kind: "week", text: "1주차 미션 마감 · 2주차 미션 시작" },
   { date: "2026-11-27", kind: "clue", text: "단서 2개 공개" },
-  { date: "2026-12-01", kind: "week", text: "3주차 시작 (전원 칭찬 한 줄 + 원하면 카드 미션)" },
+  { date: "2026-12-01", time: "11:00", kind: "week", text: "2주차 미션 마감 · 3주차 시작 (전원 칭찬 한 줄 + 원하면 카드 미션)" },
   { date: "2026-12-04", kind: "clue", text: "단서 2개 공개" },
-  { date: "2026-12-08", kind: "close", text: "미션 마감 · 최종 지목(마지막 단서: 파트)" },
+  { date: "2026-12-08", time: "11:00", kind: "close", text: "3주차 미션 마감 · 최종 지목 시작(마지막 단서: 파트)" },
   { date: "2026-12-09", kind: "party", text: "송년회: 응모권 집계, 정체 공개, 시상, 추첨" },
 ];
 const WEEKDAY = ["일", "월", "화", "수", "목", "금", "토"];
@@ -70,8 +70,19 @@ export function shortDate(date) {
   const d = new Date(`${date}T00:00:00`);
   return `${d.getMonth() + 1}/${d.getDate()}(${WEEKDAY[d.getDay()]})`;
 }
-export function scheduleLabel({ date, text }) {
-  return `${shortDate(date)} ${text}`;
+export function scheduleLabel({ date, time, text }) {
+  return `${shortDate(date)}${time ? ` ${time}` : ""} ${text}`;
+}
+
+// 주차별 미션 마감(사용자가 정함, 11/23: "지난 주차를 마니또가 몰아서 하는 것은 안 된다"): 그 주차 미션(카드 고르기·완료 알리기)은
+// 다음 주차가 열릴 때(일정표의 다음 "week" 날짜·시각), 3주차는 미션 마감("close") 때 닫힌다. 보안 규칙은 열린 주차(config.week)만 받는다.
+// 받는 사람의 인증은 지난 주차도 최종 지목이 마감될 때까지 된다.
+// 반환 { date, time, label: "11/24(월) 11:00" } 또는 null
+export function weekDeadline(week) {
+  const weeks = SCHEDULE.filter((e) => e.kind === "week");
+  const e = week < weeks.length ? weeks[week] : SCHEDULE.find((x) => x.kind === "close");
+  if (!e) return null;
+  return { date: e.date, time: e.time || "", label: `${shortDate(e.date)}${e.time ? ` ${e.time}` : ""}` };
 }
 // 두 날짜("YYYY-MM-DD") 사이의 날 수(to - from). 타임라인의 "D-2" 표시에 쓴다.
 export function daysBetween(from, to) {
@@ -99,7 +110,7 @@ export const MAIL_LINK = "@mail";
 
 // 게시돼 있어야 하는 보안 규칙 버전. firestore.rules의 rulesVersion과 같아야 한다.
 // 규칙에서 화면이 쓰는 경로·값의 모양을 바꿀 때 양쪽을 같이 올린다. 운영 화면이 이 값으로 "콘솔의 규칙이 예전 것"인지 확인해 알려 준다.
-export const RULES_VERSION = "20261121";
+export const RULES_VERSION = "20261124";
 
 // remote: 다른 근무지에 있는 대상에게도 할 수 있는 미션인지.
 // 대상이 다른 근무지면 remote 카드만 제시한다. 쉬움 카드는 모두 사이트 쪽지로 하는 무비용 미션.

@@ -2,7 +2,7 @@ import { useApp } from "../App.jsx";
 import { Giver, Panel, Target } from "../ui.jsx";
 import { PRIZES, PRIZES_ANNOUNCED, TICKET_RULES as R } from "../config/prizes.js";
 import { DEAL_COUNT } from "../lib/cards.js";
-import { CARD_HOW, DROP_TIP, EXTRA_NOTES_MAX, PROFILE_QUESTIONS, REVIEW_MIN, SCHEDULE, SPEND_GUIDE_WON, clueScheduleText, daysBetween, shortDate, todayYmd } from "../lib/constants.js";
+import { CARD_HOW, DROP_TIP, EXTRA_NOTES_MAX, PROFILE_QUESTIONS, REVIEW_MIN, SCHEDULE, SPEND_GUIDE_WON, clueScheduleText, daysBetween, shortDate, todayYmd, weekDeadline } from "../lib/constants.js";
 
 // 낱말 정의(규칙 탭 맨 위. 사용자가 정함: "내가 누군가의 마니또이고 대상도 마니또라는 개념이 헷갈리는 분이 있다").
 // 마니또 = 챙겨 주는 쪽, 대상 = 받는 쪽. 한 사람이 두 역할을 다 한다는 것과 어느 탭이 어느 역할인지를 적는다.
@@ -52,7 +52,7 @@ function Timeline() {
       <p className="small tl-now">
         오늘은 <b>{shortDate(today)}</b>
         {todays.length > 0 && <> · 오늘 일정: <b>{todays.map((e) => e.text).join(", ")}</b></>}
-        {next && <> · 다음 일정: <b>{shortDate(next.date)} {next.text}</b> ({daysBetween(today, next.date)}일 뒤)</>}
+        {next && <> · 다음 일정: <b>{shortDate(next.date)}{next.time ? ` ${next.time}` : ""} {next.text}</b> ({daysBetween(today, next.date)}일 뒤)</>}
         {over && <> · 모든 일정이 끝났어요.</>}
       </p>
       <ol className="timeline">
@@ -60,7 +60,7 @@ function Timeline() {
           const state = e.date < today ? "past" : e.date === today ? "today" : e === next ? "next" : "later";
           return (
             <li key={e.date} className={`tl-${state} tl-kind-${e.kind}`}>
-              <span className="tl-date">{shortDate(e.date)}</span>
+              <span className="tl-date">{shortDate(e.date)}{e.time && <small className="tl-time"> {e.time}</small>}</span>
               <span className="tl-dot" aria-hidden="true">{state === "past" ? "✔" : ""}</span>
               <span className="tl-body">
                 <span className="tl-tag">{KIND_LABEL[e.kind]}</span>
@@ -233,8 +233,8 @@ export default function Rules() {
           <li>보통·도전을 고르면 두 장 중 한 장은 돈이 드는 카드, 한 장은 돈이 안 드는 카드예요. 돈을 쓰기 싫으면 안 드는 카드를 고르면 돼요. 그 밖의 응모권(미션·카드 추가분)은 돈이 들든 안 들든 똑같아요.</li>
           <li>간식을 주기 전에 내 미션 화면의 "내 대상이 알려 준 것"에서 못 먹는 음식·알레르기를 꼭 확인해 주세요.</li>
           <li>난이도를 고르면 그 난이도의 카드 {DEAL_COUNT}장이 나오고, 그중 하나를 골라요. 카드는 사람·주차마다 다르게 나오고 다시 뽑을 수는 없어요. 난이도는 완료를 알리기 전까지 다시 고를 수 있어요.</li>
-          <li>카드 고르기·완료 알리기·인증은 그 주차가 열린 뒤에만 할 수 있어요. 지난 주차는 미션 진행 기간 안이면 늦게라도 할 수 있어요.</li>
-          <li>미션(완료 알리기)은 12월 8일 미션 마감 때 닫혀요. 받은 미션 인증은 그 뒤에도 최종 지목이 마감되기 전까지 할 수 있어요(마감 직전에 받은 미션을 인증할 시간).</li>
+          <li><b>미션은 주차마다 마감돼요.</b> 카드 고르기·완료 알리기는 그 주차에만 할 수 있어요: 1주차는 {weekDeadline(1)?.label}, 2주차는 {weekDeadline(2)?.label}, 3주차는 {weekDeadline(3)?.label}에 마감돼요. <b>마감된 주차는 나중에 몰아서 할 수 없어요.</b></li>
+          <li>받은 미션 인증은 지난 주차도 최종 지목이 마감되기 전까지 할 수 있어요(마감 직전에 받은 미션을 인증할 시간).</li>
           <li>완료를 알린 주차에는 "쪽지 더 보내기"로 쪽지를 더 보낼 수 있어요(주차마다 {EXTRA_NOTES_MAX}건까지). "3일 연속 응원 쪽지" 카드는 첫날 완료를 알린 뒤 이것으로 이어서 보내면 돼요.</li>
         </ul>
       </Panel>

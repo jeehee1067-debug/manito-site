@@ -20,6 +20,7 @@ import { Garland, XmasFooter } from "./xmas.jsx";
 import { Icon, TAB_ICON } from "./icons.jsx";
 import { Giver, Panel } from "./ui.jsx";
 import { myReminders } from "./lib/reminders.js";
+import { weekDeadline } from "./lib/constants.js";
 
 const AppCtx = createContext(null);
 export const useApp = () => useContext(AppCtx);
@@ -173,7 +174,8 @@ function ReminderBar({ myPid, config, inbox, current, go }) {
       <div className="reminder-lines">
         {showDo && (
           <p>
-            <b>{weeks(toDo)} 미션</b>을 아직 완료하지 않았어요(나는 <Giver>마니또</Giver>).{" "}
+            <b>{weeks(toDo)} 미션</b>을 아직 완료하지 않았어요(나는 <Giver>마니또</Giver>).
+            {weekDeadline(toDo[0])?.label && <> <b>{weekDeadline(toDo[0]).label} 마감</b>이고, 마감 뒤에는 할 수 없어요.</>}{" "}
             <button type="button" className="text-btn" onClick={() => go("mission")}>내 미션으로 가기</button>
           </p>
         )}

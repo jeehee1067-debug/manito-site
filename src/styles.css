@@ -324,6 +324,8 @@ ul.plain.redeem-status li { flex: 0 0 auto; width: auto; margin: 0; }
 .plain.tickets { gap: 2px; font-size: 14px; margin-bottom: 6px; }
 .notice-banner { background: #fff6d8; border: 3px solid var(--ink); border-radius: 10px; padding: 8px 12px; margin-bottom: 14px; white-space: pre-line; }
 .notice-banner b { margin-right: 6px; }
+/* 이번 주 미션 마감 시각(내 미션 칸) */
+.deadline-line { background: #fff6d8; border: 2px solid var(--ink); border-radius: 8px; padding: 4px 8px; margin: 0 0 8px; }
 /* 재촉 알림(App.jsx ReminderBar): 어느 탭에서나 맨 위 */
 .reminder-bar { display: flex; gap: 8px; align-items: flex-start; background: #e8f3ff; border: 3px solid var(--ink); border-radius: 10px; padding: 8px 12px; margin-bottom: 14px; }
 .reminder-bar .reminder-label { flex: none; }
@@ -661,6 +663,10 @@ ul.plain.redeem-status li { flex: 0 0 auto; width: auto; margin: 0; }
 .stamp.is-locked .stamp-ring { background: var(--paper-2); }
 .stamp.is-locked .px-icon { opacity: 0.45; filter: grayscale(1); }
 .stamp.is-locked .stamp-week { color: var(--ink-soft); }
+/* 마감된 지난 주차(완료 안 함): 잠긴 칸과 같고 글자만 흐리게 */
+.stamp.is-closed .stamp-ring { background: var(--paper-2); }
+.stamp.is-closed .px-icon { opacity: 0.45; filter: grayscale(1); }
+.stamp.is-closed .stamp-week, .stamp.is-closed .stamp-state { color: var(--ink-soft); }
 .stamp.is-open .stamp-ring { border-color: var(--gold); background: #fff8dc; animation: stamp-wait 1.8s ease-in-out infinite; }
 .stamp.is-open .stamp-state { color: #8a6500; font-weight: 700; }
 .stamp.is-done .stamp-ring { border: 3px solid var(--red); background: #fff; box-shadow: inset 0 0 0 3px #fff, inset 0 0 0 5px rgba(192, 57, 43, 0.35); transform: rotate(-10deg); animation: stamp-press 0.35s ease-out both; }

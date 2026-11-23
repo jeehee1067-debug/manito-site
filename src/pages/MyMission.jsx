@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { collection, doc, getDoc, increment, onSnapshot, query, serverTimestamp, setDoc, where, writeBatch } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp, Loading } from "../App.jsx";
-import { CARD_HOW, cardHow, DROP_TIP, DROP_TIP_SHORT, EXTRA_NOTES_MAX, FIRST_CLUE_DATE, PROFILE_DUE, shortDate, LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT, SCHEDULE, SPEND_GUIDE_WON, scheduleLabel, todayYmd } from "../lib/constants.js";
+import { CARD_HOW, cardHow, DROP_TIP, DROP_TIP_SHORT, EXTRA_NOTES_MAX, FIRST_CLUE_DATE, PROFILE_DUE, shortDate, LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT, SCHEDULE, SPEND_GUIDE_WON, scheduleLabel, todayYmd, weekDeadline } from "../lib/constants.js";
 import { DEAL_COUNT, dealCards } from "../lib/cards.js";
 import { syncClues } from "../lib/sync.js";
 import { Avatar, Dialogue, Giver, HowTag, Panel, RoleNote, Target } from "../ui.jsx";
@@ -121,7 +121,8 @@ export default function MyMission({ active = true }) {
   if (!progress.unknown && !progress.profileDone) todo.push({ text: "내 프로필 6문항 채우기 (단서가 돼요. 안 채우면 은신 응모권 없음)", href: "#profile" });
   if (extra.prefs === false) todo.push({ text: "내 마니또에게 알려 줄 것(좋아하는 간식, 못 먹는 음식) 적기", href: "#profile" });
   if (running) {
-    if (!missions.done?.[week]) todo.push({ text: week === PRAISE_SLOT ? `${week}주차 칭찬 한 줄 보내기(원하면 카드 미션도)` : missions.choices?.[week] ? `${week}주차 미션 하고 "완료 알리기"` : `${week}주차 미션 카드 고르기`, href: null });
+    const due = weekDeadline(week)?.label;
+    if (!missions.done?.[week]) todo.push({ text: (week === PRAISE_SLOT ? `${week}주차 칭찬 한 줄 보내기(원하면 카드 미션도)` : missions.choices?.[week] ? `${week}주차 미션 하고 "완료 알리기"` : `${week}주차 미션 카드 고르기`) + (due ? ` — ${due} 마감` : ""), href: null });
     if (pending.length > 0) todo.push({ text: `받은 미션 ${pending.length}건 인증하기`, href: "#detective" });
     if (extra.mid && !extra.mid[week]) todo.push({ text: `${week}주차 추측 남기기 (용의자 보드)`, href: "#detective" });
   }
@@ -171,15 +172,17 @@ export default function MyMission({ active = true }) {
         <p className="stamps-title"><Icon name="stamp" size={18} /><span>미션 스탬프</span><small>완료를 알리면 도장이 찍혀요</small></p>
         {[1, 2, 3].map((slot) => {
           const done = missions.done?.[slot] === true;
-          const open = config.phase === PHASE.RUNNING && slot <= week;
-          const state = done ? "done" : open ? "open" : "locked";
+          // 미션은 지금 열린 주차만(지난 주차는 마감 — 사용자가 정함, 11/23. 보안 규칙도 같다)
+          const open = config.phase === PHASE.RUNNING && slot === week;
+          const closed = !done && (config.phase > PHASE.RUNNING || (config.phase === PHASE.RUNNING && slot < week));
+          const state = done ? "done" : open ? "open" : closed ? "closed" : "locked";
           return (
             <div key={slot} role="listitem" className={`stamp is-${state}`}>
               <span className="stamp-ring">
                 {done ? <span className="stamp-ink">완료!</span> : open ? <Icon name="gift" size={26} /> : <Icon name="lock" size={22} />}
               </span>
               <span className="stamp-week">{slot}주차</span>
-              <span className="stamp-state">{done ? "도장 꾹" : open ? "진행 중" : config.phase > PHASE.RUNNING ? "마감" : "곧 열려요"}</span>
+              <span className="stamp-state">{done ? "도장 꾹" : open ? "진행 중" : closed ? "마감" : "곧 열려요"}</span>
             </div>
           );
         })}
@@ -218,7 +221,9 @@ export default function MyMission({ active = true }) {
           done={Boolean(missions.done?.[slot])}
           notes={missions.notes?.[slot] || 0}
           allDone={missions.done || {}}
-          open={running && slot <= config.week}
+          open={running && slot === config.week}
+          closed={(running && slot < config.week) || config.phase > PHASE.RUNNING}
+          deadline={weekDeadline(slot)?.label || ""}
           phase={config.phase}
           remote={remote}
           taken={Object.entries(missions.choices || {}).filter(([s, c]) => Number(s) !== slot && c?.cardId).map(([, c]) => c.cardId)}
@@ -241,7 +246,7 @@ function HowGuide() {
   );
 }
 
-function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, notes, allDone, open, phase, remote, taken = [] }) {
+function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, notes, allDone, open, closed = false, deadline = "", phase, remote, taken = [] }) {
   const [message, setMessage] = useState("");
   const [includeCode, setIncludeCode] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -334,7 +339,16 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
 
   return (
     <Panel title={title + (done ? " ✔" : "")} className={open || done ? "" : "locked"}>
-      {!open && !done && <p className="muted">{phase < PHASE.RUNNING ? "미션 진행이 시작되면 열려요." : `${slot}주차에 열려요.`}</p>}
+      {!open && !done && (
+        <p className="muted">
+          {phase < PHASE.RUNNING ? "미션 진행이 시작되면 열려요."
+            : closed ? `${slot}주차 미션은 마감됐어요${deadline ? `(${deadline})` : ""}. 지난 주차는 나중에 할 수 없어요.`
+            : `${slot}주차에 열려요.`}
+        </p>
+      )}
+      {open && !done && deadline && (
+        <p className="small deadline-line">⏰ {slot}주차 미션 마감: <b>{deadline}</b> — 마감 뒤에는 이 주차 미션을 할 수 없어요.</p>
+      )}
 
       {picking && (
         <>

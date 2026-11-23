@@ -69,7 +69,6 @@ async function seed({ phase = 1, week = 1, cluesReleased = 2, admins = [ADMIN], 
     // p001(마니또)이 p002(받는 사람)에게 남긴 단서와 쪽지
     for (let i = 0; i < 6; i++) b.set(doc(db, "clues", `p002_${i}`), { receiverPid: "p002", idx: i, answer: A(i), ver: 0 });
     b.set(doc(db, "clues", "p002_6"), { receiverPid: "p002", idx: 6, answer: "가파트", ver: 0 }); // 파트 단서(배정 때 운영자 브라우저가 씀)
-    b.set(doc(db, "voteCards", "c0"), { reviews: [] });
     if (results) b.set(doc(db, "results", "public"), { pairs: [], tickets: {}, draws: {} });
     // p002(마니또) → p003(받는 사람): 1주차 미션이 인증돼 있고 피드에 글이 올라가 있다
     b.set(doc(db, "giverMissions", "p002"), { choices: { 1: { cardId: "e1", level: "easy", text: "쪽지" } }, done: { 1: true } });
@@ -218,13 +217,12 @@ describe("1. 참여자는 남의 assignments·giverCodes·codes·clues·deliveri
     await assertSucceeds(getDoc(doc(p("p001"), "public", "roster")));
   });
 
-  test("profiles·giverMissions·guesses·votes·users·reports·verdicts: 남의 것은 거부", async () => {
+  test("profiles·giverMissions·guesses·users·reports·verdicts: 남의 것은 거부", async () => {
     await put("reports/p003_1", { receiverPid: "p003", slot: 1 });
     await put("verdicts/p003_1", { receiverPid: "p003", slot: 1, verdict: "missing" });
     await assertFails(getDoc(doc(p("p002"), "profiles", "p001")));
     await assertFails(getDoc(doc(p("p002"), "giverMissions", "p001")));
     await assertFails(getDoc(doc(p("p002"), "guesses", "p001")));
-    await assertFails(getDoc(doc(p("p002"), "votes", "p001")));
     await assertFails(getDoc(doc(p("p002"), "users", "u1")));
     await assertFails(getDocs(collection(p("p002"), "guesses")));
     // 신고·확인 결과: 받는 사람(p003)과 그 사람의 마니또(p002)만
@@ -259,7 +257,6 @@ describe("1. 참여자는 남의 assignments·giverCodes·codes·clues·deliveri
     await assertFails(getDoc(doc(stranger, "feed", FEED_B1)));
     await assertFails(getDocs(collection(stranger, "nudges")));
     await setPhase(5);
-    await assertFails(getDocs(collection(stranger, "voteCards")));
     await assertFails(getDoc(doc(stranger, "results", "public")));
     // 설정(공지, 운영자 계정 번호·메모)도 못 읽는다. 연결 전에 필요한 것은 초대 코드 하나 확인뿐
     await assertFails(getDoc(doc(stranger, "config", "app")));
@@ -554,16 +551,22 @@ describe("4. 운영자(공동 운영자)는 참여하지 않는 계정: 명단�
     }
   });
 
-  test("쪽지·단서·프로필도 언제든 읽고(괴롭힘·거짓 단서 확인), 투표는 집계 단계부터", async () => {
-    for (const phase of [1, 2, 3]) {
+  test("쪽지·단서·프로필도 언제든 읽는다(괴롭힘·거짓 단서 확인)", async () => {
+    for (const phase of [1, 2, 3, 4]) {
       await setPhase(phase);
       await assertSucceeds(getDocs(collection(admin(), "deliveries")));
       await assertSucceeds(getDoc(doc(admin(), "clues", "p002_0")));
       await assertSucceeds(getDoc(doc(admin(), "profiles", "p001")));
-      await assertFails(getDocs(collection(admin(), "votes")));
     }
+  });
+
+  test("없앤 투표 경로(votes·voteCards·voteViews·cardOwners·adminEval)는 누구도 읽고 쓸 수 없다", async () => {
     await setPhase(4);
-    await assertSucceeds(getDocs(collection(admin(), "votes")));
+    for (const name of ["votes", "voteCards", "voteViews", "cardOwners", "adminEval"]) {
+      await assertFails(getDocs(collection(admin(), name)), name);
+      await assertFails(setDoc(doc(admin(), name, "x"), { a: 1 }), name);
+      await assertFails(setDoc(doc(p("p001"), name, "p001"), { a: 1 }), name);
+    }
   });
 
   test("운영자 계정은 명단에 연결할 수 없다 (초대 코드를 알아도)", async () => {
@@ -656,13 +659,13 @@ describe("4. 운영자(공동 운영자)는 참여하지 않는 계정: 명단�
   });
 });
 
-// ───────────────────────── 5. 미션 슬롯: 완료한 슬롯 잠금, 열린 주차까지만 ─────────────────────────
-describe("5. 미션 슬롯: 완료한 슬롯의 난이도는 못 바꾸고, 열린 주차까지만 고르고 완료한다", () => {
+// ───────────────────────── 5. 미션 슬롯: 완료한 슬롯 잠금, 지금 열린 주차만 ─────────────────────────
+describe("5. 미션 슬롯: 완료한 슬롯의 난이도는 못 바꾸고, 지금 열린 주차만 고르고 완료한다(지난 주차는 마감)", () => {
   const card = (level, id = level[0] + "1") => ({ cardId: id, level, text: `${level} 카드` });
   const praise = { cardId: "praise", level: "praise", text: "올해의 칭찬 한 줄" };
   const mine = () => doc(p("p001"), "giverMissions", "p001");
   const gm = (data) => setDoc(mine(), { ...data, n: N }, { merge: true });
-  beforeEach(() => seed({ week: 3 }));
+  beforeEach(() => seed({ week: 1 }));
 
   test("완료 전에는 고르기·다시 고르기가 된다 (MyMission.jsx choose / 다른 카드 고르기)", async () => {
     await assertSucceeds(gm({ choices: { 1: card("easy") } }));
@@ -689,7 +692,8 @@ describe("5. 미션 슬롯: 완료한 슬롯의 난이도는 못 바꾸고, 열�
     await assertFails(gm({ done: { 1: false } }));
     await assertFails(setDoc(mine(), { choices: {}, n: N })); // 덮어쓰기로 통째로 지우기
     await assertFails(updateDoc(mine(), { choices: deleteField(), n: N }));
-    // 완료하지 않은 다른 슬롯은 여전히 바꿀 수 있다
+    // 완료하지 않은 다른 슬롯은 그 주차가 열리면 바꿀 수 있다
+    await setPhase(1, { week: 2 });
     await assertSucceeds(gm({ choices: { 2: card("normal") } }));
   });
 
@@ -709,6 +713,7 @@ describe("5. 미션 슬롯: 완료한 슬롯의 난이도는 못 바꾸고, 열�
   });
 
   test("카드를 안 고른 채 코드가 인증된 슬롯에 나중에 도전 카드를 넣을 수 없다", async () => {
+    await setPhase(1, { week: 2 });
     await put("redemptions/A2A2", { receiverPid: "p002", slot: 2, review: review20, voided: false, feedId: feedIdOf("A2A2") });
     await assertFails(gm({ choices: { 2: card("hard") } })); // 문서가 없을 때(create)
     await put("giverMissions/p001", { choices: { 1: card("easy") } });
@@ -726,6 +731,7 @@ describe("5. 미션 슬롯: 완료한 슬롯의 난이도는 못 바꾸고, 열�
   const asDelivery = (c) => ({ level: c.level, text: c.text });
 
   test("3주차: 칭찬만, 또는 칭찬과 함께 보통·도전 카드(쉬움은 없음). 알림의 카드는 고른 카드와 같아야 한다", async () => {
+    await setPhase(1, { week: 3 });
     await assertFails(gm({ choices: { 3: card("easy") } })); // 3주차 쉬움 = 칭찬만
     await assertSucceeds(gm({ choices: { 3: card("hard") } }));
     await assertSucceeds(gm({ choices: { 3: null } }));
@@ -742,6 +748,7 @@ describe("5. 미션 슬롯: 완료한 슬롯의 난이도는 못 바꾸고, 열�
   });
 
   test("3주차: 칭찬만 보내기(예전과 같음), 코드가 먼저 인증된 뒤에는 도전 카드를 새로 넣을 수 없다", async () => {
+    await setPhase(1, { week: 3 });
     await assertSucceeds(sendMission(p("p001"), 3));
     await seed({ week: 3 });
     await put("redemptions/A3A3", { receiverPid: "p002", slot: 3, review: review20, voided: false, feedId: feedIdOf("A3A3") });
@@ -768,6 +775,20 @@ describe("5. 미션 슬롯: 완료한 슬롯의 난이도는 못 바꾸고, 열�
     // 운영자가 주차를 다시 내려도, 이미 해 둔 2주차는 그대로 둔 채 다른 값을 쓸 수 있다(쪽지 더 보내기)
     await setPhase(1, { week: 1 });
     await assertSucceeds(sendNote(p("p001"), 1, 1));
+  });
+
+  test("지난 주차는 마감: 다음 주차가 열리면 그 전 주차의 카드 고르기·완료 알리기가 거부된다(몰아서 하기 방지)", async () => {
+    await assertSucceeds(gm({ choices: { 1: card("easy") } })); // 1주차에 카드만 골라 두고 완료를 안 알림
+    await setPhase(1, { week: 2 });
+    await assertFails(gm({ choices: { 1: card("hard") } })); // 지난 주차 카드 바꾸기
+    await assertFails(gm({ choices: { 1: null } }));
+    await assertFails(sendMission(p("p001"), 1)); // 지난 주차 완료 알리기
+    await assertSucceeds(gm({ choices: { 2: card("normal") } })); // 지금 열린 주차는 된다
+    await assertSucceeds(sendMission(p("p001"), 2));
+    await setPhase(1, { week: 3 });
+    await assertFails(sendMission(p("p001"), 1));
+    await assertSucceeds(sendNote(p("p001"), 2, 1)); // 완료한 지난 주차의 쪽지 더 보내기는 된다(응모권과 무관)
+    await assertSucceeds(sendMission(p("p001"), 3)); // 3주차(칭찬)는 된다
   });
 
   test("미션 진행 단계가 아니면 카드 고르기·완료 표시가 거부된다", async () => {
@@ -1079,7 +1100,7 @@ describe("앱 흐름: 참여자 화면", () => {
     await assertSucceeds(sendMission(p("p001"), 3, { message: "올해 정말 고마웠어요" }));
   });
 
-  test("완료 알림은 내 대상에게만, 미션 진행 단계에만, 열린 주차까지만, 종류에 맞는 주차로만", async () => {
+  test("완료 알림은 내 대상에게만, 미션 진행 단계에만, 지금 열린 주차만, 종류에 맞는 주차로만", async () => {
     const db = p("p001");
     await assertFails(sendMission(db, 1, { receiverPid: "p003" }));
     await assertFails(sendMission(db, 1, { message: "가".repeat(501) }));
@@ -1089,9 +1110,11 @@ describe("앱 흐름: 참여자 화면", () => {
     await assertFails(sendMission(db, 1, { kind: "공지" }));
     await assertFails(sendMission(db, 1, { delivery: { slot: "1" } }));
     await assertFails(sendMission(db, 1, { delivery: { extra: "x" } }));
+    await setPhase(1, { week: 2 });
+    await assertSucceeds(sendMission(db, 2)); // 지금 열린 주차
     await setPhase(1, { week: 3 });
     await assertFails(sendMission(db, 3, { kind: "mission", choice: EASY, gm: { done: { 3: true }, n: N } })); // 3주차 알림은 칭찬(kind praise)으로만
-    await assertSucceeds(sendMission(db, 2));
+    await assertFails(sendMission(db, 1)); // 지난 주차(1주차)는 마감
     await setPhase(2, { week: 3 });
     await assertFails(sendMission(db, 1));
   });
@@ -1196,29 +1219,6 @@ describe("앱 흐름: 참여자 화면", () => {
     await assertFails(g("nobody")); // 명단에 없는 사람
     await assertFails(setDoc(doc(db, "guesses", "p002"), { guessPid: "p001", createdAt: new Date(2020, 0, 1), n: N }, { merge: true }));
     await assertFails(setDoc(doc(db, "guesses", "p001"), { guessPid: "p004", createdAt: serverTimestamp(), n: N }, { merge: true }));
-  });
-
-  test("투표 (Vote.jsx): 3단계에만, 3장까지, 내 파트의 '보이는 카드 목록'만 읽는다", async () => {
-    await put("voteCards/c1", { reviews: [review20] });
-    await put("voteViews/v-ga", { part: "가파트", cardIds: ["c1"] });
-    await put("voteViews/v-na", { part: "나파트", cardIds: ["c0"] });
-    const db = p("p001"); // 가파트
-    const vote = (cardIds) => setDoc(doc(db, "votes", "p001"), { cardIds, createdAt: serverTimestamp(), n: N }, { merge: true });
-    await assertFails(getDocs(collection(db, "voteCards")));
-    await setPhase(3);
-    await assertSucceeds(getDocs(collection(db, "voteCards")));
-    await assertSucceeds(getDocs(query(collection(db, "voteViews"), where("part", "==", "가파트"))));
-    await assertFails(getDocs(query(collection(db, "voteViews"), where("part", "==", "나파트")))); // 다른 파트가 어떤 카드를 못 보는지(= 카드 주인 파트)
-    await assertFails(getDocs(collection(db, "voteViews")));
-    await assertFails(getDoc(doc(db, "voteViews", "v-na")));
-    await assertSucceeds(getDoc(doc(db, "votes", "p001")));
-    await assertSucceeds(vote(["c1"]));
-    await assertFails(vote(["a", "b", "c", "d"]));
-    await assertFails(setDoc(doc(db, "votes", "p001"), { cardIds: ["c1"], createdAt: new Date(2020, 0, 1), n: N }, { merge: true }));
-    await assertFails(setDoc(doc(db, "votes", "p001"), { cardIds: ["c1"], createdAt: serverTimestamp() }, { merge: true })); // n 안 올림
-    await assertFails(getDocs(collection(db, "cardOwners")));
-    await setPhase(4);
-    await assertFails(vote(["c1"]));
   });
 
   test("결과는 5단계부터 참여자에게 보인다 (Reveal.jsx)", async () => {
@@ -1359,33 +1359,10 @@ describe("앱 흐름: 운영 화면", () => {
     await assertFails(deleteDoc(doc(db, "verdicts", "p002_3")));
   });
 
-  test("투표 단계: 투표 카드 만들기·운영진 평가 (Admin.jsx VotingAdmin)", async () => {
-    await seed({ phase: 3 });
-    const db = admin();
-    await assertSucceeds(getDocs(collection(db, "giverCodes")));
-    await assertSucceeds(getDocs(collection(db, "redemptions")));
-    await assertSucceeds(getDocs(collection(db, "roster"))); // 수상 대상이 아닌 마니또는 카드를 만들지 않는다
-    await assertSucceeds(getDocs(collection(db, "voteCards")));
-    await assertSucceeds(getDocs(collection(db, "voteViews")));
-    await assertSucceeds(getDocs(collection(db, "adminEval")));
-    await assertFails(setDoc(doc(db, "voteCards", "c1"), { reviews: [review20], part: "가파트" })); // 카드에 주인의 파트를 넣을 수 없다
-    const b = writeBatch(db);
-    b.set(doc(db, "voteCards", "c1"), { reviews: [review20] });
-    b.set(doc(db, "cardOwners", "c1"), { giverPid: "p001" });
-    b.set(doc(db, "voteViews", "v1"), { part: "나파트", cardIds: ["c1"] }); // 나파트 사람에게 보이는 카드(가파트 카드)
-    await assertSucceeds(b.commit());
-    const del = writeBatch(db);
-    del.delete(doc(db, "voteCards", "c1"));
-    del.delete(doc(db, "cardOwners", "c1"));
-    del.delete(doc(db, "voteViews", "v1"));
-    await assertSucceeds(del.commit());
-    await assertSucceeds(setDoc(doc(db, "adminEval", "c1"), { score: 7 }));
-  });
-
   test("집계 단계: 전부 읽고 결과 쓰기 (Admin.jsx Scoring)", async () => {
     await seed({ phase: 4 });
     const db = admin();
-    for (const name of ["assignments", "giverCodes", "redemptions", "giverMissions", "guesses", "votes", "cardOwners", "adminEval", "deliveries", "verdicts", "reports", "clues", "users"]) {
+    for (const name of ["assignments", "giverCodes", "redemptions", "giverMissions", "guesses", "deliveries", "verdicts", "reports", "clues", "users"]) {
       await assertSucceeds(getDocs(collection(db, name)), name);
     }
     await assertSucceeds(setDoc(doc(db, "results", "public"), { pairs: [], tickets: {}, draws: {}, computedAt: serverTimestamp() }));
