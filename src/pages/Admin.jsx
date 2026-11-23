@@ -15,6 +15,7 @@ import { angelQueue, angelQueueStatus, matchAngels, needyReceivers } from "../li
 import { GOLD_DRAW, PRIZES, TICKET_RULES as R } from "../config/prizes.js";
 import { drawGold, goldCandidates, goldCount, goldWeekClosed, isGoldChoice } from "../lib/gold.js";
 import { secureRandom } from "../lib/random.js";
+import { TITLES, computeTitles } from "../lib/titles.js";
 import { parseRosterLine, rosterSummary, sameSummary } from "../lib/roster.js";
 import InviteMail, { ProfileMail, ReminderMail } from "./InviteMail.jsx";
 import { AUTO_ITEMS, CLAIM_MS, autoPlan, localInputToMs, msToLocalInput, nextDue } from "../lib/schedule.js";
@@ -2280,7 +2281,21 @@ async function calcAll(roster, assignVer, { awards = true } = {}) {
     angelPid: a.angelPid, receiverPid, done: Object.values(angelGifts).filter((g) => g.receiverPid === receiverPid && g.confirmed).length,
     ...(volunteerOrder[a.angelPid] ? { order: volunteerOrder[a.angelPid] } : {}),
   })).filter((x) => x.done > 0);
-  const extras = { guesses: finalGuess, noticed, story, stats, bestReview: reviewRank[0] || null, reviewRank, tieBreak, angels: angelList };
+  // 송년회 칭호 4개(응모권과 무관, titles.js)와 황금 카드 커피 쿠폰 당첨자(운영 화면 "황금 카드 추첨"의 기록 meta/goldDraw에서 옮김).
+  // 당첨자는 추첨 기록 그대로 보인다(집계 뒤에 추첨했으면 다시 집계해야 발표 화면에 들어간다 — 집계 패널이 알려 준다).
+  const titles = computeTitles({
+    people,
+    assignments: assignMap,
+    giverCodes: Object.fromEntries(Object.entries(giverCodes).map(([g, c]) => [g, c.codes || {}])),
+    redemptions, missions,
+    deliveries: Object.values(deliveries),
+    midGuesses: Object.fromEntries(Object.entries(midGuesses).map(([r, m]) => [r, m.guesses || {}])),
+    tickets,
+  });
+  const goldRecord = awards ? await getDoc(doc(db, "meta", "goldDraw")).then((s) => (s.exists() ? s.data().weeks || {} : {})).catch(() => ({})) : {};
+  const goldWinners = Object.fromEntries(GOLD_DRAW.weeks.filter((w) => goldRecord[String(w)])
+    .map((w) => [String(w), goldRecord[String(w)].winners || []]));
+  const extras = { guesses: finalGuess, noticed, story, stats, bestReview: reviewRank[0] || null, reviewRank, tieBreak, angels: angelList, titles, goldWinners };
   return { assignments, deliveries, people, tickets, extras };
 }
 
@@ -2295,6 +2310,12 @@ function Scoring() {
   useEffect(() => {
     return onSnapshot(doc(db, "results", "public"), (s) => setResult(s.exists() ? s.data() : null));
   }, []);
+  // 황금 카드 추첨 기록: 집계 전에 추첨을 끝냈는지, 집계 뒤에 추첨해서 발표 화면에 아직 안 들어갔는지 알려 준다
+  const [goldRecord, setGoldRecord] = useState(null);
+  useEffect(() => onSnapshot(doc(db, "meta", "goldDraw"), (s) => setGoldRecord(s.exists() ? s.data().weeks || {} : {}), () => setGoldRecord(null)), []);
+  const goldMissing = goldRecord ? GOLD_DRAW.weeks.filter((w) => !goldRecord[String(w)]) : [];
+  const goldStale = Boolean(result && goldRecord) && GOLD_DRAW.weeks.some((w) =>
+    JSON.stringify(goldRecord[String(w)]?.winners || null) !== JSON.stringify(result.goldWinners?.[String(w)] || null));
 
   const [error, setError] = useState("");
   async function compute() {
@@ -2326,7 +2347,7 @@ function Scoring() {
       ticketDetail: tickets,
       partBoard: partStandings(people, tickets).map(({ part, members, done, max, winner }) => ({ part, members, done, max, winner })),
       praises,
-      ...extras, // 발표용: 최종 지목, 알아챈 주차, 마니또별 미션 이야기, 숫자, 공감 1위 후기
+      ...extras, // 발표용: 최종 지목, 알아챈 주차, 마니또별 미션 이야기, 숫자, 공감 1위 후기, 칭호, 황금 카드 당첨자
       draws: {},
       step: 0, // 발표 화면 진행. 참여자 결과 화면은 운영자가 넘긴 장면까지만 보인다
       computedAt: serverTimestamp(),
@@ -2356,6 +2377,17 @@ function Scoring() {
           {" "}시상은 공개 단계의 발표 화면에서 해요: 현장 숫자를 넣으면 {PRIZES.bestManito.label}(응모권 최다 {PRIZES.bestManito.count}명)와 {PRIZES.bestReview.label}이 정해지고,
           4·5등과 1등은 현장에서 종이로 뽑아 이름을 입력하고, 6등은 사이트가 뽑아요. 한 사람은 하나만 받아요(겹치면 큰 상).
         </p>
+        <p className="small">
+          송년회 칭호 {TITLES.map((t) => `${t.emoji} ${t.label}`).join(" · ")}(응모권과 무관, 기록으로 자동)와 황금 카드 커피 쿠폰 당첨자도 같이 저장해 발표 화면에 나와요.
+        </p>
+        {goldMissing.length > 0 && (
+          <p className="warn-text small" role="alert">
+            {goldMissing.join("·")}주차 황금 카드 추첨을 아직 안 했어요. 위 "황금 카드 추첨"에서 먼저 뽑고 집계하세요(추첨하지 않은 주차는 발표 화면에 안 나와요).
+          </p>
+        )}
+        {goldStale && goldMissing.length < GOLD_DRAW.weeks.length && (
+          <p className="warn-text small" role="alert">집계한 뒤에 황금 카드 추첨 결과가 바뀌었어요. 다시 집계해야 발표 화면에 들어가요.</p>
+        )}
         <div className="reveal-row">
           <button className="pk-btn main" onClick={compute} disabled={busy || !fullRoster}>{result ? "다시 집계" : "집계하기"}</button>
           {result && <button className="pk-btn sm" onClick={check} disabled={busy || !fullRoster}>검산(다시 계산해 비교)</button>}
@@ -2373,6 +2405,10 @@ function Scoring() {
             <li>{PRIZES.bestReview.label}: {result.bestReview
               ? `${nameOf(result.bestReview.receiverPid)} (♥ ${result.bestReview.likes ?? "-"}, 당사자 공감 제외) "${String(result.bestReview.review).slice(0, 40)}…"`
               : "공감을 받은 후기가 없어 수상자가 없어요"}{result.bestReview ? " — 이 사람이 1·2등을 받으면 다음으로 공감이 많은 후기가 받아요" : ""}</li>
+            <li>송년회 칭호: {(result.titles || []).map((t) => `${t.emoji} ${t.label} ${(t.winners || []).length
+              ? `${t.winners.map(nameOf).join(", ")}${t.value && t.unit ? `(${t.value}${t.unit})` : ""}` : "없음"}`).join(" · ") || "다시 집계하면 계산돼요"}</li>
+            <li>황금 카드 커피 쿠폰: {GOLD_DRAW.weeks.map((w) => `${w}주차 ${result.goldWinners?.[String(w)]
+              ? (result.goldWinners[String(w)].map(nameOf).join(", ") || "당첨자 없음") : "추첨 전"}`).join(" · ")}</li>
             <li>파트 대항전: {(result.partBoard || []).length
               ? result.partBoard.map((x) => `${x.part} ${x.done}/${x.max}${x.winner ? " (우승)" : ""}`).join(", ")
               : "파트가 입력되지 않아 없음"}</li>

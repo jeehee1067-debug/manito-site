@@ -3,15 +3,28 @@ import { doc, onSnapshot, runTransaction, updateDoc } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp, Loading } from "../App.jsx";
 import { LEVEL_LABEL, PHASE } from "../lib/constants.js";
-import { PRIZES, TICKET_RULES } from "../config/prizes.js";
+import { GOLD_DRAW, PRIZES, TICKET_RULES } from "../config/prizes.js";
 import { ONLINE_PRIZE, PAPER_TIERS, PRIZE_ORDER, drawOnline, resolvePrizes, verifyOnline } from "../lib/scoring.js";
 import { buildSlides, revealedUpTo } from "../lib/reveal.js";
+import { goldWinnerWeeks, shownTitles, titleValue } from "../lib/titles.js";
 import { Avatar, Dialogue, Panel } from "../ui.jsx";
 
 const resultRef = () => doc(db, "results", "public");
 const rankWord = (p) => p.label.split(" ")[0]; // "6등 응모권 추첨" → "6등"
 // 한 장면에 여러 사람이 나올 때 캐릭터 크기: 사람이 많아도 큰 화면 한 장에 다 들어가게 줄인다. 0이면 이름만 보인다.
 const crowdSize = (n) => (n <= 6 ? 110 : n <= 12 ? 84 : n <= 20 ? 64 : n <= 32 ? 48 : 0);
+// 여러 사람을 한 장면에: 사람 수에 맞춰 캐릭터를 줄이고, 아주 많으면 이름만(crowdSize가 0). size를 주면 그 크기로(두 줄을 같은 크기로 맞출 때)
+function Crowd({ pids, nameOf, size, className = "" }) {
+  const n = pids.length;
+  const px = size ?? crowdSize(n);
+  return (
+    <div className={`${n > 12 ? "pres-row dense" : "pres-row"} ${className}`.trim()}>
+      {pids.map((pid) => (
+        <span key={pid} className="pres-person">{px > 0 && <Avatar pid={pid} size={px} />}<b>{nameOf(pid)}</b></span>
+      ))}
+    </div>
+  );
+}
 const WALL_SPEED = 45; // 칭찬 벽이 흘러가는 빠르기(1초에 몇 px)
 
 // ── 시상·추첨(공개 단계, 발표 화면에서 진행) ─────────────────────────────────────
@@ -239,6 +252,19 @@ export default function Reveal() {
     ),
     shown.has("angels") && (r.angels || []).length > 0 && (
       <li key="angels"><strong>숨은 수호천사</strong> {r.angels.map((a) => `${nameOf(a.angelPid)} → ${nameOf(a.receiverPid)}`).join(", ")}</li>
+    ),
+    ...shownTitles(r).filter((t) => shown.has(`title_${t.key}`)).map((t) => (
+      <li key={`title_${t.key}`}>
+        <strong>{t.emoji} {t.label}</strong> {t.winners.map(nameOf).join(", ")}
+        <span className="small"> ({t.desc}{titleValue(t) ? ` · ${titleValue(t)}` : ""})</span>
+        {t.winners.includes(myPid) && <span className="small"> · 축하해요!</span>}
+      </li>
+    )),
+    shown.has("gold") && (
+      <li key="gold">
+        <strong>☕ 황금 카드 {GOLD_DRAW.prize}</strong> {goldWinnerWeeks(r).map((w) => `${w.week}주차 ${w.winners.map(nameOf).join(", ")}`).join(" · ")}
+        {goldWinnerWeeks(r).some((w) => w.winners.includes(myPid)) && <span className="small"> · 축하해요!</span>}
+      </li>
     ),
   ].filter(Boolean);
 
@@ -685,6 +711,41 @@ function Slide({ r, slide, nameOf, pairCount }) {
           <PraiseWall praises={r.praises || []} nameOf={nameOf} />
         </div>
       );
+    case "title": {
+      // 송년회 칭호(응모권과 무관, 집계 때 기록으로 정함 — titles.js). 칭호마다 한 장면
+      const t = shownTitles(r).find((x) => x.key === slide.key);
+      if (!t) return null;
+      return (
+        <div className={t.winners.length > 6 ? "pres-center wide" : "pres-center"}>
+          <p className="pres-kicker">송년회 칭호</p>
+          <h1 className="pres-title"><span className="pres-emoji pop" aria-hidden="true">{t.emoji}</span> {t.label}</h1>
+          <p className="pres-sub">{t.desc}</p>
+          <Crowd pids={t.winners} nameOf={nameOf} className="pop delay" />
+          {titleValue(t) && <p className="pres-badge ok delay2">{titleValue(t)}</p>}
+        </div>
+      );
+    }
+    case "gold": {
+      // 황금 카드 커피 쿠폰(주차마다 추첨, 운영 화면 "황금 카드 추첨"의 기록을 집계 때 옮겨 둔 것). 송년회에서 발표하며 전달
+      const weeks = goldWinnerWeeks(r);
+      // 주차를 나란히 놓고 캐릭터를 작게(노트북 1280×720에서도 한 장에 들어가게)
+      const size = Math.min(64, crowdSize(weeks.reduce((sum, w) => sum + w.winners.length, 0)));
+      return (
+        <div className="pres-center wide">
+          <p className="pres-kicker">✨ 황금 카드 추첨</p>
+          <h2 className="pres-h2">☕ {GOLD_DRAW.prize} 당첨!</h2>
+          <p className="pres-sub">황금 카드 미션을 해내고 대상이 "카드와 같아요"로 인증한 마니또 중에서 주마다 뽑았어요</p>
+          <div className="pres-groups">
+            {weeks.map((w, i) => (
+              <div key={w.week} className={i ? "pres-group pop delay" : "pres-group pop"}>
+                <p className="pres-kicker">{w.week}주차</p>
+                <Crowd pids={w.winners} nameOf={nameOf} size={size} />
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
     case "drawGo":
       return <DrawGoSlide r={r} />;
     case "paper":
