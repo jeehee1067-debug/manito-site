@@ -466,7 +466,7 @@ test("카드 뽑기: 두 장, 사람·주차마다 고정, 보통·도전은 비
       }
     }
   }
-  for (const [level, cards] of Object.entries(MISSION_CARDS)) assert.equal(seen[level].size, cards.length, `${level}: 54명·3주에 모든 카드가 한 번은 나온다`);
+  for (const [level, cards] of Object.entries(MISSION_CARDS)) assert.equal(seen[level].size, cards.filter((c) => !c.gold).length, `${level}: 54명·3주에 모든 카드가 한 번은 나온다(황금 카드는 따로)`);
   assert.ok(MISSION_CARDS.normal.some((c) => c.real && !c.cost), "보통에 돈이 안 드는 실물 카드가 있다");
   assert.ok(MISSION_CARDS.hard.some((c) => c.real && !c.cost), "도전에 돈이 안 드는 실물 카드가 있다");
   // 다른 주차에 고른 카드는 다시 나오지 않는다(비용 카드 한 장 + 무비용 한 장은 그대로)
@@ -482,6 +482,101 @@ test("카드 뽑기: 두 장, 사람·주차마다 고정, 보통·도전은 비
   }
   // 주차가 다르면 다른 카드가 나오는 사람이 있다(매주 같은 카드만 나오지 않는다)
   assert.ok(Array.from({ length: 54 }, (_, i) => `p${i + 1}`).some((p) => dealCards(p, 1, "normal")[0].id !== dealCards(p, 2, "normal")[0].id));
+});
+
+test("2주차 새 카드: 1주차에는 안 나오고, 2·3주차 쉬움·보통은 두 장 중 한 장이 새 카드, 황금 카드는 일반 도전 두 장에 안 나온다", async () => {
+  const { goldDeal } = await import("../src/lib/cards.js");
+  const { isNewCard } = await import("../src/lib/constants.js");
+  const fresh = Object.values(MISSION_CARDS).flat().filter((c) => (c.from || 1) >= 2 && !c.gold);
+  assert.deepEqual(fresh.map((c) => c.id), ["e7", "n11", "n12", "n13"]);
+  for (let i = 1; i <= 54; i++) {
+    for (const remote of [false, true]) {
+      for (const level of ["easy", "normal", "hard"]) {
+        const w1 = dealCards(`p${i}`, 1, level, remote);
+        assert.ok(w1.every((c) => (c.from || 1) === 1 && !c.gold), "1주차에는 새 카드·황금 카드가 없다");
+        for (const slot of [2, 3]) {
+          const hand = dealCards(`p${i}`, slot, level, remote);
+          assert.ok(hand.every((c) => !c.gold), "황금 카드는 일반 카드 두 장에 안 나온다");
+          if (level !== "hard") assert.equal(hand.filter((c) => isNewCard(c)).length, 1, `${level}: 두 장 중 한 장이 새 카드`);
+        }
+      }
+    }
+  }
+  // 2주차에 새 카드를 했으면 3주차에는 다른 새 카드(보통은 3장이라 남아 있다)
+  const w2 = dealCards("p1", 2, "normal").find((c) => isNewCard(c));
+  assert.ok(dealCards("p1", 3, "normal", false, [w2.id]).every((c) => c.id !== w2.id));
+  // 1주차에 나오는 두 장은 새 카드를 넣기 전과 같다(1주차는 11/24 12:00까지 열려 있다) — 새 카드가 목록에 없으므로 섞는 대상이 같다
+  assert.equal(dealCards("p1", 1, "easy").length, 2);
+  void goldDeal;
+});
+
+test("황금 카드: 도전 등급, 2주차부터, 두 장(돈 안 드는 것 + 드는 것), 다른 근무지는 원격 카드만", async () => {
+  const { goldDeal } = await import("../src/lib/cards.js");
+  const { isGoldCard } = await import("../src/lib/constants.js");
+  const gold = MISSION_CARDS.hard.filter((c) => c.gold);
+  assert.deepEqual(gold.map((c) => c.id), ["h14", "h15", "h16"]);
+  assert.ok(gold.every((c) => c.real && (c.from || 1) >= 2), "모두 실물, 2주차부터");
+  assert.ok(Object.entries(MISSION_CARDS).every(([lv, cards]) => lv === "hard" || cards.every((c) => !c.gold)), "황금 카드는 도전에만");
+  for (let i = 1; i <= 54; i++) {
+    assert.deepEqual(goldDeal(`p${i}`, 1), [], "1주차에는 없다");
+    for (const slot of [2, 3]) {
+      for (const remote of [false, true]) {
+        const hand = goldDeal(`p${i}`, slot, remote);
+        assert.equal(hand.length, 2);
+        assert.ok(hand.every((c) => c.gold && c.level === "hard" && isGoldCard(c)));
+        assert.equal(hand.filter((c) => c.cost).length, 1, "돈이 드는 것 한 장");
+        assert.equal(hand.filter((c) => !c.cost).length, 1, "돈이 안 드는 것 한 장(돈을 안 써도 같은 추첨 기회)");
+        if (remote) assert.ok(hand.every((c) => c.remote), "다른 근무지면 원격 카드만");
+        else assert.ok(hand.every((c) => !c.remoteOnly), "같은 근무지에는 다른 근무지용(공범 카페)이 안 나온다");
+        assert.deepEqual(goldDeal(`p${i}`, slot, remote), hand, "다시 불러도 같은 카드");
+      }
+    }
+  }
+  // 완료 알림에는 번호가 없어서 글로도 찾는다
+  assert.ok(isGoldCard({ level: "hard", text: gold[0].text }));
+  assert.ok(!isGoldCard({ level: "hard", text: MISSION_CARDS.hard[0].text }));
+});
+
+test("황금 카드 추첨: 황금 카드를 완료하고 대상이 '카드와 같아요'로 인증한 마니또만, 앞 주 당첨자 제외, 남은 자리는 다음 주로", async () => {
+  const { goldCandidates, goldCount, drawGold, goldWeekClosed } = await import("../src/lib/gold.js");
+  const { GOLD_DRAW } = await import("../src/config/prizes.js");
+  const gold = { cardId: "h14", level: "hard", text: "x" }, plain = { cardId: "h1", level: "hard", text: "y" };
+  const roster = ["p1", "p2", "p3", "p4", "p5", "p6", "p7"].map((pid) => ({ pid, uid: `u${pid}` }));
+  roster.push({ pid: "p8" }); // 가입 안 함
+  roster.find((r) => r.pid === "p6").dropout = true;
+  roster.find((r) => r.pid === "p7").disqualified = true;
+  const missions = {
+    p1: { choices: { 2: gold }, done: { 2: true } }, // 대상: 인증·카드 같음
+    p2: { choices: { 2: gold }, done: { 2: true } }, // 인증했지만 카드와 다름
+    p3: { choices: { 2: gold }, done: { 2: true } }, // 아직 인증 안 됨
+    p4: { choices: { 2: plain }, done: { 2: true } }, // 일반 도전
+    p5: { choices: { 2: gold } }, // 완료를 안 알림
+    p6: { choices: { 2: gold }, done: { 2: true } }, // 중도 이탈
+    p7: { choices: { 2: gold }, done: { 2: true } }, // 수상 제외
+    p8: { choices: { 2: gold }, done: { 2: true } },
+  };
+  const giverCodes = Object.fromEntries(Object.keys(missions).map((pid) => [pid, { codes: { 2: `C${pid}` } }]));
+  const redemptions = { Cp1: { cardMatch: true }, Cp2: { cardMatch: false }, Cp4: { cardMatch: true }, Cp5: { cardMatch: true }, Cp6: { cardMatch: true }, Cp7: { cardMatch: true }, Cp8: { cardMatch: true } };
+  assert.deepEqual(goldCandidates({ week: 2, missions, giverCodes, redemptions, roster }), ["p1"]);
+  assert.deepEqual(goldCandidates({ week: 2, missions, giverCodes, redemptions: { ...redemptions, Cp1: { cardMatch: true, voided: true } }, roster }), [], "무효 처리된 인증은 빠진다");
+  assert.deepEqual(goldCandidates({ week: 2, missions, giverCodes, redemptions, roster, exclude: ["p1"] }), [], "앞 주 당첨자는 빠진다");
+  // 몇 명
+  assert.equal(GOLD_DRAW.perWeek, 5);
+  assert.equal(goldCount(2, {}), 5);
+  assert.equal(goldCount(3, {}), 5, "앞 주 추첨이 없으면 넘기는 자리 없음");
+  assert.equal(goldCount(3, { 2: { winners: ["a", "b"] } }), 8, "2주차에 2명만 뽑혔으면 3주차는 5 + 3");
+  assert.equal(goldCount(3, { 2: { winners: ["a", "b", "c", "d", "e"] } }), 5);
+  // 뽑기: 같은 숫자면 같은 결과, 대상 순서와 무관, 대상보다 많이 뽑지 않는다
+  const c = ["p3", "p1", "p9", "p4", "p2", "p7", "p8"];
+  assert.deepEqual(drawGold(c, 5, "123"), drawGold([...c].reverse(), 5, "123"));
+  assert.equal(new Set(drawGold(c, 5, "123")).size, 5);
+  assert.deepEqual(drawGold(["p2", "p1"], 5, "1").sort(), ["p1", "p2"]);
+  assert.ok(Array.from({ length: 20 }, (_, k) => drawGold(c, 1, String(k))[0]).some((x) => x !== drawGold(c, 1, "0")[0]), "숫자가 다르면 결과가 달라진다");
+  // 그 주가 끝났는지
+  assert.equal(goldWeekClosed(2, { phase: 1, week: 2 }), false);
+  assert.equal(goldWeekClosed(2, { phase: 1, week: 3 }), true);
+  assert.equal(goldWeekClosed(3, { phase: 1, week: 3 }), false);
+  assert.equal(goldWeekClosed(3, { phase: 2, week: 3 }), true);
 });
 
 test("파트 대항전: 완수율 1위 파트원에게 +1, 내 미션이 0건이면 없음, 불참자는 인원에서 빼고 0장", () => {

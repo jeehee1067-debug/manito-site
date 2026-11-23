@@ -1916,3 +1916,40 @@ describe("보안 점검에서 막은 것: 위조·권한 넘기", () => {
     await assertSucceeds(updateDoc(doc(p("p001"), "users", "u1"), { eliminated: ["p003", "p004"], n: N }));
   });
 });
+
+// ───────────────────────── 황금 카드 추첨(사용자가 정함, 11/23) ─────────────────────────
+describe("황금 카드 추첨: 당첨은 운영자만 쓰고, 당첨된 본인과 운영자만 읽는다", () => {
+  beforeEach(() => seed({ phase: 1, week: 3 }));
+
+  test("운영자의 추첨(Admin.jsx GoldDraw): meta/goldDraw·public/goldDraw·goldWins를 한 번에", async () => {
+    const db = admin();
+    await assertSucceeds(runTransaction(db, async (tx) => {
+      tx.set(doc(db, "meta", "goldDraw"), { weeks: { 2: { at: serverTimestamp(), seed: "000000001", count: 5, candidates: ["p003"], winners: ["p003"] } } }, { merge: true });
+      tx.set(doc(db, "public", "goldDraw"), { weeks: { 2: { at: serverTimestamp(), candidates: 1, winners: 1 } } }, { merge: true });
+      tx.set(doc(db, "goldWins", "p003"), { weeks: { 2: true }, at: serverTimestamp() }, { merge: true });
+    }));
+    // 3주차에도 뽑히면 칸이 늘어난다
+    await assertSucceeds(setDoc(doc(db, "goldWins", "p003"), { weeks: { 3: true }, at: serverTimestamp() }, { merge: true }));
+    await assertFails(setDoc(doc(db, "goldWins", "p004"), { weeks: { 4: true }, at: serverTimestamp() })); // 없는 주차
+    await assertFails(setDoc(doc(db, "goldWins", "p004"), { weeks: { 2: "yes" }, at: serverTimestamp() }));
+    await assertFails(setDoc(doc(db, "goldWins", "p004"), { weeks: { 2: true }, at: new Date(2026, 10, 1) })); // 시각 지어내기
+    await assertFails(setDoc(doc(db, "goldWins", "p004"), { weeks: { 2: true }, at: serverTimestamp(), prize: "x" }));
+  });
+
+  test("당첨 확인: 본인만 자기 문서를 읽고(없어도 확인 가능), 남의 당첨·목록·추첨 기록은 못 읽고, 쓰지도 못한다", async () => {
+    await put("goldWins/p003", { weeks: { 2: true }, at: new Date(2026, 11, 1) });
+    await put("meta/goldDraw", { weeks: { 2: { winners: ["p003"], candidates: ["p003"], seed: "1", count: 5 } } });
+    await put("public/goldDraw", { weeks: { 2: { candidates: 1, winners: 1 } } });
+    await assertSucceeds(getDoc(doc(p("p003"), "goldWins", "p003")));
+    await assertSucceeds(getDoc(doc(p("p004"), "goldWins", "p004"))); // 안 뽑힌 사람도 자기 것은 확인(없음)
+    await assertFails(getDoc(doc(p("p004"), "goldWins", "p003"))); // 남의 당첨
+    await assertFails(getDoc(doc(p("p002"), "goldWins", "p003"))); // p003의 마니또여도
+    await assertFails(getDocs(collection(p("p003"), "goldWins")));
+    await assertFails(getDoc(doc(p("p003"), "meta", "goldDraw")));
+    await assertSucceeds(getDoc(doc(p("p004"), "public", "goldDraw"))); // 추첨 여부·인원 수만
+    await assertFails(setDoc(doc(p("p003"), "goldWins", "p003"), { weeks: { 3: true }, at: serverTimestamp() }));
+    await assertFails(setDoc(doc(p("p004"), "goldWins", "p004"), { weeks: { 2: true }, at: serverTimestamp() }));
+    await assertFails(setDoc(doc(p("p003"), "public", "goldDraw"), { weeks: {} }));
+    await assertSucceeds(getDoc(doc(admin(), "goldWins", "p003")));
+  });
+});

@@ -2,12 +2,13 @@ import { useEffect, useState } from "react";
 import { collection, doc, getDoc, increment, onSnapshot, query, serverTimestamp, setDoc, where, writeBatch } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp, Loading } from "../App.jsx";
-import { CARD_HOW, cardHow, DROP_TIP, DROP_TIP_SHORT, EXTRA_NOTES_MAX, FIRST_CLUE_DATE, PROFILE_DUE, shortDate, LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT, SCHEDULE, SPEND_GUIDE_WON, scheduleLabel, todayYmd, weekDeadline, deadlinePassed } from "../lib/constants.js";
-import { DEAL_COUNT, dealCards } from "../lib/cards.js";
+import { CARD_HOW, cardHow, DROP_TIP, DROP_TIP_SHORT, EXTRA_NOTES_MAX, FIRST_CLUE_DATE, PROFILE_DUE, shortDate, LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT, SCHEDULE, SPEND_GUIDE_WON, scheduleLabel, todayYmd, weekDeadline, deadlinePassed, isGoldCard, isNewCard } from "../lib/constants.js";
+import { DEAL_COUNT, dealCards, goldDeal } from "../lib/cards.js";
+import { isGoldChoice } from "../lib/gold.js";
 import { syncClues } from "../lib/sync.js";
 import { Avatar, Dialogue, Giver, HowTag, Panel, RoleNote, Target } from "../ui.jsx";
 import { Icon } from "../icons.jsx";
-import { TICKET_RULES } from "../config/prizes.js";
+import { GOLD_DRAW, TICKET_RULES } from "../config/prizes.js";
 import { cardCost, cardLevel } from "../lib/scoring.js";
 import { bump } from "../lib/writes.js";
 
@@ -20,13 +21,14 @@ const isCostCard = (cardId) => Boolean(ALL_CARDS.find((c) => c.id === cardId)?.c
 const isRealCard = (cardId) => Boolean(ALL_CARDS.find((c) => c.id === cardId)?.real);
 
 // 난이도 고르기 화면에 적는 한 줄 설명(규칙 탭 "미션 카드 난이도"와 같은 기준)
-const LEVEL_HINT = { easy: "사이트 쪽지 한 통", normal: "공들여 지어 쓰는 쪽지, 또는 간단한 실물", hard: "직접 만든 것 · 선물 · 3일 연속 · 알아내 맞히기" };
+const LEVEL_HINT = { easy: "사이트 쪽지 한 통", normal: "공들여 지어 쓰는 쪽지, 또는 간단한 실물", hard: "직접 만든 것 · 선물 · 3일 연속 · 알아내 맞히기", gold: `특별 도전 미션 · 매주 ${GOLD_DRAW.perWeek}명 추첨으로 ${GOLD_DRAW.prize}` };
 // 3주차: 칭찬 한 줄은 모두 보내고, 원하면 보통·도전 카드를 하나 더 한다("칭찬만"이 쉬움 몫. 보안 규칙도 같은 세 가지만 받는다)
 const PRAISE_LEVELS = ["praise", "normal", "hard"];
 const PRAISE_CARD = { cardId: "praise", level: "praise", text: "올해의 칭찬 한 줄" };
-const PRAISE_HINT = { praise: "올해의 칭찬 한 줄만 보내기", normal: "칭찬 한 줄 + 보통 카드 미션", hard: "칭찬 한 줄 + 도전 카드 미션" };
-const levelLabel = (lv) => (lv === "praise" ? "칭찬만" : LEVEL_LABEL[lv]);
-const starLevel = (lv) => (lv === "praise" ? "easy" : lv);
+const PRAISE_HINT = { praise: "올해의 칭찬 한 줄만 보내기", normal: "칭찬 한 줄 + 보통 카드 미션", hard: "칭찬 한 줄 + 도전 카드 미션", gold: `칭찬 한 줄 + 황금 카드 미션 · ${GOLD_DRAW.prize} 추첨` };
+// 황금 카드(사용자가 정함, 11/23): 2·3주차에 난이도 칸 옆에 따로 하나 더. 등급은 도전(응모권도 도전과 같다)이고, 고르면 황금 카드 두 장(lib/cards.js goldDeal)
+const levelLabel = (lv) => (lv === "praise" ? "칭찬만" : lv === "gold" ? "✨ 황금 카드" : LEVEL_LABEL[lv]);
+const starLevel = (lv) => (lv === "praise" ? "easy" : lv === "gold" ? "hard" : lv);
 const stars = (lv) => {
   const k = LEVELS.indexOf(starLevel(lv));
   return <span className="card-stars" aria-hidden="true">{"★".repeat(k + 1)}<i>{"★".repeat(2 - k)}</i></span>;
@@ -238,6 +240,33 @@ export default function MyMission({ active = true }) {
 }
 
 // 카드 방법 안내: 카드마다 붙는 "사이트 쪽지"·"실물 전달" 표시가 무슨 뜻인지(난이도 고르기·카드 두 장 화면)
+// 황금 카드 추첨 결과(사용자가 정함, 11/23: "그 주가 끝나면 뽑힌 마니또가 본인이 받았음을 확인할 수만 있게").
+// 추첨은 그 주가 끝난 뒤 운영 화면에서 한다(public/goldDraw에 주차별 추첨 여부와 인원 수만, 누가 뽑혔는지는 goldWins/{나} — 나와 운영자만 읽는다).
+// 황금 카드를 완료한 주차에만 이 조각이 있어서, 그 사람만 읽는다(문서 2건).
+function GoldResult({ slot, myPid }) {
+  const [draw, setDraw] = useState(undefined);
+  const [mine, setMine] = useState(undefined);
+  useEffect(() => onSnapshot(doc(db, "public", "goldDraw"), (s) => setDraw(s.exists() ? s.data().weeks?.[slot] || null : null), () => setDraw(null)), [slot]);
+  useEffect(() => onSnapshot(doc(db, "goldWins", myPid), (s) => setMine(s.exists() ? s.data().weeks || {} : {}), () => setMine({})), [myPid]);
+  if (draw === undefined || mine === undefined) return null;
+  if (!draw) {
+    return (
+      <p className="small gold-line">
+        ✨ 황금 카드 추첨은 {slot}주차가 끝난 뒤에 해요. 내 대상이 인증하면서 "카드와 같아요"를 확인해야 추첨 대상이 돼요.
+      </p>
+    );
+  }
+  if (mine[slot] === true) {
+    return (
+      <Dialogue speaker="✨ 황금 카드 추첨" tone="gold">
+        <p><b>{slot}주차 황금 카드 추첨에 뽑혔어요!</b> {GOLD_DRAW.prize}은 송년회에서 발표하면서 드려요.</p>
+        <p className="small">황금 카드를 한 마니또라는 게 알려지면 정체가 드러날 수 있으니, 송년회 전까지는 비밀로 해 주세요.</p>
+      </Dialogue>
+    );
+  }
+  return <p className="small gold-line">✨ {slot}주차 황금 카드 추첨이 끝났어요. 이번 주에는 뽑히지 않았어요.</p>;
+}
+
 function HowGuide() {
   return (
     <p className="small how-guide">
@@ -335,8 +364,10 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
   const praiseOnly = isPraise && !hasCard && (level === "praise" || choice?.level === "praise");
   const how = hasCard ? cardHow(choice) : null; // "site" 사이트 쪽지로 끝나는 카드 / "real" 실물을 전달하는 카드
   const picking = open && !done && !hasCard && !praiseOnly;
-  const levels = isPraise ? PRAISE_LEVELS : LEVELS;
+  const levels = (isPraise ? PRAISE_LEVELS : LEVELS).concat(slot >= 2 ? ["gold"] : []);
   const hint = (lv) => (isPraise ? PRAISE_HINT[lv] : LEVEL_HINT[lv]);
+  const dealt = level === "gold" ? goldDeal(myPid, slot, remote, taken) : level && level !== "praise" ? dealCards(myPid, slot, level, remote, taken) : [];
+  const isGold = hasCard && isGoldCard(choice);
 
   return (
     <Panel title={title + (done ? " ✔" : "")} className={open || done ? "" : "locked"}>
@@ -370,11 +401,11 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
               <HowGuide />
               <div className="cards">
                 {levels.map((lv) => (
-                  <button key={lv} type="button" className={`card level-pick level-${starLevel(lv)}`} onClick={() => setLevel(lv)}>
+                  <button key={lv} type="button" className={`card level-pick level-${starLevel(lv)}${lv === "gold" ? " is-gold" : ""}`} onClick={() => setLevel(lv)}>
                     <span className="card-head">
                       <span className="card-level">{levelLabel(lv)}</span>
                       {stars(lv)}
-                      <span className="card-reward">응모권 +{1 + (TICKET_RULES.cardBonus[lv] || 0)}</span>
+                      <span className="card-reward">응모권 +{1 + (TICKET_RULES.cardBonus[starLevel(lv)] || 0)}</span>
                     </span>
                     <span className="card-text">{hint(lv)}</span>
                   </button>
@@ -386,22 +417,30 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
           {level && level !== "praise" && (
             <>
               <p className="small">
-                이번 주 {LEVEL_LABEL[level]} 카드예요. 하나를 골라 주세요. 카드는 사람·주차마다 다르게 나오고, 다시 뽑을 수는 없어요.
+                이번 주 {level === "gold" ? "✨ 황금" : LEVEL_LABEL[level]} 카드예요. 하나를 골라 주세요. 카드는 사람·주차마다 다르게 나오고, 다시 뽑을 수는 없어요.
                 {isPraise && " 칭찬 한 줄은 카드와 함께 보내요."}
+                {level !== "gold" && slot >= 2 && dealt.some((c) => isNewCard(c)) && " NEW 표시는 2주차부터 들어온 새 카드예요."}
               </p>
+              {level === "gold" && (
+                <p className="small gold-line">
+                  <b>✨ 황금 카드</b>는 특별 도전 미션이에요(응모권은 도전과 같아요). {slot}주차가 끝나면, 황금 카드를 하고 내 <Target />이 인증하면서 "카드와 같아요"를 확인한 마니또 중
+                  {" "}{GOLD_DRAW.perWeek}명을 뽑아 {GOLD_DRAW.prize}을 드려요(송년회에서 발표하며 전달). 뽑혔는지는 추첨 뒤 이 화면에서 나만 볼 수 있어요.
+                </p>
+              )}
               <p className="small">
                 <span className="cost-tag">소액 비용</span> 표시는 간식·음료처럼 내 돈이 드는 카드예요. 건당 {SPEND_GUIDE_WON.toLocaleString()}원 이하를 권장해요.
                 비용 카드 미션이 인증되면 응모권 {TICKET_RULES.costBonus}장을 더 받아요(3주 동안 한 번만. 여러 번 해도 {TICKET_RULES.costBonus}장이에요).
-                {dealCards(myPid, slot, level, remote, taken).some((c) => c.cost) && " 두 장 중 한 장은 돈이 드는 카드, 한 장은 돈이 안 드는 카드예요."}
+                {dealt.some((c) => c.cost) && " 두 장 중 한 장은 돈이 드는 카드, 한 장은 돈이 안 드는 카드예요."}
               </p>
-              {dealCards(myPid, slot, level, remote, taken).some((c) => c.real) && <p className="tip-line"><span className="tip-tag">꿀팁</span>{DROP_TIP_SHORT}</p>}
+              {dealt.some((c) => c.real) && <p className="tip-line"><span className="tip-tag">꿀팁</span>{DROP_TIP_SHORT}</p>}
               <HowGuide />
               <div className="cards dealt">
-                {dealCards(myPid, slot, level, remote, taken).map((c) => (
-                  <button key={c.id} type="button" className={`card level-${c.level}`} onClick={() => choose(c)}>
+                {dealt.map((c) => (
+                  <button key={c.id} type="button" className={`card level-${c.level}${c.gold ? " is-gold" : ""}`} onClick={() => choose(c)}>
                     <span className="card-head">
-                      <span className="card-level">{LEVEL_LABEL[c.level]}</span>
+                      <span className="card-level">{c.gold ? "✨ 황금" : LEVEL_LABEL[c.level]}</span>
                       {stars(c.level)}
+                      {!c.gold && isNewCard(c) && <span className="new-tag">NEW</span>}
                       {c.cost && <span className="cost-tag">소액 비용</span>}
                       <span className="card-reward">응모권 +{1 + (TICKET_RULES.cardBonus[c.level] || 0)}</span>
                     </span>
@@ -425,8 +464,9 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
             </p>
           )}
           {hasCard && (
-            <div className="chosen">
+            <div className={`chosen${isGold ? " is-gold" : ""}`}>
               <span className={`badge level-${choice.level}`}>{LEVEL_LABEL[choice.level]}</span>
+              {isGold && <span className="gold-tag">✨ 황금 카드</span>}
               <HowTag card={choice} />
               <span className="chosen-text">{choice.text}</span>
               {isCostCard(choice.cardId) && <span className="cost-tag">소액 비용 · {SPEND_GUIDE_WON.toLocaleString()}원 이하 권장</span>}
@@ -491,12 +531,14 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
       {done && (
         <div className="stack tight">
           {choice?.text && (
-            <div className="chosen">
+            <div className={`chosen${isGold ? " is-gold" : ""}`}>
               {choice.level !== "praise" && <span className={`badge level-${choice.level}`}>{LEVEL_LABEL[choice.level]}</span>}
+              {isGold && <span className="gold-tag">✨ 황금 카드</span>}
               <HowTag card={choice} />
               <span className="chosen-text">{choice.text}</span>
             </div>
           )}
+          {isGoldChoice(choice) && <GoldResult slot={slot} myPid={myPid} />}
           <p className={redeemed && !redeemed.voided ? "note" : "small"}>
             {redeemed
               ? redeemed.voided

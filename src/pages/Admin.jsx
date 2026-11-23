@@ -12,7 +12,9 @@ import { SLOT_STATUS_LABEL, assignmentHealth, cardPicks, clueAnswers, codeProble
 import { assignManito, assignmentMemo, generateCodes, makeInviteCode, previewAssignments } from "../lib/assign.js";
 import { computeTickets, missionLikes, noticedWeeks, partStandings, rankReviews, reviewLikes, weeklyPartBoard } from "../lib/scoring.js";
 import { angelQueue, angelQueueStatus, matchAngels, needyReceivers } from "../lib/angels.js";
-import { PRIZES, TICKET_RULES as R } from "../config/prizes.js";
+import { GOLD_DRAW, PRIZES, TICKET_RULES as R } from "../config/prizes.js";
+import { drawGold, goldCandidates, goldCount, goldWeekClosed, isGoldChoice } from "../lib/gold.js";
+import { secureRandom } from "../lib/random.js";
 import { parseRosterLine, rosterSummary, sameSummary } from "../lib/roster.js";
 import InviteMail, { ProfileMail, ReminderMail } from "./InviteMail.jsx";
 import { AUTO_ITEMS, CLAIM_MS, autoPlan, localInputToMs, msToLocalInput, nextDue } from "../lib/schedule.js";
@@ -307,6 +309,7 @@ function AdminFull() {
       {phase >= PHASE.RUNNING && <Angels />}
       <Pairs />
       {phase >= PHASE.RUNNING && <CardPicks />}
+      {phase >= PHASE.RUNNING && <GoldDraw />}
       {phase >= PHASE.RUNNING && phase <= PHASE.SCORING && <Moderation />}
       {phase === PHASE.SCORING && <Scoring />}
       {phase >= PHASE.RUNNING && <Accounts />}
@@ -1993,6 +1996,91 @@ function Pairs() {
 
 // 고른 미션 카드(사용자가 정함: "실제 어떤 카드를 각자 뽑아서 하고 있는지 내가 보게"). 짝 현황과 같은 자료(usePairs)를 쓴다.
 // 카드별 인원(이름 없음)은 바로 보이고, 누가 어떤 카드를 골랐는지는 "사람별 보기"를 눌러야 보인다(사무실에서 화면이 보일 수 있어서).
+// 황금 카드 추첨(사용자가 정함, 11/23): 그 주가 끝나면(2주차는 3주차가 열린 뒤, 3주차는 미션 마감 뒤) 운영자가 누른다.
+// 대상: 그 주에 황금 카드를 골라 완료를 알렸고 대상이 "카드와 같아요"로 인증한 마니또(lib/gold.js). 같은 확률로 GOLD_DRAW.perWeek명,
+// 앞 주 당첨자는 빼고, 앞 주에 남은 자리는 넘긴다. 한 번만(트랜잭션으로 확인). 기록은 meta/goldDraw(운영자만: 대상·당첨자·숫자),
+// 참여자에게는 public/goldDraw(주차별 추첨 여부·인원 수만)와 goldWins/{당첨자}(본인만 읽음). 당첨자 이름은 송년회 전까지 공개하지 않는다.
+function GoldDraw() {
+  const { config, nameOf } = useApp();
+  const roster = useFullRoster();
+  const missions = useColl("giverMissions");
+  const giverCodes = useColl("giverCodes");
+  const redemptions = useColl("redemptions");
+  const [record, setRecord] = useState(undefined);
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => onSnapshot(doc(db, "meta", "goldDraw"), (s) => setRecord(s.exists() ? s.data().weeks || {} : {}), () => setRecord({})), []);
+  if (!roster || !missions || !giverCodes || !redemptions || record === undefined) return null;
+
+  const names = (pids) => pids.map(nameOf).join(", ") || "없음";
+  const rows = GOLD_DRAW.weeks.map((w) => {
+    const done = record[String(w)] || null;
+    const exclude = GOLD_DRAW.weeks.filter((x) => x < w).flatMap((x) => record[String(x)]?.winners || []);
+    const candidates = goldCandidates({ week: w, missions, giverCodes, redemptions, roster, exclude });
+    const chose = Object.entries(missions).filter(([, m]) => isGoldChoice(m.choices?.[String(w)])).map(([pid]) => pid);
+    const completed = chose.filter((pid) => missions[pid].done?.[String(w)] === true);
+    const prevDone = GOLD_DRAW.weeks.filter((x) => x < w).every((x) => record[String(x)]);
+    return { w, done, candidates, chose, completed, count: goldCount(w, record), closed: goldWeekClosed(w, config), prevDone };
+  });
+
+  async function run(row) {
+    setMsg("");
+    if (!window.confirm(`${row.w}주차 황금 카드 추첨을 할까요?\n\n추첨 대상 ${row.candidates.length}명(황금 카드를 하고 대상이 "카드와 같아요"로 인증한 마니또) 중 ${Math.min(row.count, row.candidates.length)}명을 뽑아요.\n대상의 인증이 아직 안 온 마니또는 빠져요. 한 번만 할 수 있어요.`)) return;
+    setBusy(true);
+    try {
+      await runTransaction(db, async (tx) => {
+        const ref = doc(db, "meta", "goldDraw");
+        const cur = await tx.get(ref);
+        const weeks = cur.exists() ? cur.data().weeks || {} : {};
+        if (weeks[String(row.w)]) throw new Error("already");
+        const seed = String(Math.floor(secureRandom() * 1e9)).padStart(9, "0");
+        const winners = drawGold(row.candidates, row.count, seed);
+        tx.set(ref, { weeks: { [row.w]: { at: serverTimestamp(), seed, count: row.count, candidates: row.candidates, winners } } }, { merge: true });
+        tx.set(doc(db, "public", "goldDraw"), { weeks: { [row.w]: { at: serverTimestamp(), candidates: row.candidates.length, winners: winners.length } } }, { merge: true });
+        for (const pid of winners) tx.set(doc(db, "goldWins", pid), { weeks: { [row.w]: true }, at: serverTimestamp() }, { merge: true });
+      });
+      setMsg(`${row.w}주차 추첨을 마쳤어요. 뽑힌 마니또는 자기 내 미션 화면에서 확인할 수 있어요.`);
+    } catch (e) {
+      setMsg(e.message === "already" ? "이미 추첨한 주차예요." : "추첨하지 못했어요. 잠시 뒤 다시 눌러 주세요. 계속 안 되면 콘솔의 보안 규칙이 최신인지 확인해 주세요.");
+    }
+    setBusy(false);
+  }
+
+  return (
+    <Panel title="황금 카드 추첨">
+      <p className="small">
+        주차가 끝나면(2주차는 3주차가 열린 뒤, 3주차는 미션 마감 뒤) 누르세요. 그 주에 황금 카드를 하고 대상이 "카드와 같아요"로 인증한 마니또 중
+        {" "}{GOLD_DRAW.perWeek}명을 같은 확률로 뽑아요({GOLD_DRAW.prize}, 송년회에서 발표하며 전달). 2주차 당첨자는 3주차 추첨에서 빠지고, 대상이 {GOLD_DRAW.perWeek}명보다 적으면 남은 자리는 다음 주로 넘어가요.
+        누르는 시점까지 인증된 것만 세니, 대상의 인증을 하루 이틀 기다렸다 눌러도 돼요.
+      </p>
+      <p className="small warn-text">당첨자 이름은 송년회 전까지 알리지 마세요. 황금 카드를 받은 대상이 당첨자 명단으로 자기 마니또를 좁힐 수 있어요. 당첨자는 자기 화면에서만 확인해요.</p>
+      <ul className="plain">
+        {rows.map((row) => (
+          <li key={row.w} className="row-item">
+            <p><b>{row.w}주차</b> · 황금 카드 고름 {row.chose.length}명 · 완료 {row.completed.length}명 · 추첨 대상 {row.candidates.length}명 · 뽑을 수 {row.count}명</p>
+            {row.done ? (
+              <p className="small">
+                추첨 완료: <b>{names(row.done.winners || [])}</b> (대상 {(row.done.candidates || []).length}명, 숫자 {row.done.seed})
+              </p>
+            ) : (
+              <>
+                {row.candidates.length > 0 && <p className="small muted">추첨 대상: {names(row.candidates)}</p>}
+                <button type="button" className="pk-btn sm" disabled={busy || !row.closed || !row.prevDone || row.candidates.length === 0} onClick={() => run(row)}>
+                  {row.w}주차 황금 카드 추첨하기
+                </button>
+                {!row.closed && <span className="small muted"> {row.w}주차가 끝나면 누를 수 있어요.</span>}
+                {row.closed && !row.prevDone && <span className="small muted"> 앞 주차 추첨을 먼저 해 주세요.</span>}
+                {row.closed && row.prevDone && row.candidates.length === 0 && <span className="small muted"> 아직 추첨 대상이 없어요.</span>}
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+      {msg && <p className="note" role="status">{msg}</p>}
+    </Panel>
+  );
+}
+
 function CardPicks() {
   const { config, nameOf, byPid } = useApp();
   const { ready, rows } = usePairs();
