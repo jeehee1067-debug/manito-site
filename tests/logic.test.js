@@ -579,6 +579,18 @@ test("황금 카드 추첨: 황금 카드를 완료하고 대상이 '카드와 �
   assert.equal(goldWeekClosed(3, { phase: 2, week: 3 }), true);
 });
 
+test("황금 카드 결과 팝업: 황금 카드를 완료한 주차 중 추첨이 끝났고 아직 안 본 것만, 당첨·미당첨 구분", async () => {
+  const { goldPopups } = await import("../src/lib/gold.js");
+  const gold = { cardId: "h15", level: "hard", text: "x" };
+  const missions = { choices: { 2: gold, 3: gold }, done: { 2: true, 3: true } };
+  assert.deepEqual(goldPopups({ missions, draws: {}, wins: {} }), [], "추첨 전에는 없음");
+  assert.deepEqual(goldPopups({ missions, draws: { 2: { winners: 5 } }, wins: { 2: true } }), [{ week: 2, won: true }]);
+  assert.deepEqual(goldPopups({ missions, draws: { 2: { winners: 5 } }, wins: {} }), [{ week: 2, won: false }], "뽑히지 않았으면 위로 팝업");
+  assert.deepEqual(goldPopups({ missions, draws: { 2: {}, 3: {} }, wins: { 3: true }, seen: [2] }), [{ week: 3, won: true }], "이미 본 주차는 다시 안 뜬다");
+  assert.deepEqual(goldPopups({ missions: { choices: { 2: { cardId: "h1", level: "hard", text: "y" } }, done: { 2: true } }, draws: { 2: {} }, wins: {} }), [], "황금 카드를 안 한 사람에게는 안 뜬다");
+  assert.deepEqual(goldPopups({ missions: { choices: { 2: gold } }, draws: { 2: {} }, wins: {} }), [], "고르기만 하고 완료를 안 알렸으면 안 뜬다");
+});
+
 test("파트 대항전: 완수율 1위 파트원에게 +1, 내 미션이 0건이면 없음, 불참자는 인원에서 빼고 0장", () => {
   // 원: A1 → B1 → A2 → B2 → A1.  가파트 = A1, A2, A3(가입 안 함)  나파트 = B1, B2
   const people = [

@@ -2,7 +2,7 @@
 //  - 2주차부터 쉬움·보통 카드 두 장 중 한 장은 새 카드(NEW), 난이도 칸 옆에 "✨ 황금 카드" 칸(1주차에는 없음)
 //  - 황금 카드 두 장(돈이 드는 것 + 안 드는 것) → 고르고 완료 → 대상 화면에 황금 표시 → 대상이 "카드와 같아요"로 인증
 //  - 주차가 끝나기 전에는 추첨 버튼이 꺼져 있고, 끝나면 추첨 대상(황금 카드 + 인증 + 카드와 같음)만 뽑힌다
-//  - 뽑힌 마니또는 자기 내 미션 화면에서만 확인하고, 안 뽑힌 마니또에게는 "뽑히지 않았어요", 남의 당첨은 못 읽는다
+//  - 사이트에 들어오면 결과 팝업(당첨 축하·미당첨 위로, 한 번 닫으면 다시 안 뜸), 내 미션 화면에서도 확인, 남의 당첨은 못 읽는다
 // 먼저 `npm run dev:emu`를 띄워 둘 것. 로컬 에뮬레이터 데이터를 지우고 시작한다.
 // 화면 사진은 e2e/shots/gold(또는 GOLD_SHOTS=경로)에 남긴다(사람이 보는 용도라 2배 해상도).
 const { chromium } = require("playwright");
@@ -172,19 +172,47 @@ async function tokenOf(email) {
     console.log("  2주차가 끝난 뒤 추첨: 대상 1명(가나) → 가나 당첨, 3주차는 남은 4자리를 더해 9명");
   }
 
-  step("뽑힌 마니또만 자기 화면에서 확인, 안 뽑힌 마니또는 '뽑히지 않았어요', 남의 당첨은 못 읽는다");
+  step("사이트에 들어오면 결과 팝업: 당첨자는 축하, 황금 카드를 했지만 안 뽑힌 사람은 위로, 한 번 닫으면 다시 안 뜸");
   {
-    const g = u["가나"]; await g.reload(); await H.tab(g, "내 미션");
+    const g = u["가나"]; await g.reload();
+    const win = g.locator(".gold-pop.is-win");
+    await win.getByText("축하해요! 당첨이에요!").waitFor();
+    await win.getByText("2주차 황금 카드 추첨 결과").waitFor();
+    await win.getByText("5천원 커피 쿠폰").waitFor();
+    await g.waitForTimeout(900); // 팝업이 커지는 효과가 끝난 뒤 사진
+    await g.screenshot({ path: path.join(SHOTS, `${String(++shotNo).padStart(2, "0")}-popup-win.png`) });
+    await win.getByRole("button", { name: "야호! 확인" }).click();
+    await win.waitFor({ state: "detached" });
+    await g.reload(); await H.tab(g, "내 미션");
+    await g.waitForTimeout(1500);
+    assert.equal(await g.locator(".gold-pop").count(), 0, "한 번 닫으면 다시 안 뜬다");
+    for (const n of ["마바", "사아"]) {
+      const p = u[n]; await p.reload();
+      const lose = p.locator(".gold-pop.is-lose");
+      await lose.getByText("아쉽게도 이번엔 뽑히지 않았어요").waitFor();
+      await lose.getByText("3주차에도 황금 카드 추첨이 있어요").waitFor();
+      if (n === "마바") { await p.waitForTimeout(900); await p.screenshot({ path: path.join(SHOTS, `${String(++shotNo).padStart(2, "0")}-popup-lose.png`) }); }
+      await lose.getByRole("button", { name: "확인" }).click();
+      await lose.waitFor({ state: "detached" });
+    }
+    const d = u["다라"]; await d.reload(); await H.tab(d, "내 미션");
+    await d.waitForTimeout(1500);
+    assert.equal(await d.locator(".gold-pop").count(), 0, "황금 카드를 안 한 사람에게는 팝업이 없다");
+    console.log("  가나: 축하 팝업 → 닫으면 다시 안 뜸, 마바·사아: 위로 팝업, 다라(황금 안 함): 팝업 없음");
+  }
+
+  step("내 미션 화면에서도 결과 확인, 남의 당첨은 못 읽는다");
+  {
+    const g = u["가나"];
     const w2 = H.panel(g, "2주차 미션 ✔");
     await w2.getByText("2주차 황금 카드 추첨에 뽑혔어요!").waitFor();
     await shot(w2, "winner");
     for (const n of ["마바", "사아"]) {
-      const p = u[n]; await p.reload();
+      const p = u[n];
       await H.tab(p, "내 미션"); // 새로 고치면 마지막에 보던 탭이 열린다(대상으로 인증한 사람은 추리 보드)
       await H.panel(p, "2주차 미션 ✔").getByText("이번 주에는 뽑히지 않았어요").waitFor();
     }
     await shot(H.panel(u["마바"], "2주차 미션 ✔"), "not-winner");
-    await H.tab(u["다라"], "내 미션");
     await H.panel(u["다라"], "2주차 미션 ✔").waitFor();
     assert.equal(await H.panel(u["다라"], "2주차 미션 ✔").getByText(/황금 카드 추첨/).count(), 0, "황금 카드를 안 한 사람에게는 안 보인다");
     const tok = await tokenOf(email["마바"]);

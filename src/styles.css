@@ -695,3 +695,27 @@ ul.plain.redeem-status li { flex: 0 0 auto; width: auto; margin: 0; }
 .card.level-hard.is-gold .card-level { background: #e0b030; color: #2b1f00; font-weight: 700; }
 .chosen.is-gold { box-shadow: inset 0 0 0 3px #e0b030; border-radius: 10px; padding: 6px; background: #fff8d6; }
 .gold-line { background: #fff8d6; border-left: 4px solid #e0b030; padding: 4px 8px; border-radius: 4px; }
+
+/* 황금 카드 추첨 결과 팝업(사이트에 들어오면 한 번) */
+.gold-pop-backdrop { position: fixed; inset: 0; z-index: 1000; background: rgba(10, 14, 30, 0.72); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.gold-pop { position: relative; overflow: hidden; width: min(400px, 100%); text-align: center; border-radius: 18px; padding: 22px 18px 18px; border: 4px solid var(--ink); box-shadow: 0 8px 0 rgba(0, 0, 0, 0.45); animation: gold-pop-in 0.45s cubic-bezier(0.2, 1.4, 0.4, 1) both; }
+.gold-pop.is-win { background: radial-gradient(circle at 50% 0%, #fffbe6, #ffe38a 55%, #f2c230); box-shadow: 0 8px 0 rgba(0, 0, 0, 0.45), inset 0 0 0 4px #fff6c8, 0 0 40px 6px rgba(242, 194, 48, 0.75); }
+.gold-pop.is-lose { background: linear-gradient(180deg, #fffdf4, #fff3cf); box-shadow: 0 8px 0 rgba(0, 0, 0, 0.45), inset 0 0 0 4px #fff; }
+.gold-pop > *:not(.gold-confetti) { position: relative; z-index: 1; }
+.gold-pop-kicker { font-size: 13px; font-weight: 700; color: #6b4b00; letter-spacing: 0.02em; }
+.gold-pop-emoji { font-size: 56px; line-height: 1.1; margin: 6px 0; }
+.gold-pop.is-win .gold-pop-emoji { animation: gold-bounce 1.2s ease-in-out infinite; }
+.gold-pop-title { font-size: 22px; margin: 4px 0 8px; color: #2b1f00; }
+.gold-pop.is-win .gold-pop-title { background: linear-gradient(90deg, #8a5a00, #e0a400, #8a5a00); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: gold-shine 2.4s linear infinite; }
+.gold-pop-prize { display: inline-block; margin: 8px 0; padding: 6px 14px; border-radius: 999px; background: #2b1f00; color: #ffe38a; font-weight: 700; font-size: 17px; }
+.gold-pop-btn { margin-top: 12px; min-width: 140px; }
+.gold-confetti { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
+.gold-confetti span { position: absolute; top: -12px; width: 8px; height: 14px; border-radius: 2px; opacity: 0.9; animation: gold-fall 2.6s ease-in infinite; }
+@keyframes gold-pop-in { from { transform: scale(0.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes gold-fall { 0% { top: -14px; opacity: 1; } 100% { top: 105%; opacity: 0.2; } }
+@keyframes gold-bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+@keyframes gold-shine { from { background-position: 0% 0; } to { background-position: 200% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .gold-pop, .gold-pop.is-win .gold-pop-emoji, .gold-pop.is-win .gold-pop-title, .gold-confetti span { animation: none; }
+  .gold-confetti { display: none; }
+}
