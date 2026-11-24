@@ -708,7 +708,7 @@ function Suspects({ myPid, hintPart }) {
   }
 
   return (
-    <Panel title={`용의자 보드 (남은 후보 ${remaining.length}명)`}>
+    <Panel title={`용의자 보드 (남은 후보 ${remaining.length}명)`} id="suspects">
       <p className="small">
         {byPart && bySite ? "우리 파트와 다른 근무지 사람은 " : byPart ? "우리 파트 사람은 " : bySite ? "다른 근무지 사람은 " : ""}
         {byPart || bySite ? "내 마니또가 될 수 없어서 처음부터 빠져 있어요. " : ""}

@@ -20,7 +20,7 @@ import GoldPopup from "./pages/GoldPopup.jsx";
 import { Garland, XmasFooter } from "./xmas.jsx";
 import { Icon, TAB_ICON } from "./icons.jsx";
 import { Giver, Panel } from "./ui.jsx";
-import { myReminders } from "./lib/reminders.js";
+import { guessReminderOpen, myReminders } from "./lib/reminders.js";
 import { deadlinePassed, weekDeadline } from "./lib/constants.js";
 
 const AppCtx = createContext(null);
@@ -164,12 +164,21 @@ function ReminderBar({ myPid, config, inbox, current, go, modNew = 0 }) {
     (s) => setMine(s.docs.map((d) => d.data())), () => setMine(null)), [myPid]);
   useEffect(() => onSnapshot(doc(db, "giverMissions", myPid),
     (s) => setMissions(s.exists() ? s.data() : {}), () => setMissions(null)), [myPid]);
-  const { toVerify, toDo } = myReminders({ inbox, mine, missions, week: config.week || 1, phase: config.phase });
+  // 주차별 추측: 이번 주 단서가 나온 뒤에만 내 추측 문서를 읽는다(그 전에는 띄우지 않으니 읽지 않는다. 추리 보드의 구독과 같은 문서라 함께 열려 있으면 한 번만 읽힌다)
+  const week = config.week || 1;
+  const guessOpen = guessReminderOpen({ phase: config.phase, week, cluesReleased: config.cluesReleased || 0 });
+  const [guesses, setGuesses] = useState(null);
+  useEffect(() => {
+    if (!guessOpen) { setGuesses(null); return undefined; }
+    return onSnapshot(doc(db, "midGuesses", myPid), (s) => setGuesses(s.exists() ? s.data().guesses || {} : {}), () => setGuesses(null));
+  }, [myPid, guessOpen]);
+  const { toVerify, toDo, toGuess } = myReminders({ inbox, mine, missions, week, phase: config.phase, guesses, cluesReleased: config.cluesReleased || 0 });
   const showDo = toDo.length > 0 && current !== "mission";
   const showVerify = toVerify.length > 0 && current !== "detective";
+  const showGuess = toGuess.length > 0 && current !== "detective";
   // 운영진이 내 후기·답장을 가리거나 지우거나 무효 처리했고 아직 추리 보드에서 보지 않은 것(추리 보드를 열면 본 것으로 친다)
   const showMod = modNew > 0 && current !== "detective";
-  if (closed || (!showDo && !showVerify && !showMod)) return null;
+  if (closed || (!showDo && !showVerify && !showMod && !showGuess)) return null;
   const weeks = (list) => list.map((s) => `${s}주차`).join("·");
   return (
     <div className="reminder-bar" role="status">
@@ -188,6 +197,15 @@ function ReminderBar({ myPid, config, inbox, current, go, modNew = 0 }) {
           <p>
             <Giver>내 마니또</Giver>가 보낸 <b>{weeks(toVerify)} 미션</b>을 아직 인증하지 않았어요. 인증해야 나와 마니또 모두 응모권이 쌓여요.{" "}
             <button type="button" className="text-btn" onClick={() => go("detective")}>추리 보드에서 인증하기</button>
+          </p>
+        )}
+        {showGuess && (
+          <p>
+            <Giver>내 마니또</Giver>가 누구일지 <b>{weeks(toGuess)} 추측</b>을 아직 남기지 않았어요. 이번 주 단서를 보고 가장 의심되는 사람을 골라 보세요(응모권과는 상관없고, 송년회에서 공개돼요).
+            {weekDeadline(toGuess[0])?.label && (deadlinePassed(toGuess[0])
+              ? <> 곧 닫혀요.</>
+              : <> <b>{weekDeadline(toGuess[0]).label}까지</b>예요.</>)}{" "}
+            <button type="button" className="text-btn" onClick={() => { go("detective"); setTimeout(() => document.getElementById("suspects")?.scrollIntoView({ block: "start" }), 80); }}>용의자 보드에서 추측하기</button>
           </p>
         )}
         {showMod && (
