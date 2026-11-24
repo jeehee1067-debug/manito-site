@@ -44,7 +44,9 @@ function CrowdProgress() {
   return (
     <section className="crowd-progress" aria-label="모두의 미션 진행">
       <p className="crowd-line">
-        참여 {v.joined}명 중 <b>{v.done}명</b>이 {v.week}주차 미션을 완료했어요{v.done > 0 && v.done < v.joined ? "!" : v.done >= v.joined ? " 🎉" : ""}
+        {v.done === 0
+          ? <>참여 {v.joined}명 중 아직 {v.week}주차 미션을 완료한 사람이 없어요. <b>첫 번째로 완료해 보세요!</b></>
+          : <>참여 {v.joined}명 중 <b>{v.done}명</b>이 {v.week}주차 미션을 완료했어요{v.done >= v.joined ? " 🎉" : "!"}</>}
       </p>
       <span className="crowd-bar" role="img" aria-label={`${v.pct}%`}><i style={{ width: `${v.pct}%` }} /></span>
       <p className="small muted crowd-sub">

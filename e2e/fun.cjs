@@ -79,6 +79,8 @@ const step = (s) => console.log("▶", s);
   {
     const g = u["가나"];
     assert.match(await todoOf(g), /1주차 미션 카드 고르기/);
+    // 모두의 미션 진행: 미션 진행으로 넘어가면 운영자 화면이 바로 센다(아직 0명) → 내 미션 맨 위에 "첫 번째로 완료해 보세요!"
+    await g.locator(".crowd-progress:visible").getByText("참여 4명 중 아직 1주차 미션을 완료한 사람이 없어요. 첫 번째로 완료해 보세요!").waitFor();
     const slot = H.panel(g, "1주차 미션");
     await slot.getByText(/보통은 응모권 1장, 도전은 2장을 더 받아요/).waitFor();
     await H.pickCard(slot, "normal");
