@@ -275,6 +275,26 @@ const step = (s) => console.log("▶", s);
     assert.equal(await panel.locator("li.row-item").count(), 1, "연결은 여전히 한 쌍");
     assert.ok(await panel.getByRole("button", { name: "지금 순서대로 연결 (0쌍)" }).isDisabled(), `넘긴 짝(${first} ← ${ANGEL})은 다시 붙지 않는다`);
     console.log(`  "연결 풀고 다음 순번으로": ${first}에게는 다시 붙지 않고, ${ANGEL}은(는) 순서대로 ${X}에게 연결됨`);
+    // 수호천사 연결 팝업: 연결된 지원자에게 어느 탭에서나 한 번 뜬다(받는 사람 이름은 쓰지 않는다). 연결을 풀고 다시 붙어도 지금 연결된 사람 기준으로 한 번
+    {
+      const pop = a.locator(".gold-pop.is-angel");
+      await pop.waitFor();
+      await pop.getByText("수호천사로 연결됐어요!").waitFor();
+      const popText = await pop.innerText();
+      for (const n of NAMES) assert.ok(!popText.includes(n), `팝업에 이름(${n})이 없다`);
+      await a.waitForTimeout(800); // 나타나는 움직임이 끝난 뒤 사진
+      await a.screenshot({ path: path.join(__dirname, "shots", "fun", "angel-popup.png") });
+      for (const n of NAMES.filter((x) => x !== ANGEL)) assert.equal(await u[n].locator(".gold-pop.is-angel").count(), 0, `${n}(수호천사 아님)에게는 안 뜬다`);
+      await pop.getByRole("button", { name: "수호천사 미션 보러 가기" }).click();
+      await pop.waitFor({ state: "detached" });
+      await a.locator("nav.tabs button.is-on", { hasText: "내 미션" }).waitFor();
+      await a.locator("#angel-mission:visible").waitFor();
+      await a.reload();
+      await a.locator("nav.tabs").waitFor();
+      await a.waitForTimeout(1500);
+      assert.equal(await a.locator(".gold-pop.is-angel").count(), 0, "한 번 닫으면 이 기기에서는 다시 안 뜬다");
+      console.log(`  ${ANGEL}: 연결되자 '수호천사로 연결됐어요!' 팝업(이름 없음) → '수호천사 미션 보러 가기'로 내 미션의 수호천사 미션 패널, 새로 고쳐도 다시 안 뜸. 다른 사람에게는 안 뜸`);
+    }
     // 수호천사 화면: 수호천사 미션 + 이번 주 할 일
     assert.match(await todoOf(a), /수호천사 미션 하기/);
     const mp = H.panel(a, "수호천사 미션");
