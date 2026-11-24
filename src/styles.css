@@ -713,6 +713,12 @@ ul.plain.redeem-status li { flex: 0 0 auto; width: auto; margin: 0; }
 .gold-pop.is-win { background: radial-gradient(circle at 50% 0%, #fffbe6, #ffe38a 55%, #f2c230); box-shadow: 0 8px 0 rgba(0, 0, 0, 0.45), inset 0 0 0 4px #fff6c8, 0 0 40px 6px rgba(242, 194, 48, 0.75); }
 .gold-pop.is-lose { background: linear-gradient(180deg, #fffdf4, #fff3cf); box-shadow: 0 8px 0 rgba(0, 0, 0, 0.45), inset 0 0 0 4px #fff; }
 .gold-pop > *:not(.gold-confetti) { position: relative; z-index: 1; }
+.gold-pop.is-angel { background: radial-gradient(circle at 50% 0%, #ffffff, #e6f0ff 55%, #c9dcff); box-shadow: 0 8px 0 rgba(0, 0, 0, 0.45), inset 0 0 0 4px #fff, 0 0 36px 4px rgba(150, 190, 255, 0.7); }
+.gold-pop.is-angel .gold-pop-kicker { color: #2b4a8a; }
+.gold-pop.is-angel .gold-pop-title { color: #1d2f5c; }
+.gold-pop.is-angel .gold-pop-emoji { animation: gold-bounce 1.6s ease-in-out infinite; }
+.angel-pop-list { margin: 8px 0 0; padding-left: 20px; text-align: left; font-size: 14px; display: grid; gap: 4px; }
+.angel-pop-actions { display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .gold-pop-kicker { font-size: 13px; font-weight: 700; color: #6b4b00; letter-spacing: 0.02em; }
 .gold-pop-emoji { font-size: 56px; line-height: 1.1; margin: 6px 0; }
 .gold-pop.is-win .gold-pop-emoji { animation: gold-bounce 1.2s ease-in-out infinite; }
@@ -727,6 +733,6 @@ ul.plain.redeem-status li { flex: 0 0 auto; width: auto; margin: 0; }
 @keyframes gold-bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
 @keyframes gold-shine { from { background-position: 0% 0; } to { background-position: 200% 0; } }
 @media (prefers-reduced-motion: reduce) {
-  .gold-pop, .gold-pop.is-win .gold-pop-emoji, .gold-pop.is-win .gold-pop-title, .gold-confetti span { animation: none; }
+  .gold-pop, .gold-pop.is-win .gold-pop-emoji, .gold-pop.is-win .gold-pop-title, .gold-pop.is-angel .gold-pop-emoji, .gold-confetti span { animation: none; }
   .gold-confetti { display: none; }
 }

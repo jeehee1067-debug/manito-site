@@ -19,6 +19,7 @@ import { ProgressWriter, progressRef } from "./lib/progressDigest.js";
 import { progressView } from "./lib/progress.js";
 import Rules from "./pages/Rules.jsx";
 import GoldPopup from "./pages/GoldPopup.jsx";
+import AngelPopup from "./pages/AngelPopup.jsx";
 import { Garland, XmasFooter } from "./xmas.jsx";
 import { Icon, TAB_ICON } from "./icons.jsx";
 import { Giver, Panel } from "./ui.jsx";
@@ -546,6 +547,7 @@ function Session({ user, logout }) {
         </header>
         {config.notice && (ctx.myPid || ctx.isAdmin) && <p className="notice-banner" role="status"><b>공지</b>{config.notice}</p>}
         {ctx.myPid && <GoldPopup myPid={ctx.myPid} uid={user.uid} />}
+        {ctx.myPid && <AngelPopup myPid={ctx.myPid} uid={user.uid} phase={config.phase} go={setTab} />}
         {ctx.myPid && <ReminderBar myPid={ctx.myPid} config={config} inbox={inbox} current={current} go={setTab} modNew={modItems.filter((m) => !seen.mod.includes(m.id)).length} crowd={crowd} />}
         {/* 예약(자동 진행) 실행기: 운영자·공동 운영자의 화면이 열려 있는 동안 예약 시각이 지난 작업을 실행한다 */}
         {ctx.isAdmin && <AutoRunner />}

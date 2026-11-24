@@ -743,7 +743,7 @@ function AngelMission({ receiverPid, active = true }) {
   }
   return (
     <>
-      <Panel title="수호천사 미션">
+      <Panel title="수호천사 미션" id="angel-mission">
         <p className="small">
           마니또에게 아무것도 받지 못한 사람이에요. 몰래 챙겨 주고 아래에 "완료 알리기"를 눌러 주세요. 그 사람에게는 "수호천사가 보낸 것"으로 가고(누구인지는 몰라요),
           확인되면 응모권 +{TICKET_RULES.angelPerMission}장이에요. 송년회에서 수호천사로 소개돼요.
