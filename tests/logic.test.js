@@ -1516,13 +1516,13 @@ test("재촉: 참여자 할 일(인증·완료 알리기)과 운영 화면 재�
     { kind: "mission", slot: 1 }, { kind: "note", slot: 1 }, { kind: "mission", slot: 2, hidden: true }, { kind: "praise", slot: 3 },
   ];
   // 1주차 완료 알림을 받았고 인증 전, 2주차는 운영진이 가림, 3주차는 아직 안 열림
-  assert.deepEqual(myReminders({ inbox, mine: [], missions: { done: { 1: true } }, week: 2, phase: PHASE.RUNNING }), { toVerify: [1], toDo: [2] });
+  assert.deepEqual(myReminders({ inbox, mine: [], missions: { done: { 1: true } }, week: 2, phase: PHASE.RUNNING }), { toVerify: [1], toDo: [2], toGuess: [] });
   assert.deepEqual(myReminders({ inbox: [], mine: [], missions: {}, week: 2, phase: PHASE.RUNNING }).toDo, [2], "지난 주차(1주차)는 마감이라 할 일에 넣지 않는다");
-  assert.deepEqual(myReminders({ inbox, mine: [{ slot: 1 }], missions: { done: { 1: true, 2: true } }, week: 2, phase: PHASE.RUNNING }), { toVerify: [], toDo: [] });
+  assert.deepEqual(myReminders({ inbox, mine: [{ slot: 1 }], missions: { done: { 1: true, 2: true } }, week: 2, phase: PHASE.RUNNING }), { toVerify: [], toDo: [], toGuess: [] });
   assert.deepEqual(myReminders({ inbox, mine: [], missions: {}, week: 3, phase: PHASE.RUNNING }).toVerify, [1, 3], "칭찬 카드도 인증할 것");
-  assert.deepEqual(myReminders({ inbox, mine: [], missions: {}, week: 3, phase: PHASE.GUESSING }), { toVerify: [1, 3], toDo: [] }, "최종 지목 단계: 인증만");
-  assert.deepEqual(myReminders({ inbox, mine: [], missions: {}, week: 3, phase: PHASE.CLOSED }), { toVerify: [], toDo: [] }, "마감 뒤에는 없음");
-  assert.deepEqual(myReminders({ inbox, mine: null, missions: null, week: 1, phase: PHASE.RUNNING }), { toVerify: [], toDo: [] }, "읽는 중에는 띄우지 않음");
+  assert.deepEqual(myReminders({ inbox, mine: [], missions: {}, week: 3, phase: PHASE.GUESSING }), { toVerify: [1, 3], toDo: [], toGuess: [] }, "최종 지목 단계: 인증만");
+  assert.deepEqual(myReminders({ inbox, mine: [], missions: {}, week: 3, phase: PHASE.CLOSED }), { toVerify: [], toDo: [], toGuess: [] }, "마감 뒤에는 없음");
+  assert.deepEqual(myReminders({ inbox, mine: null, missions: null, week: 1, phase: PHASE.RUNNING }), { toVerify: [], toDo: [], toGuess: [] }, "읽는 중에는 띄우지 않음");
 
   const roster = [
     { pid: "a", name: "가나", email: "a@x", uid: "u1" }, { pid: "b", name: "다라", email: "b@x", uid: "u2" },
@@ -1653,4 +1653,25 @@ test("발표 화면: 칭호는 받은 사람이 있는 것만 한 장면씩, 그
   assert.ok(!old.some((x) => x.startsWith("title_") || x === "gold"));
   // 장면 수는 시상 전후가 같다
   assert.equal(buildSlides({ ...r, draws: { seed: "1", t6: { winners: ["A"] } } }, (x) => x).length, ids.length);
+});
+
+test("할 일: 주차별 추측은 이번 주 단서 2개가 나온 뒤부터 그 주차가 닫힐 때까지, 아직 안 남긴 사람에게만", async () => {
+  const { myReminders, guessReminderOpen } = await import("../src/lib/reminders.js");
+  const { PHASE } = await import("../src/lib/constants.js");
+  const base = { inbox: [], mine: [], missions: { done: { 1: true, 2: true } }, phase: PHASE.RUNNING };
+  // 1주차: 단서 2개(11/20) 공개 뒤부터
+  assert.deepEqual(myReminders({ ...base, week: 1, cluesReleased: 0, guesses: {} }).toGuess, [], "이번 주 단서 전에는 없음");
+  assert.deepEqual(myReminders({ ...base, week: 1, cluesReleased: 2, guesses: {} }).toGuess, [1]);
+  assert.deepEqual(myReminders({ ...base, week: 1, cluesReleased: 2, guesses: { 1: "p9" } }).toGuess, [], "이미 남겼으면 없음");
+  // 2주차: 2주차 단서(3·4번, 11/27)가 나와야. 1주차 추측을 남겼어도 2주차는 따로
+  assert.deepEqual(myReminders({ ...base, week: 2, cluesReleased: 2, guesses: { 1: "p9" } }).toGuess, [], "2주차가 열렸어도 2주차 단서 전에는 없음");
+  assert.deepEqual(myReminders({ ...base, week: 2, cluesReleased: 4, guesses: { 1: "p9" } }).toGuess, [2]);
+  assert.deepEqual(myReminders({ ...base, week: 3, cluesReleased: 6, guesses: { 1: "p9", 2: "p9", 3: "p8" } }).toGuess, []);
+  // 추측은 미션 진행 단계에만(최종 지목 단계부터는 주차별 추측이 없다), 읽는 중에는 띄우지 않음
+  assert.deepEqual(myReminders({ ...base, week: 3, cluesReleased: 6, guesses: {}, phase: PHASE.GUESSING }).toGuess, []);
+  assert.deepEqual(myReminders({ ...base, week: 1, cluesReleased: 2, guesses: null }).toGuess, []);
+  // 화면은 이 조건일 때만 내 추측 문서를 읽는다(읽기 수)
+  assert.equal(guessReminderOpen({ phase: PHASE.RUNNING, week: 2, cluesReleased: 3 }), false);
+  assert.equal(guessReminderOpen({ phase: PHASE.RUNNING, week: 2, cluesReleased: 4 }), true);
+  assert.equal(guessReminderOpen({ phase: PHASE.SETUP, week: 1, cluesReleased: 2 }), false);
 });

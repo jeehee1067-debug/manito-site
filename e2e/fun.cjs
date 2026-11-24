@@ -134,9 +134,25 @@ const step = (s) => console.log("▶", s);
   {
     const r = u[R];
     assert.match(await todoOf(r), /1주차 추측 남기기/);
+    // 맨 위 할 일 줄: 이번 주 단서 2개가 공개되기 전에는 추측 줄이 없다 → 공개되면 다른 탭에서도 뜨고, 누르면 용의자 보드로 간다
+    await H.tab(r, "피드");
+    const guessLine = r.locator(".reminder-bar p", { hasText: "1주차 추측" });
+    assert.equal(await guessLine.count(), 0, "이번 주 단서 전에는 추측 줄 없음");
+    await H.tab(admin, "운영");
+    await admin.getByRole("button", { name: "이번 주 단서 2개 공개" }).click();
+    await admin.getByText("단서를 공개하고 파트 순위도 새로 발표했어요.").waitFor();
+    await guessLine.waitFor();
+    assert.match(await guessLine.innerText(), /1주차 추측을 아직 남기지 않았어요/);
+    await guessLine.getByRole("button", { name: "용의자 보드에서 추측하기" }).click();
+    await r.locator("nav.tabs button.is-on", { hasText: "추리 보드" }).waitFor();
+    assert.equal(await r.locator(".reminder-bar p", { hasText: "추측" }).count(), 0, "추리 보드에서는 추측 줄을 숨김");
+    console.log(`  ${R}: 단서 공개 전에는 할 일 줄에 추측 없음 → 단서 2개 공개 뒤 피드 탭 맨 위에 '1주차 추측을 아직 남기지 않았어요' → 누르면 추리 보드`);
     await guessWeek(r, "가나");
     await r.getByText("내 추측: 1주차 가나").waitFor();
     assert.doesNotMatch(await todoOf(r), /추측 남기기/);
+    await H.tab(r, "피드");
+    await r.waitForTimeout(400);
+    assert.equal(await r.locator(".reminder-bar p", { hasText: "추측" }).count(), 0, "추측을 남기면 할 일 줄에서 사라짐");
     // 인증
     await H.tab(r, "추리 보드");
     const inbox = H.panel(r, "마니또에게서 온 것");

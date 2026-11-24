@@ -5,19 +5,26 @@
 // 여기에는 Firestore를 부르는 코드가 없다(tests/logic.test.js).
 import { MISSION_SLOTS, PHASE } from "./constants.js";
 
+// 주차별 추측을 할 일로 띄우는 때(사용자가 정함, 11/23): 그 주 단서 2개가 공개된 뒤부터 그 주차가 닫힐 때까지(미션 진행 단계).
+// 단서는 금요일에 주차마다 2개씩 나가므로(공개 개수 ≤ 2 × 주차) "공개 개수 ≥ 2 × 주차" = 이번 주 단서가 나왔다.
+export const guessReminderOpen = ({ phase, week = 1, cluesReleased = 0 }) => phase === PHASE.RUNNING && cluesReleased >= 2 * week;
+
 /**
  * 참여자 본인의 할 일.
  * inbox: 내 앞으로 온 deliveries, mine: 내 인증(redemptions where receiverPid == 나, 아직 못 읽었으면 null),
- * missions: giverMissions/{나}(아직 못 읽었으면 null), week: 열린 주차, phase: 단계
+ * missions: giverMissions/{나}(아직 못 읽었으면 null), week: 열린 주차, phase: 단계,
+ * guesses: midGuesses/{나}의 guesses({ "주차": pid }, 아직 못 읽었으면 null), cluesReleased: 공개된 단서 수
  * 반환 { toVerify: [주차] — 내 마니또가 완료를 알렸는데 내가 아직 인증하지 않은 주차(인증은 단계 1~2),
- *        toDo: [주차] — 지금 열린 주차를 내가 마니또로서 아직 완료하지 않았으면 그 주차(미션은 단계 1, 지난 주차는 마감이라 넣지 않는다) }
+ *        toDo: [주차] — 지금 열린 주차를 내가 마니또로서 아직 완료하지 않았으면 그 주차(미션은 단계 1, 지난 주차는 마감이라 넣지 않는다),
+ *        toGuess: [주차] — 이번 주 단서가 나왔는데 이번 주차 추측(내 마니또가 누구인지)을 아직 남기지 않았으면 그 주차 }
  */
-export function myReminders({ inbox = [], mine = null, missions = null, week = 1, phase }) {
+export function myReminders({ inbox = [], mine = null, missions = null, week = 1, phase, guesses = null, cluesReleased = 0 }) {
   const canVerify = phase === PHASE.RUNNING || phase === PHASE.GUESSING;
   const sentSlots = [...new Set(inbox.filter((d) => (d.kind === "mission" || d.kind === "praise") && !d.hidden && d.slot <= week).map((d) => d.slot))];
   const toVerify = canVerify && mine ? sentSlots.filter((s) => !mine.some((r) => r.slot === s)).sort((a, b) => a - b) : [];
   const toDo = phase === PHASE.RUNNING && missions ? MISSION_SLOTS.filter((s) => s === week && missions.done?.[s] !== true) : [];
-  return { toVerify, toDo };
+  const toGuess = guesses && guessReminderOpen({ phase, week, cluesReleased }) && !guesses[String(week)] ? [week] : [];
+  return { toVerify, toDo, toGuess };
 }
 
 /**
