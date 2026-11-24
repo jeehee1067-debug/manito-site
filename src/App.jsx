@@ -192,7 +192,7 @@ function ReminderBar({ myPid, config, inbox, current, go, modNew = 0, crowd = nu
             {weekDeadline(toDo[0])?.label && (deadlinePassed(toDo[0])
               ? <> <b>마감 시각({weekDeadline(toDo[0]).label})이 지났어요.</b> 곧 닫히니 지금 완료를 알려 주세요.</>
               : <> <b>{weekDeadline(toDo[0]).label} 마감</b>이고, 마감 뒤에는 할 수 없어요.</>)}
-            {(() => { const v = progressView(crowd, week); return v && v.done > 0 ? <> 벌써 <b>{v.done}명</b>이 완료했어요!</> : null; })()}{" "}
+            {(() => { const v = progressView(crowd, week); return v && v.pct > 0 ? <> 벌써 참여자의 <b>{v.pct}%</b>가 완료했어요!</> : null; })()}{" "}
             <button type="button" className="text-btn" onClick={() => go("mission")}>내 미션으로 가기</button>
           </p>
         )}
@@ -329,7 +329,7 @@ function Session({ user, logout }) {
       .catch(() => setMyReceiver(null));
   }, [myPidForSeen, assignVer]);
 
-  // 모두의 미션 진행(이번 주 완료 인원, 운영자 화면이 세어 둔 public/progress 1건): 내 미션 맨 위와 할 일 줄이 같이 쓴다.
+  // 모두의 미션 진행(이번 주 완료율, 운영자 화면이 세어 둔 public/progress 1건): 내 미션 맨 위와 할 일 줄이 같이 쓴다.
   // 미션 진행·최종 지목 단계에만 구독한다(숫자는 운영자 화면이 5분마다 다시 세고 바뀔 때만 쓴다).
   const crowdOn = Boolean(myPidForSeen) && (config?.phase === PHASE.RUNNING || config?.phase === PHASE.GUESSING);
   const [crowd, setCrowd] = useState(null);
