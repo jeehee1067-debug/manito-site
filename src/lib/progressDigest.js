@@ -1,13 +1,13 @@
 // "모두의 미션 진행" 숫자를 세어 적는 쪽(운영자·공동 운영자 화면, App.jsx가 띄움). 계산과 화면 값은 progress.js.
 // 읽기 수: 문서를 통째로 읽지 않고 개수만 세는 집계(count, 최대 1,000건까지 1회 읽기)로 센다 — 한 번에 (열린 주차 수 + 1)건.
-// 화면이 보이는 동안 PROGRESS_EVERY(5분)마다, 그리고 다시 보일 때(1분 넘게 지났으면) 센다. 숫자가 같으면 쓰지 않는다.
+// 화면이 보이는 동안 PROGRESS_EVERY(5분)마다, 그리고 다시 보일 때(1분 넘게 지났으면) 센다. 완료율이 같으면 쓰지 않는다.
 // 운영자 화면이 하나도 열려 있지 않으면 숫자가 그대로 머문다(서버가 없어서). 참여자 화면에는 "몇 시 기준"을 같이 보인다.
 // public/* 쓰기는 원래 운영자만이라 보안 규칙 변경 없음.
 import { useEffect, useRef } from "react";
 import { collection, doc, getCountFromServer, getDoc, query, serverTimestamp, setDoc, where } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { PHASE } from "./constants.js";
-import { PROGRESS_EVERY, sameProgress } from "./progress.js";
+import { PROGRESS_EVERY, progressPercents, sameProgress } from "./progress.js";
 
 export const progressRef = () => doc(db, "public", "progress");
 
@@ -17,7 +17,8 @@ async function countNow(week) {
     getCountFromServer(query(collection(db, "roster"), where("uid", "!=", null))),
     ...weeks.map((w) => getCountFromServer(query(collection(db, "giverMissions"), where(`done.${w}`, "==", true)))),
   ]);
-  return { joined: joined.data().count, weeks: Object.fromEntries(weeks.map((w, i) => [String(w), done[i].data().count])) };
+  // 문서에는 완료율만 적는다(인원 수는 적지 않는다 — 사용자가 정함: "몇 명 중 몇 명이 아니라 비율로")
+  return { v: 2, weeks: progressPercents(joined.data().count, Object.fromEntries(weeks.map((w, i) => [String(w), done[i].data().count]))) };
 }
 
 // 미션 진행·최종 지목 단계에만 센다(최종 지목 단계에는 완료가 늘지 않지만, 미션 마감 직전 숫자를 마지막으로 맞춰 둔다)
@@ -38,8 +39,8 @@ export function ProgressWriter({ phase, week }) {
           written.current = s.exists() ? s.data() : null;
         }
         const next = await countNow(week);
-        if (!stop && !sameProgress(written.current, next)) {
-          await setDoc(progressRef(), { v: 1, at: serverTimestamp(), ...next });
+        if (!stop && Object.keys(next.weeks).length > 0 && !sameProgress(written.current, next)) {
+          await setDoc(progressRef(), { ...next, at: serverTimestamp() });
           written.current = next;
         }
       } catch {

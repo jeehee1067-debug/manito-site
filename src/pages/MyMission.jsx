@@ -35,7 +35,7 @@ const stars = (lv) => {
   return <span className="card-stars" aria-hidden="true">{"★".repeat(k + 1)}<i>{"★".repeat(2 - k)}</i></span>;
 };
 
-// 모두의 미션 진행: 이번 주차 미션을 완료한 마니또 수 / 가입한 사람 수(부서 전체 숫자만. 운영자 화면이 세어 둔 public/progress — App이 구독)
+// 모두의 미션 진행: 이번 주차 미션 완료율(부서 전체 비율만, 인원 수는 보이지 않는다. 운영자 화면이 세어 둔 public/progress — App이 구독)
 const hhmm = (d) => `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
 function CrowdProgress() {
   const { crowd, config } = useApp();
@@ -44,13 +44,13 @@ function CrowdProgress() {
   return (
     <section className="crowd-progress" aria-label="모두의 미션 진행">
       <p className="crowd-line">
-        {v.done === 0
-          ? <>참여 {v.joined}명 중 아직 {v.week}주차 미션을 완료한 사람이 없어요. <b>첫 번째로 완료해 보세요!</b></>
-          : <>참여 {v.joined}명 중 <b>{v.done}명</b>이 {v.week}주차 미션을 완료했어요{v.done >= v.joined ? " 🎉" : "!"}</>}
+        {v.pct === 0
+          ? <>아직 {v.week}주차 미션을 완료한 사람이 없어요. <b>첫 번째로 완료해 보세요!</b></>
+          : <>{v.week}주차 미션 완료율 <b>{v.pct}%</b>{v.pct >= 100 ? " 🎉" : ""}</>}
       </p>
       <span className="crowd-bar" role="img" aria-label={`${v.pct}%`}><i style={{ width: `${v.pct}%` }} /></span>
       <p className="small muted crowd-sub">
-        {v.past.map((p) => `${p.week}주차 ${p.done}명 완료`).join(" · ")}{v.past.length > 0 && v.at ? " · " : ""}{v.at ? `${hhmm(v.at)} 기준` : ""}
+        {v.past.map((p) => `${p.week}주차 ${p.pct}%`).join(" · ")}{v.past.length > 0 && v.at ? " · " : ""}{v.at ? `${hhmm(v.at)} 기준` : ""}
       </p>
     </section>
   );
