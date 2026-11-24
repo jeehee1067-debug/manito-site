@@ -448,6 +448,14 @@ ul.plain.redeem-status li { flex: 0 0 auto; width: auto; margin: 0; }
 .board-rank { font-weight: 700; font-size: 17px; color: var(--blue-dark); }
 .board-main { display: grid; gap: 4px; min-width: 0; }
 .board-name { font-weight: 700; }
+/* 내 미션 맨 위 "모두의 미션 진행"(이번 주 완료 인원) */
+.crowd-progress { display: grid; gap: 6px; margin-bottom: 14px; padding: 10px 14px; border: 3px solid var(--ink); border-radius: 10px; background: #fff; }
+.crowd-line { margin: 0; font-size: 15px; }
+.crowd-line b { color: var(--red); font-size: 1.15em; }
+.crowd-bar { display: block; height: 12px; background: var(--paper-2); border: 2px solid var(--ink); border-radius: 5px; overflow: hidden; }
+.crowd-bar i { display: block; height: 100%; background: var(--green); transition: width 0.6s ease-out; }
+.crowd-sub { margin: 0; }
+.crowd-sub:empty { display: none; }
 .board-bar { display: block; height: 14px; background: #fff; border: 2px solid var(--ink); border-radius: 5px; overflow: hidden; }
 .board-bar i { display: block; height: 100%; background: var(--gold); }
 .board li.me .board-bar i { background: var(--green); }

@@ -15,6 +15,8 @@ import PartBoard from "./pages/PartBoard.jsx";
 import Reveal from "./pages/Reveal.jsx";
 import Admin, { AutoRunner } from "./pages/Admin.jsx";
 import { FeedDigestWriter } from "./lib/feedDigest.js";
+import { ProgressWriter, progressRef } from "./lib/progressDigest.js";
+import { progressView } from "./lib/progress.js";
 import Rules from "./pages/Rules.jsx";
 import GoldPopup from "./pages/GoldPopup.jsx";
 import { Garland, XmasFooter } from "./xmas.jsx";
@@ -156,7 +158,7 @@ function saveAvatarStore(pid, value, at) {
 // 사이트를 열면 어느 탭에서나 맨 위에 뜬다(lib/reminders.js myReminders). 지금 보고 있는 탭이 그 일을 하는 탭이면 그 줄은 숨긴다
 // (내 미션 탭에는 "이번 주 할 일", 추리 보드에는 인증 칸이 이미 있다). "닫기"는 이번에 연 동안만 숨긴다.
 // 내 인증·내 미션 문서는 내 미션·추리 보드 탭과 같은 질의라 Firestore가 하나로 묶어 읽는다(읽기가 늘지 않음).
-function ReminderBar({ myPid, config, inbox, current, go, modNew = 0 }) {
+function ReminderBar({ myPid, config, inbox, current, go, modNew = 0, crowd = null }) {
   const [mine, setMine] = useState(null);
   const [missions, setMissions] = useState(null);
   const [closed, setClosed] = useState(false);
@@ -189,7 +191,8 @@ function ReminderBar({ myPid, config, inbox, current, go, modNew = 0 }) {
             <b>{weeks(toDo)} 미션</b>을 아직 완료하지 않았어요(나는 <Giver>마니또</Giver>).
             {weekDeadline(toDo[0])?.label && (deadlinePassed(toDo[0])
               ? <> <b>마감 시각({weekDeadline(toDo[0]).label})이 지났어요.</b> 곧 닫히니 지금 완료를 알려 주세요.</>
-              : <> <b>{weekDeadline(toDo[0]).label} 마감</b>이고, 마감 뒤에는 할 수 없어요.</>)}{" "}
+              : <> <b>{weekDeadline(toDo[0]).label} 마감</b>이고, 마감 뒤에는 할 수 없어요.</>)}
+            {(() => { const v = progressView(crowd, week); return v && v.done > 0 ? <> 벌써 <b>{v.done}명</b>이 완료했어요!</> : null; })()}{" "}
             <button type="button" className="text-btn" onClick={() => go("mission")}>내 미션으로 가기</button>
           </p>
         )}
@@ -326,6 +329,15 @@ function Session({ user, logout }) {
       .catch(() => setMyReceiver(null));
   }, [myPidForSeen, assignVer]);
 
+  // 모두의 미션 진행(이번 주 완료 인원, 운영자 화면이 세어 둔 public/progress 1건): 내 미션 맨 위와 할 일 줄이 같이 쓴다.
+  // 미션 진행·최종 지목 단계에만 구독한다(숫자는 운영자 화면이 5분마다 다시 세고 바뀔 때만 쓴다).
+  const crowdOn = Boolean(myPidForSeen) && (config?.phase === PHASE.RUNNING || config?.phase === PHASE.GUESSING);
+  const [crowd, setCrowd] = useState(null);
+  useEffect(() => {
+    if (!crowdOn) { setCrowd(null); return undefined; }
+    return onSnapshot(progressRef(), (s) => setCrowd(s.exists() ? s.data() : null), () => setCrowd(null));
+  }, [crowdOn]);
+
   // 마니또에게서 온 것(완료 알림·쪽지): 내 미션(인증 안 한 미션 알림), 추리 보드, 안 읽은 표시가 같이 쓴다(한 번만 읽기).
   const [inbox, setInbox] = useState([]);
   useEffect(() => {
@@ -447,8 +459,9 @@ function Session({ user, logout }) {
       angelInbox,
       fromReceiver,
       modNotes,
+      crowd,
     };
-  }, [user, config, me, roster, avatars, loadAvatar, setAvatarLocal, myReceiver, inbox, angelInbox, fromReceiver, modNotes]);
+  }, [user, config, me, roster, avatars, loadAvatar, setAvatarLocal, myReceiver, inbox, angelInbox, fromReceiver, modNotes, crowd]);
 
   if (config === FAILED) return <LoadFailed code={failCode} retry={() => { setConfig(undefined); setRecheckNo((n) => n + 1); }} logout={logout} />;
   if (config === undefined || me === undefined || roster === undefined) return <Loading />;
@@ -533,10 +546,11 @@ function Session({ user, logout }) {
         </header>
         {config.notice && (ctx.myPid || ctx.isAdmin) && <p className="notice-banner" role="status"><b>공지</b>{config.notice}</p>}
         {ctx.myPid && <GoldPopup myPid={ctx.myPid} uid={user.uid} />}
-        {ctx.myPid && <ReminderBar myPid={ctx.myPid} config={config} inbox={inbox} current={current} go={setTab} modNew={modItems.filter((m) => !seen.mod.includes(m.id)).length} />}
+        {ctx.myPid && <ReminderBar myPid={ctx.myPid} config={config} inbox={inbox} current={current} go={setTab} modNew={modItems.filter((m) => !seen.mod.includes(m.id)).length} crowd={crowd} />}
         {/* 예약(자동 진행) 실행기: 운영자·공동 운영자의 화면이 열려 있는 동안 예약 시각이 지난 작업을 실행한다 */}
         {ctx.isAdmin && <AutoRunner />}
         {ctx.isAdmin && <FeedDigestWriter />}
+        {ctx.isAdmin && <ProgressWriter phase={config.phase} week={config.week || 1} />}
         <main>{body}</main>
         <XmasFooter />
       </div>

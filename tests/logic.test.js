@@ -1675,3 +1675,19 @@ test("할 일: 주차별 추측은 이번 주 단서 2개가 나온 뒤부터 �
   assert.equal(guessReminderOpen({ phase: PHASE.RUNNING, week: 2, cluesReleased: 4 }), true);
   assert.equal(guessReminderOpen({ phase: PHASE.SETUP, week: 1, cluesReleased: 2 }), false);
 });
+
+test("모두의 미션 진행: 이번 주 완료 인원 / 가입 인원, 지난 주차, 이번 주를 아직 안 셌으면 보이지 않음, 같은 숫자면 다시 쓰지 않음", async () => {
+  const { progressView, sameProgress } = await import("../src/lib/progress.js");
+  const at = { toDate: () => new Date(2026, 10, 24, 14, 5) };
+  const v = progressView({ joined: 50, weeks: { 1: 45, 2: 12 }, at }, 2);
+  assert.deepEqual({ ...v, at: v.at.getMinutes() }, { week: 2, done: 12, joined: 50, pct: 24, past: [{ week: 1, done: 45 }], at: 5 });
+  assert.equal(progressView({ joined: 50, weeks: { 1: 45 } }, 2), null, "주차가 막 바뀌어 이번 주를 아직 안 셌으면 지난 숫자를 이번 주처럼 보이지 않는다");
+  assert.equal(progressView(null, 1), null);
+  assert.equal(progressView({ joined: 0, weeks: { 1: 0 } }, 1), null, "가입한 사람이 없으면 보이지 않음");
+  assert.equal(progressView({ joined: 3, weeks: { 1: 5 } }, 1).done, 3, "완료 수가 가입 수를 넘지 않게");
+  assert.equal(progressView({ joined: 3, weeks: { 1: 0 } }, 1).at, null, "시각이 없으면 null");
+  assert.equal(sameProgress({ joined: 50, weeks: { 1: 45 } }, { joined: 50, weeks: { 1: 45 }, at: 1 }), true);
+  assert.equal(sameProgress({ joined: 50, weeks: { 1: 45 } }, { joined: 50, weeks: { 1: 46 } }), false);
+  assert.equal(sameProgress({ joined: 50, weeks: { 1: 45 } }, { joined: 50, weeks: { 1: 45, 2: 0 } }), false, "주차가 늘면 다시 쓴다");
+  assert.equal(sameProgress(null, { joined: 1, weeks: {} }), false);
+});
