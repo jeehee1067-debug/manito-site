@@ -11,6 +11,7 @@ import { Icon } from "../icons.jsx";
 import { GOLD_DRAW, TICKET_RULES } from "../config/prizes.js";
 import { cardCost, cardLevel } from "../lib/scoring.js";
 import { bump } from "../lib/writes.js";
+import { progressView } from "../lib/progress.js";
 
 // 대상 이름은 처음에 가려 둔다(사무실에서 화면을 열면 옆 사람이 볼 수 있어서). "이름 보기"를 누르면 이만큼 보인다.
 const SHOW_MS = 60 * 1000;
@@ -33,6 +34,25 @@ const stars = (lv) => {
   const k = LEVELS.indexOf(starLevel(lv));
   return <span className="card-stars" aria-hidden="true">{"★".repeat(k + 1)}<i>{"★".repeat(2 - k)}</i></span>;
 };
+
+// 모두의 미션 진행: 이번 주차 미션을 완료한 마니또 수 / 가입한 사람 수(부서 전체 숫자만. 운영자 화면이 세어 둔 public/progress — App이 구독)
+const hhmm = (d) => `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+function CrowdProgress() {
+  const { crowd, config } = useApp();
+  const v = progressView(crowd, config.week || 1);
+  if (!v) return null;
+  return (
+    <section className="crowd-progress" aria-label="모두의 미션 진행">
+      <p className="crowd-line">
+        참여 {v.joined}명 중 <b>{v.done}명</b>이 {v.week}주차 미션을 완료했어요{v.done > 0 && v.done < v.joined ? "!" : v.done >= v.joined ? " 🎉" : ""}
+      </p>
+      <span className="crowd-bar" role="img" aria-label={`${v.pct}%`}><i style={{ width: `${v.pct}%` }} /></span>
+      <p className="small muted crowd-sub">
+        {v.past.map((p) => `${p.week}주차 ${p.done}명 완료`).join(" · ")}{v.past.length > 0 && v.at ? " · " : ""}{v.at ? `${hhmm(v.at)} 기준` : ""}
+      </p>
+    </section>
+  );
+}
 
 export default function MyMission({ active = true }) {
   const { myPid, nameOf, config, byPid, inbox, fromReceiver, angelInbox } = useApp();
@@ -139,6 +159,7 @@ export default function MyMission({ active = true }) {
 
   return (
     <>
+      <CrowdProgress />
       {config.phase < PHASE.SCORING && (
         <Panel title="이번 주 할 일">
           {todo.length === 0

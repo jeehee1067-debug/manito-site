@@ -4,6 +4,8 @@
 const { chromium } = require("playwright");
 const assert = require("node:assert/strict");
 const H = require("./helpers.cjs");
+const fs = require("node:fs");
+const path = require("node:path");
 const step = (s) => console.log("▶", s);
 
 (async () => {
@@ -104,6 +106,34 @@ const step = (s) => console.log("▶", s);
     assert.doesNotMatch(await r.title(), /^\(/);
     console.log(`  ${R}: '추리 보드' 탭에 1, 탭 제목 "${"(1) …"}" → 추리 보드를 열면 사라짐`);
     await H.tab(g, "피드");
+  }
+
+  step("모두의 미션 진행: 운영자 화면이 이번 주 완료 인원을 세어 두면 참여자 내 미션 맨 위와 할 일 줄에 보인다");
+  {
+    // 미션 진행으로 넘어갈 때 운영자 화면이 한 번 셌다(0명). 가나가 완료한 뒤 운영자 화면을 새로 열면 다시 센다(평소에는 5분마다)
+    const progressOf = async () => H.readDoc("public/progress");
+    await admin.reload();
+    for (let k = 0; k < 60 && (await progressOf()).weeks?.["1"] !== 1; k++) await admin.waitForTimeout(250);
+    const pg = await progressOf();
+    assert.equal(pg.joined, 4, "가입한 4명");
+    assert.deepEqual(pg.weeks, { 1: 1 }, "1주차 완료 1명(가나)");
+    const viewer = u[NAMES.find((n) => n !== "가나" && n !== R)]; // 주인공(R)은 다음 단계에서 추리 보드에 있어야 해서 다른 사람으로 본다
+    await H.tab(viewer, "내 미션");
+    const box = viewer.locator(".crowd-progress:visible");
+    await box.getByText(/참여 4명 중 1명이 1주차 미션을 완료했어요!/).waitFor();
+    assert.match(await box.innerText(), /기준/, "몇 시 기준인지 보인다");
+    fs.mkdirSync(path.join(__dirname, "shots", "fun"), { recursive: true });
+    await box.screenshot({ path: path.join(__dirname, "shots", "fun", "crowd-progress.png") });
+    // 아직 1주차를 안 한 사람의 할 일 줄(다른 탭): "벌써 1명이 완료했어요!"
+    // 규칙 탭에서 본다(피드 탭에 들어가면 3분 동안 읽어 둔 목록을 써서, 뒤 단계의 "새 글이 보이는지" 확인이 어긋난다)
+    await H.tab(viewer, "규칙");
+    const bar = viewer.locator(".reminder-bar p", { hasText: "1주차 미션" });
+    await bar.getByText(/벌써 1명이 완료했어요!/).waitFor();
+    await viewer.locator(".reminder-bar").screenshot({ path: path.join(__dirname, "shots", "fun", "crowd-reminder.png") });
+    await H.tab(viewer, "내 미션");
+    // 파트별 숫자는 없다(실시간 파트 숫자로 마니또의 파트가 드러나지 않게)
+    assert.deepEqual(Object.keys(pg).sort(), ["at", "joined", "v", "weeks"]);
+    console.log("  운영자 화면이 센 숫자: 가입 4명, 1주차 완료 1명 → 참여자 내 미션 맨 위 '참여 4명 중 1명이 1주차 미션을 완료했어요!', 할 일 줄 '벌써 1명이 완료했어요!'");
   }
 
   step("마니또에게 한마디: 주차마다 한 번, 마니또 메뉴에 숫자");
