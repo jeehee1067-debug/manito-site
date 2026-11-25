@@ -1,6 +1,7 @@
 // 운영 화면 "짝 현황" 표와 "받은 게 없어요 확인" 표에 쓰는 계산.
 // 운영자는 참여하지 않는 계정이라 짝·진행·지목을 언제든 읽는다(보안 규칙).
 import { MISSION_SLOTS, cardHow } from "./constants.js";
+import { slotPairs } from "./handover.js";
 
 // 주차 상태
 //  none      아직 카드를 안 고름
@@ -22,6 +23,7 @@ export const SLOT_STATUS_LABEL = {
   auto: "칭찬 카드 전달(인정)",
   redeemed: "인증됨",
   voided: "인증 무효",
+  left: "이탈(이어 받음)",
 };
 
 /**
@@ -33,17 +35,28 @@ export const SLOT_STATUS_LABEL = {
  * autoPraise: Set("받는사람_주차") 사이트가 전달한 칭찬 카드(운영자가 가리지 않은 것). 인증이 없어도 인정된다.
  * codeSent: Set("받는사람_주차") 인증 코드가 실린 완료 알림·쪽지가 간 주차(대상이 코드를 받았는지).
  * guesses: { receiverPid: { guessPid } }
- * 반환: [{ giverPid, receiverPid, slots: { 1: { status, level, text, done, notes, code, reported, verdict }, … }, guessPid, correct }]
+ * handover: meta/handover(중도 이탈로 짝을 이어 붙인 기록, handover.js). 주차마다 그 주차의 대상으로 상태를 본다.
+ * 반환: [{ giverPid, receiverPid, left, slots: { 1: { status, receiverPid, level, text, done, notes, code, reported, verdict }, … }, guessPid, correct }]
+ *   slots[주차].receiverPid = 그 주차의 대상(이어 받은 마니또의 지난 주차는 빠진 사람). 빠진 사람의 줄(left = true)도 넣는다:
+ *   그 사람이 한 주차는 그대로 보이고, 이어 받은 뒤 주차는 status "left". 이 줄의 receiverPid는 마지막으로 챙긴 대상.
  */
-export function pairRows({ assignments = {}, giverCodes = {}, missions = {}, redemptions = {}, reports = {}, verdicts = {}, guesses = {}, delivered = new Set(), autoPraise = new Set(), codeSent = new Set() }) {
-  return Object.entries(assignments).map(([giverPid, a]) => {
+export function pairRows({ assignments = {}, giverCodes = {}, missions = {}, redemptions = {}, reports = {}, verdicts = {}, guesses = {}, delivered = new Set(), autoPraise = new Set(), codeSent = new Set(), handover = null }) {
+  const at = slotPairs(assignments, handover);
+  const leftRows = [...at.left].filter((pid) => !assignments[pid] && at.givers.includes(pid))
+    .map((pid) => [pid, { receiverPid: [...MISSION_SLOTS].reverse().map((s) => at.receiverAt(pid, s)).find(Boolean) }, true]);
+  return [...Object.entries(assignments).map(([g, a]) => [g, a, false]), ...leftRows].map(([giverPid, a, left]) => {
     const receiverPid = a.receiverPid;
     const m = missions[giverPid] || {};
     const slots = {};
     for (const slot of MISSION_SLOTS) {
+      const slotReceiver = at.receiverAt(giverPid, slot);
+      if (!slotReceiver) {
+        slots[slot] = { status: "left", receiverPid: null, level: null, cardId: null, text: "", done: false, notes: 0, code: null, codeSent: false, reported: false, verdict: null, voided: false };
+        continue;
+      }
       const code = giverCodes[giverPid]?.codes?.[slot] || null;
       const choice = m.choices?.[slot] || null;
-      const key = `${receiverPid}_${slot}`;
+      const key = `${slotReceiver}_${slot}`;
       const done = m.done?.[slot] === true || delivered.has(key); // 완료 표시는 정확히 true일 때만(보안 규칙도 true만 받는다)
       const red = code ? redemptions[code] : null;
       const reported = Boolean(reports[key]) && reports[key].active !== false; // 취소한 신고는 active = false (예전 신고는 active 없음)
@@ -52,10 +65,10 @@ export function pairRows({ assignments = {}, giverCodes = {}, missions = {}, red
       if (red && !red.voided) status = "redeemed";
       else if (red) status = verdict === "received" ? "confirmed" : "voided"; // 무효 처리된 인증: "받았음"으로 확인하면 마니또의 미션은 인정
       else if (done) status = verdict === "received" ? "confirmed" : verdict === "missing" ? "missing" : reported ? "reported" : autoPraise.has(key) ? "auto" : "sent";
-      slots[slot] = { status, level: choice?.level || null, cardId: choice?.cardId || null, text: choice?.text || "", done, notes: m.notes?.[slot] || 0, code, codeSent: codeSent.has(key), reported, verdict, voided: Boolean(red?.voided) };
+      slots[slot] = { status, receiverPid: slotReceiver, level: choice?.level || null, cardId: choice?.cardId || null, text: choice?.text || "", done, notes: m.notes?.[slot] || 0, code, codeSent: codeSent.has(key), reported, verdict, voided: Boolean(red?.voided) };
     }
-    const guessPid = guesses[receiverPid]?.guessPid || null;
-    return { giverPid, receiverPid, slots, guessPid, correct: guessPid === giverPid };
+    const guessPid = left ? null : guesses[receiverPid]?.guessPid || null;
+    return { giverPid, receiverPid, left, slots, guessPid, correct: !left && guessPid === giverPid };
   });
 }
 
@@ -73,7 +86,7 @@ export function unresolvedSlots(rows, { onlyReported = false } = {}) {
       const open = ["sent", "reported", "confirmed", "missing"].includes(s.status) || s.voided;
       if (!open) continue;
       if (onlyReported && !s.reported && !s.verdict) continue;
-      out.push({ giverPid: r.giverPid, receiverPid: r.receiverPid, slot: Number(slot), level: s.level, text: s.text, reported: s.reported, verdict: s.verdict, voided: s.voided });
+      out.push({ giverPid: r.giverPid, receiverPid: s.receiverPid || r.receiverPid, slot: Number(slot), level: s.level, text: s.text, reported: s.reported, verdict: s.verdict, voided: s.voided });
     }
   }
   return out;
@@ -86,7 +99,11 @@ export function unresolvedSlots(rows, { onlyReported = false } = {}) {
 //   roster: [{ pid, part }], assignments: { 마니또: { receiverPid } }, hints: [{ receiverPid, answer, ver }](파트 단서, idx 6), config
 // 반환 status: "none"(짝이 없음) | "mismatch"(명단과 짝이 안 맞음) | "partial"(짝은 있는데 마무리 값이 빠짐) | "ok"
 //   want: 설정에 있어야 하는 값 { assignVer, partExcluded, siteMatched } — hintsUsable이면 콘솔에서 이 값만 넣어도 된다
-export function assignmentHealth({ roster = [], assignments = {}, hints = [], config = {} }) {
+//   handover: 중도 이탈로 짝을 이어 붙인 기록 — 빠진 사람은 명단에서 빼고 보고, 이어 붙인 짝(같은 파트일 수 있다)은 "다른 파트끼리" 검사에서 뺀다
+export function assignmentHealth({ roster: allRoster = [], assignments = {}, hints = [], config = {}, handover = null }) {
+  const ho = slotPairs(assignments, handover);
+  const roster = allRoster.filter((r) => !ho.left.has(r.pid));
+  const joinedByHandover = new Set(ho.items.map((x) => `${x.giver}>${x.receiver}`));
   const partOf = Object.fromEntries(roster.map((r) => [r.pid, (r.part || "").trim()]));
   const givers = Object.keys(assignments);
   const n = roster.length;
@@ -95,7 +112,7 @@ export function assignmentHealth({ roster = [], assignments = {}, hints = [], co
   const receivers = new Set(givers.map((g) => assignments[g]?.receiverPid));
   if (givers.length !== n || roster.some((r) => !assignments[r.pid] || !receivers.has(r.pid))) return { ...base, status: "mismatch" };
   const pairs = givers.map((g) => [g, assignments[g].receiverPid]);
-  const partExcluded = !pairs.some(([g, r]) => partOf[g] && partOf[g] === partOf[r]);
+  const partExcluded = !pairs.some(([g, r]) => partOf[g] && partOf[g] === partOf[r] && !joinedByHandover.has(`${g}>${r}`));
   const byReceiver = Object.fromEntries(hints.map((h) => [h.receiverPid, h]));
   const needHint = pairs.filter(([g]) => partOf[g]);
   const vers = new Set(needHint.map(([, r]) => byReceiver[r]?.ver));
@@ -108,11 +125,18 @@ export function assignmentHealth({ roster = [], assignments = {}, hints = [], co
   return { ...base, status: ok ? "ok" : "partial", hintsUsable: hintsUsable || !needHint.length, needHints: needHint.length, want };
 }
 
-export function receiverCodesOf(assignments, giverCodes) {
+// handover: 중도 이탈로 짝을 이어 붙인 기록 — 주차마다 그 주차의 마니또가 가진 코드를 넣는다
+// (이어 받은 마니또에게는 빠진 사람의 남은 주차 코드가 옮겨 가 있어서, 대상 쪽 코드는 그대로다).
+export function receiverCodesOf(assignments, giverCodes, handover = null) {
+  const at = slotPairs(assignments || {}, handover);
   const out = {};
-  for (const [giverPid, a] of Object.entries(assignments || {})) {
+  for (const giverPid of at.givers) {
     const codes = giverCodes?.[giverPid]?.codes;
-    if (a?.receiverPid && codes) out[a.receiverPid] = { ...codes };
+    if (!codes) continue;
+    for (const [slot, code] of Object.entries(codes)) {
+      const r = at.receiverAt(giverPid, slot);
+      if (r && code) out[r] = { ...(out[r] || {}), [slot]: code };
+    }
   }
   return out;
 }
@@ -148,7 +172,7 @@ export function cluesDoneSet(assignments, clues, ver = 0) {
 export function cardPicks(rows, slot) {
   const counts = { easy: 0, normal: 0, hard: 0, praise: 0, none: 0, site: 0, real: 0, done: 0, redeemed: 0, noCode: 0 };
   const byCard = new Map();
-  const people = rows.map((r) => {
+  const people = rows.filter((r) => r.slots[slot]?.status !== "left").map((r) => {
     const x = r.slots[slot] || { status: "none" };
     const picked = Boolean(x.level);
     const how = picked ? cardHow({ cardId: x.cardId, text: x.text }) : null;
@@ -169,7 +193,7 @@ export function cardPicks(rows, slot) {
     }
     const noCode = done && !redeemed && !x.codeSent && x.status !== "auto";
     if (noCode) counts.noCode++;
-    return { giverPid: r.giverPid, receiverPid: r.receiverPid, level: x.level || null, cardId: x.cardId || null, text: x.text || "", how, status: x.status, notes: x.notes || 0,
+    return { giverPid: r.giverPid, receiverPid: x.receiverPid || r.receiverPid, level: x.level || null, cardId: x.cardId || null, text: x.text || "", how, status: x.status, notes: x.notes || 0,
       code: x.code || null, codeSent: Boolean(x.codeSent), noCode };
   });
   const order = { easy: 0, normal: 1, hard: 2, praise: 3 };
@@ -183,15 +207,19 @@ export function cardPicks(rows, slot) {
  * "나에게 온 코드가 아니에요"가 된다.
  * 반환: [{ giverPid, receiverPid, slot, code, problem: "missing" | "wrong", got }]
  */
-export function codeProblems(assignments = {}, giverCodes = {}, codes = {}) {
+// handover: 중도 이탈로 짝을 이어 붙인 기록 — 주차마다 그 주차의 대상을 가리키는지 본다(빠진 사람의 이어 받은 뒤 주차는 보지 않는다)
+export function codeProblems(assignments = {}, giverCodes = {}, codes = {}, handover = null) {
+  const at = slotPairs(assignments, handover);
   const out = [];
-  for (const [giverPid, a] of Object.entries(assignments)) {
+  for (const giverPid of at.givers) {
     for (const slot of MISSION_SLOTS) {
+      const receiverPid = at.receiverAt(giverPid, slot);
+      if (!receiverPid) continue;
       const code = giverCodes[giverPid]?.codes?.[slot];
-      if (!code) { out.push({ giverPid, receiverPid: a.receiverPid, slot, code: null, problem: "missing", got: null }); continue; }
+      if (!code) { out.push({ giverPid, receiverPid, slot, code: null, problem: "missing", got: null }); continue; }
       const got = codes[code] || null;
-      if (!got) out.push({ giverPid, receiverPid: a.receiverPid, slot, code, problem: "missing", got: null });
-      else if (got.receiverPid !== a.receiverPid || Number(got.slot) !== slot) out.push({ giverPid, receiverPid: a.receiverPid, slot, code, problem: "wrong", got });
+      if (!got) out.push({ giverPid, receiverPid, slot, code, problem: "missing", got: null });
+      else if (got.receiverPid !== receiverPid || Number(got.slot) !== slot) out.push({ giverPid, receiverPid, slot, code, problem: "wrong", got });
     }
   }
   return out;
@@ -204,9 +232,9 @@ export function codeProblems(assignments = {}, giverCodes = {}, codes = {}) {
  * 셀 대상은 가입했고 중도 이탈이 아닌 사람. 정답 = 그 사람의 실제 마니또(assignments에서 receiverPid가 그 사람인 giver).
  * 반환 { summary: [{ week, eligible, guessed, correct }], rows: [{ pid, name, part, cells: { 주차: { pid, correct } | null } }] } (rows는 파트·이름순)
  */
-export function midGuessStats({ midGuesses = {}, assignments = {}, roster = [], week = 1 }) {
-  const giverOf = {};
-  for (const [g, a] of Object.entries(assignments)) if (a?.receiverPid) giverOf[a.receiverPid] = g;
+export function midGuessStats({ midGuesses = {}, assignments = {}, roster = [], week = 1, handover = null }) {
+  // 정답은 그 주차의 마니또(중도 이탈로 마니또가 바뀐 사람은 바뀌기 전 주차의 정답이 빠진 사람이다)
+  const at = slotPairs(assignments, handover);
   const weeks = Array.from({ length: Math.max(1, Math.min(3, week)) }, (_, i) => i + 1);
   const rows = roster
     .filter((r) => r.uid && !r.dropout)
@@ -214,7 +242,7 @@ export function midGuessStats({ midGuesses = {}, assignments = {}, roster = [], 
       const g = midGuesses[r.pid]?.guesses || {};
       const cells = Object.fromEntries(weeks.map((w) => {
         const pid = g[String(w)];
-        return [w, pid ? { pid, correct: pid === giverOf[r.pid] } : null];
+        return [w, pid ? { pid, correct: pid === at.giverAt(r.pid, w) } : null];
       }));
       return { pid: r.pid, name: r.name || r.pid, part: r.part || "", cells };
     })

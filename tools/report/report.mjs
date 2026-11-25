@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // 부서 공지용 "N주차 결산" 그림(PNG)과 메일 글 만들기(사용자가 정함, 11/25). 숫자 계산은 compute.js.
-//   node tools/report/report.mjs <백업.json> --week 1 --out <폴더> [--font-dir <Galmuri 글꼴 폴더>]
+//   node tools/report/report.mjs <백업.json> --week 1 --out <폴더> [--font-dir <Galmuri 글꼴 폴더>] [--width 1400]
 //   node tools/report/report.mjs --sample --out <폴더>        예시 숫자로 모양만 보기(그림에 "예시" 띠가 붙는다)
-// 결과: report.json(숫자), report.html, report.png(가로 1080 기준 2배), mail.txt(제목·본문, 사진 4장 들어갈 자리 표시)
+// 결과: report.json(숫자), report.html, report.png(가로 --width(기본 1400, 메일 본문에서 보기 좋은 조금 넓은 비율) 기준 2배), mail.txt(제목·본문, 사진 4장 들어갈 자리 표시)
+// 후기는 줄여 쓰지 않고 전부 싣는다(사용자가 정함, 11/26).
 // 백업 JSON에는 이름·메일·누가 누구의 마니또인지가 들어 있다. 이 스크립트의 결과에는 넣지 않지만, 백업 파일 자체는 운영진만 다룬다.
 // 그림은 Playwright(Chromium)로 찍는다. 글꼴 Galmuri는 --font-dir가 없으면 jsDelivr에서 불러온다(사이트와 같은 글꼴).
 import fs from "node:fs";
@@ -29,13 +30,14 @@ const SAMPLE = {
 };
 
 function args(argv) {
-  const out = { week: 1 };
+  const out = { week: 1, width: 1400 };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--sample") out.sample = true;
     else if (a === "--week") out.week = Number(argv[++i]);
     else if (a === "--out") out.out = argv[++i];
     else if (a === "--font-dir") out.fontDir = argv[++i];
+    else if (a === "--width") out.width = Math.max(900, Math.min(2000, Number(argv[++i]) || 1400));
     else if (!a.startsWith("--")) out.backup = a;
   }
   return out;
@@ -66,7 +68,7 @@ function fontCss(fontDir) {
   </style>`;
 }
 
-export function renderHtml(d, { fontDir } = {}) {
+export function renderHtml(d, { fontDir, width = 1400 } = {}) {
   const info = nextInfo(d.week);
   const next = d.week + 1;
   const levelBar = ["easy", "normal", "hard", "praise"].filter((l) => d.levelMix[l] > 0)
@@ -74,7 +76,15 @@ export function renderHtml(d, { fontDir } = {}) {
   const popular = d.popular.map((p, i) => `<li><b>${i + 1}</b><span class="lv-tag lv-${p.level}">${esc(LEVEL_LABEL[p.level] || "")}</span>${esc(p.title)}</li>`).join("");
   const reviews = d.topReviews.map((r, i) => `<div class="quote"><span class="rank">${i + 1}</span><p>“${esc(r.text)}”</p><span class="heart">♥ ${r.likes}</span></div>`).join("")
     || `<p class="muted">아직 공감을 받은 후기가 없어요.</p>`;
-  const lights = Array.from({ length: 22 }, (_, i) => `<i class="l${i % 4}"></i>`).join("");
+  const lights = Array.from({ length: Math.round(width / 50) }, (_, i) => `<i class="l${i % 4}"></i>`).join("");
+  // 배경 눈(사용자가 정함, 11/26): 늘 같은 자리에 오게 정해진 수열로 흩뿌린다. 작은 점 + 가끔 눈 결정, 맨 아래는 쌓인 눈
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  const flakes = Array.from({ length: Math.round(width / 6) }, () => {
+    const size = 3 + Math.floor(rnd() * 5);
+    return `<i class="flake" style="left:${(rnd() * 100).toFixed(2)}%;top:${(rnd() * 100).toFixed(2)}%;width:${size}px;height:${size}px;opacity:${(0.35 + rnd() * 0.55).toFixed(2)}"></i>`;
+  }).join("") + Array.from({ length: 18 }, () =>
+    `<i class="crystal" style="left:${(rnd() * 97).toFixed(2)}%;top:${(rnd() * 97).toFixed(2)}%;font-size:${18 + Math.floor(rnd() * 16)}px;opacity:${(0.35 + rnd() * 0.35).toFixed(2)}">❄</i>`).join("");
   const news = d.week === 1 ? `
       <li><span class="tag new">NEW</span><div><b>새 카드 ${newCardNames().length}장</b><small>${esc(newCardNames().join(" · "))}</small><small>쉬움·보통 카드 두 장 중 한 장은 새 카드예요</small></div></li>
       <li><span class="tag gold">✨ 황금</span><div><b>황금 카드 등장!</b><small>${esc(goldCardNames().slice(0, 2).join(" · "))} 등 · 응모권은 도전과 같아요</small><small>대상이 인증하면 매주 ${GOLD_DRAW.perWeek}명을 뽑아 ☕ ${esc(GOLD_DRAW.prize)}</small></div></li>
@@ -85,8 +95,15 @@ export function renderHtml(d, { fontDir } = {}) {
 <style>
   :root { --ink:#1d2029; --paper:#fbfbf7; --paper2:#eceadf; --blue:#3d6ea8; --blued:#274a75; --bluel:#8fc0e8; --red:#c0392b; --green:#2e8b4f; --gold:#e8b83b; --night:#16213a; }
   * { box-sizing: border-box; }
-  body { word-break: keep-all; overflow-wrap: anywhere; margin:0; width:1080px; background: var(--night); font-family: "Galmuri11","Galmuri9","Malgun Gothic",sans-serif; color: var(--ink); }
-  .poster { position:relative; padding:36px 40px 40px; background: radial-gradient(circle at 20% 10%, #22305299 0 2px, transparent 3px) 0 0/46px 46px, var(--night); overflow:hidden; }
+  body { word-break: keep-all; overflow-wrap: anywhere; margin:0; width:${width}px; background: var(--night); font-family: "Galmuri11","Galmuri9","Malgun Gothic",sans-serif; color: var(--ink); }
+  .flake { position:absolute; z-index:0; background:#fff; border-radius:50%; box-shadow:0 0 6px rgba(255,255,255,.6); pointer-events:none; }
+  .crystal { position:absolute; z-index:0; color:#e6f0ff; font-style:normal; line-height:1; text-shadow:0 0 8px rgba(200,225,255,.7); pointer-events:none; }
+  .lights, header, .card, .two, footer, .sample { position:relative; z-index:1; }
+  .snowbank { position:absolute; left:0; right:0; bottom:0; height:46px; z-index:0; background:#f4f8ff;
+    border-radius:60% 40% 0 0 / 38px 30px 0 0; box-shadow:0 -4px 0 #d9e6f7 inset; }
+  .snowbank::before { content:""; position:absolute; left:18%; bottom:22px; width:30%; height:40px; background:#f4f8ff; border-radius:50% 50% 0 0; }
+  .snowbank::after { content:""; position:absolute; right:10%; bottom:18px; width:26%; height:36px; background:#f4f8ff; border-radius:50% 50% 0 0; }
+  .poster { position:relative; padding:36px 40px 84px; background: radial-gradient(circle at 20% 10%, #22305299 0 2px, transparent 3px) 0 0/46px 46px, var(--night); overflow:hidden; }
   .lights { display:flex; justify-content:space-between; padding:0 6px 18px; border-top:3px solid #0d1426; }
   .lights i { width:16px; height:22px; border-radius:50% 50% 45% 45%; margin-top:-2px; box-shadow:0 0 14px 2px currentColor; }
   .l0 { background:#ff6b6b; color:#ff6b6b; } .l1 { background:#ffd25a; color:#ffd25a; } .l2 { background:#5fd38d; color:#5fd38d; } .l3 { background:#7fb6ff; color:#7fb6ff; }
@@ -99,11 +116,14 @@ export function renderHtml(d, { fontDir } = {}) {
   .card h2 { margin:0 0 14px; font-size:28px; display:flex; align-items:center; gap:10px; color: var(--blued); }
   .ico { width:34px; height:34px; image-rendering:pixelated; }
   .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-top:4px; }
-  .stat { background:#fff; border:3px solid var(--ink); border-radius:12px; padding:16px 10px 14px; text-align:center; }
-  .stat b { display:block; font-size:52px; line-height:1.05; color: var(--red); }
+  /* 네 칸 모두 같은 세 줄(숫자 / 막대 또는 아이콘 / 설명)이라 숫자·설명 높이가 맞는다(사용자가 정함, 11/26) */
+  .stat { background:#fff; border:3px solid var(--ink); border-radius:12px; padding:16px 10px 12px; text-align:center;
+    display:grid; grid-template-rows: 62px 30px 52px; align-items:center; justify-items:center; }
+  .stat b { display:block; font-size:52px; line-height:1; color: var(--red); }
   .stat b small { font-size:24px; color: var(--ink); margin-left:2px; }
-  .stat span { display:block; margin-top:8px; font-size:18px; color:#4a4f5c; line-height:1.35; }
-  .bar { height:12px; border:2px solid var(--ink); border-radius:6px; background: var(--paper2); margin:10px 6px 0; overflow:hidden; }
+  .stat span { display:flex; align-items:center; justify-content:center; height:100%; font-size:18px; color:#4a4f5c; line-height:1.35; }
+  .stat .icons { display:flex; gap:8px; } .stat .icons img { width:24px; height:24px; image-rendering:pixelated; }
+  .bar { width:86%; height:14px; border:2px solid var(--ink); border-radius:6px; background: var(--paper2); overflow:hidden; }
   .bar i { display:block; height:100%; background: var(--green); }
   .two { display:grid; grid-template-columns: 1.25fr 1fr; gap:22px; }
   .two .card { margin-top:22px; }
@@ -123,7 +143,7 @@ export function renderHtml(d, { fontDir } = {}) {
   .muted { color:#6b6f7a; font-size:17px; }
   .quotes { display:grid; gap:14px; }
   .quote { position:relative; background:#fff; border:3px solid var(--ink); border-radius:14px; padding:16px 92px 16px 64px; }
-  .quote p { margin:0; font-size:22px; line-height:1.55; }
+  .quote p { margin:0; font-size:22px; line-height:1.55; white-space: pre-line; }
   .quote .rank { position:absolute; left:16px; top:50%; transform:translateY(-50%); width:36px; height:36px; border-radius:50%; background: var(--blue); color:#fff; display:flex; align-items:center; justify-content:center; font-size:20px; border:2px solid var(--ink); }
   .quote .heart { position:absolute; right:16px; top:50%; transform:translateY(-50%); color: var(--red); font-size:24px; font-weight:700; }
   .week2 { background: linear-gradient(180deg,#fffaf0,#fff3d6); }
@@ -139,6 +159,7 @@ export function renderHtml(d, { fontDir } = {}) {
   footer p { margin:16px 0 0; font-size:20px; color:#c9d6f0; }
   .sample { position:absolute; top:58px; right:-92px; transform:rotate(35deg); background: var(--red); color:#fff; font-size:26px; padding:10px 120px; border:3px solid #fff; z-index:5; }
 </style></head><body><div class="poster">
+  ${flakes}<div class="snowbank"></div>
   ${d.sample ? `<div class="sample">예시 숫자 · 실제 아님</div>` : ""}
   <div class="lights">${lights}</div>
   <header>
@@ -151,8 +172,8 @@ export function renderHtml(d, { fontDir } = {}) {
     <div class="stats">
       <div class="stat"><b>${d.completion}<small>%</small></b><div class="bar"><i style="width:${d.completion}%"></i></div><span>미션 완료율</span></div>
       <div class="stat"><b>${d.verifiedPct}<small>%</small></b><div class="bar"><i style="width:${d.verifiedPct}%"></i></div><span>완료된 미션 중<br>대상이 인증</span></div>
-      <div class="stat"><b>${d.notes}<small>통</small></b><span>오간 쪽지</span></div>
-      <div class="stat"><b>${d.likes}<small>번</small></b><span>피드 공감 ♥</span></div>
+      <div class="stat"><b>${d.notes}<small>통</small></b><div class="icons">${icon("mail").repeat(3)}</div><span>오간 쪽지</span></div>
+      <div class="stat"><b>${d.likes}<small>번</small></b><div class="icons">${icon("heart").repeat(3)}</div><span>피드 공감</span></div>
     </div>
   </section>
   <div class="two">
@@ -203,7 +224,8 @@ export function mailText(d) {
     `- ${d.week}주차 추측 참여 ${d.guessPct}%${d.guessCorrect > 0 ? ` — 벌써 ${d.guessCorrect}명이 자기 마니또를 맞혔어요!` : ""} (송년회에서 "가장 먼저 알아챈 사람"이 발표돼요)`,
     "",
     "■ 공감을 가장 많이 받은 후기 (익명 피드에서)",
-    ...(d.topReviews.length ? d.topReviews.map((r, i) => `${i + 1}. "${r.text}" ♥${r.likes}`) : ["(아직 공감을 받은 후기가 없어요)"]),
+    // 후기는 줄바꿈까지 그대로(둘째 줄부터는 번호 아래로 들여 쓴다)
+    ...(d.topReviews.length ? d.topReviews.flatMap((r, i) => [`${i + 1}. "${r.text.split("\n").join("\n   ")}" ♥${r.likes}`, ""]).slice(0, -1) : ["(아직 공감을 받은 후기가 없어요)"]),
     "",
     "■ 📸 이번 주 분석실 신발장 풍경",
     "[사진 4장]",
@@ -244,10 +266,10 @@ async function main() {
   fs.writeFileSync(path.join(o.out, "report.json"), JSON.stringify(data, null, 2));
   fs.writeFileSync(path.join(o.out, "mail.txt"), mailText(data));
   const htmlPath = path.join(o.out, "report.html");
-  fs.writeFileSync(htmlPath, renderHtml(data, { fontDir: o.fontDir }));
+  fs.writeFileSync(htmlPath, renderHtml(data, { fontDir: o.fontDir, width: o.width }));
   const { chromium } = createRequire(import.meta.url)("playwright"); // 전역에 설치된 Playwright도 찾게(require는 NODE_PATH를 본다)
   const browser = await chromium.launch();
-  const page = await (await browser.newContext({ viewport: { width: 1080, height: 1200 }, deviceScaleFactor: 2 })).newPage();
+  const page = await (await browser.newContext({ viewport: { width: o.width, height: 1200 }, deviceScaleFactor: 2 })).newPage();
   await page.goto(pathToFileURL(htmlPath).href);
   await page.evaluate(() => document.fonts.ready);
   await page.screenshot({ path: path.join(o.out, "report.png"), fullPage: true });

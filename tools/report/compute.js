@@ -9,14 +9,16 @@ import { midGuessStats } from "../../src/lib/pairs.js";
 const pct = (a, b) => (b > 0 ? Math.round((a / b) * 100) : 0);
 const ms = (t) => (t ? new Date(t).getTime() || 0 : 0); // 백업의 시각은 ISO 글자
 const LEVELS = ["easy", "normal", "hard", "praise"];
-// 카드 짧은 이름: 이름이 있으면 그것, 없으면 글의 앞부분(괄호 앞, 24자)
+// 카드 짧은 이름: 이름이 있으면 그것, 없으면 글의 앞부분(괄호 앞, 40자까지 — 그림에서는 두 줄로 접힌다)
 export function cardTitle(card) {
   const c = findCard(card) || card || {};
   if (c.name) return c.name;
   const t = String(c.text || "").split(/[(（]/)[0].trim();
-  return t.length > 24 ? `${t.slice(0, 23)}…` : t;
+  return t.length > 40 ? `${t.slice(0, 39)}…` : t;
 }
+// 후기 글: 기본은 줄바꿈까지 그대로(사용자가 정함, 11/26: "중략하지 말고 전부"). n > 0이면 한 줄로 모아 n자에서 자른다.
 const clip = (s, n) => {
+  if (!(n > 0)) return String(s || "").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
   const t = String(s || "").replace(/\s+/g, " ").trim();
   return t.length > n ? `${t.slice(0, n - 1)}…` : t;
 };
@@ -26,7 +28,7 @@ const clip = (s, n) => {
  * 반환 { week, completion, nextCompletion(다음 주차 지금까지, 3주차면 null), verifiedPct, notes, likes, levelMix: { easy, normal, hard, praise } (%), howMix: { real, site } (%),
  *        popular: [{ title, level }] (많이 고른 순 3개), guessPct, guessCorrect, topReviews: [{ text, likes }] }
  */
-export function computeReport(backup, { week = 1, topN = 3, reviewChars = 90 } = {}) {
+export function computeReport(backup, { week = 1, topN = 3, reviewChars = 0 } = {}) {
   const C = backup?.collections || {};
   const w = String(week);
   const roster = Object.entries(C.roster || {}).map(([pid, r]) => ({ pid, ...r }));

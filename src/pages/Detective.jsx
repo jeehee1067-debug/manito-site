@@ -71,7 +71,8 @@ function Inbox({ myPid, items, onUseCode }) {
   const redeemedCodes = new Set((mine || []).map((r) => r.code));
   const redeemedSlots = new Set((mine || []).map((r) => r.slot));
   // 마니또가 완료를 알렸는데 내가 아직 인증하지 않은 1·2주차(3주차 칭찬 카드는 사이트로 바로 오므로 "받은 게 없어요"가 없다)
-  const waiting = [...new Set(items.filter((it) => it.slot !== PRAISE_SLOT).map((it) => it.slot))]
+  // (쪽지는 빼고 본다: 마니또는 완료 전에도 메뉴판·예고 쪽지를 먼저 보낼 수 있다)
+  const waiting = [...new Set(items.filter((it) => it.kind !== "note" && it.slot !== PRAISE_SLOT).map((it) => it.slot))]
     .filter((slot) => !redeemedSlots.has(slot))
     .sort((a, b) => a - b);
   const canRedeem = config.phase === PHASE.RUNNING || config.phase === PHASE.GUESSING;
@@ -651,7 +652,9 @@ function Suspects({ myPid, hintPart }) {
   const myLoc = byPid[myPid]?.loc;
   const bySite = Boolean(config.siteMatched && myLoc);
   // 같은 파트끼리 짝이 하나도 없게 배정됐을 때만 내 파트를 뺀다(예전 배정이나 한 파트가 절반을 넘는 경우는 빼지 않는다).
-  const byPart = config.partExcluded === true && Boolean(myPart);
+  // 단, 파트 단서가 내 파트로 나왔으면 빼지 않는다: 중도 이탈로 짝을 이어 붙이면(tools/handover) 마니또가 같은 파트일 수 있다
+  // (빼면 후보가 0명이 되고, 진짜 마니또를 지목할 수 없다).
+  const byPart = config.partExcluded === true && Boolean(myPart) && hintPart !== myPart;
   const [guess, setGuess] = useState(null);
   const [pick, setPick] = useState("");
   const [msg, setMsg] = useState("");
@@ -661,7 +664,7 @@ function Suspects({ myPid, hintPart }) {
   const suspects = useMemo(
     () =>
       roster
-        .filter((r) => r.pid !== myPid && (!byPart || r.part !== myPart) && (!bySite || r.loc === myLoc) && (!hintPart || r.part === hintPart))
+        .filter((r) => r.pid !== myPid && !r.out && (!byPart || r.part !== myPart) && (!bySite || r.loc === myLoc) && (!hintPart || r.part === hintPart))
         .sort((a, b) => a.name.localeCompare(b.name, "ko")),
     [roster, myPid, myPart, myLoc, byPart, bySite, hintPart]
   );

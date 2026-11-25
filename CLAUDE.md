@@ -57,6 +57,7 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 - `deliveries`(`receiverPid, slot, kind, message, code, card, createdAt`, 보낸 사람 정보 없음) 문서 ID는 정해져 있다.
   - `mission`(1·2주차 완료 알림, `card` = 고른 카드의 `level`·`text`와 같아야 함)·`praise`(3주차 칭찬 카드, 10자 이상. "칭찬만"이면 `card` 없음, 칭찬과 함께 보통·도전 카드를 골랐으면 `card` = 그 카드 — 규칙 `praiseCardOk`): ID `{받는사람}_{주차}`. `giverMissions.done[주차]`를 켜는 것과 한 묶음으로만(규칙이 `getAfter`/`existsAfter`로 서로 확인). 그래서 주차마다 한 번이고, 완료 표시와 알림이 항상 같이 있다.
   - `note`(완료한 주차에 더 보내는 쪽지, 빈 쪽지 안 됨): ID `{받는사람}_{주차}_n{번째}`, `giverMissions.notes[주차]`를 1 올리는 것과 한 묶음으로만, 주차마다 `EXTRA_NOTES_MAX`(5)건까지.
+  - **완료 전 쪽지**(규칙 20261128, 사용자가 정함 11/26: "메뉴판을 보내놓고 확인 요청 의미로 완료를 누른 상태" — 마니또 카페·타임어택처럼 미션 전에 알릴 게 있는 카드가 사이트로 글을 보내려면 '완료'를 눌러야 했다): **지금 열린 주차(`slot == week()`)는 완료 전에도 `note`를 보낼 수 있다. 단 `code`는 `null`만**(받기 전에 인증하지 않게). 같은 순번·같은 5건. 화면은 카드를 고른 뒤 완료 전 칸 아래 `MoreNotes pre`("완료 전에 쪽지 먼저 보내기"). 그래서 **`note`는 "완료를 알린 주차"의 근거가 아니다** — 응모권(`scoring.js` `delivered`), 짝 현황(`usePairs`), 받는 쪽 "받은 게 없어요"·인증 대기(`Detective.jsx` `waiting`), 할 일(`reminders.js`)은 모두 `mission`·`praise`만 본다. 이미 미리 '완료'를 누른 사람(2주차 몇 명)은 그대로 두었다(응모권은 대상의 인증으로만 쌓인다).
   - 운영자는 `hidden`만 바꾸고(받는 사람 화면에서 가림), 지울 수 있다. 받는 사람은 `noteFlags/{쪽지ID}`(`at`)로 한 번 신고한다(운영 화면 "쪽지 검토").
 - "받은 게 없어요": `reports/{받는사람_주차}`(`receiverPid, slot, active, createdAt, n`)는 받는 사람이 만들고, 취소는 `active = false`로 바꾼다(지울 수 없음, phase 1~3, 열린 주차). `verdicts/{받는사람_주차}`(`receiverPid, slot, verdict, at`, `received`/`missing`)는 운영자가 쓴다(phase 1~4). **`missing`은 처음 운영자만** 쓰고 바꾸고 지운다(공동 운영자는 `received`만 남기고 취소). 둘 다 받는 사람·그 사람의 마니또·운영자만 읽는다. 예전 신고에는 `active`가 없고 없으면 유효한 신고로 본다(`pairs.js`).
 - `nudges/{받는사람}`(운영자가 켜는 알림. 그 사람의 마니또 화면에 "대상이 기다리고 있어요")은 그 받는 사람의 마니또만 get한다.
@@ -77,6 +78,12 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 - `results/public`: phase 4에는 통째로 다시 쓸 수 있지만 `draws`는 비어 있어야 하고, phase 5의 `draws`는 `{ seed, grand: { winners }, t4: { winners }, t5: { winners }, t6: { winners } }`(규칙 `drawsShapeOk`. 칸 이름은 `prizes.js`의 `key`·`how`와 맞아야 하고 `npm test`가 확인). `seed`(현장 숫자)는 한 번 넣으면 못 바꾸고, `grand`·`t4`·`t5`(종이로 뽑혀 운영자가 입력한 이름)는 `t6`를 쓰기 전까지 고칠 수 있고, `t6`(사이트가 뽑은 6등)는 숫자가 있어야 쓰며 **쓴 뒤에는 `draws` 전체를 바꿀 수 없다**. 2·3등은 저장하지 않는다 — 응모권 표·공감 수·숫자·종이로 뽑힌 이름에서 `scoring.js` `resolvePrizes`가 계산한다(화면: `Reveal.jsx` `saveSeed`·`editPaper`·`runOnline`, 모두 트랜잭션). 결과 화면 "6등 추첨 검증"이 `verifyOnline`으로 다시 계산한다.
 - 투표는 없앴다(화면·집계 코드 삭제). 규칙의 `votes`·`voteCards`·`voteViews`·`cardOwners`·`adminEval` 경로도 규칙 20261124(주차별 마감)에서 지웠다(지금은 누구도 읽고 쓸 수 없다 — 규칙 테스트가 확인). 단계 3은 `PHASE.CLOSED`("마감")로 이름만 바꿨다(단계는 한 칸씩만 넘어가므로 번호는 그대로).
 - 단서는 배정 회차(`config.assignVer`, 배정할 때마다 +1)가 같은 것만 읽고 쓴다. 다시 배정해도 예전 마니또의 답이 남지 않게(실제로 재현된 버그).
+- **중도 이탈 이어 붙이기**(사용자가 정함, 11/26: 병가로 빠지는 참여자 — "그 사람만 쏙 빠지게", 데이터는 저장해 두고 송년회에 올 수도 있게, 관련된 마니또·대상이 손해 보지 않게): 원 X → Y → Z에서 Y가 빠지면 **X가 `fromSlot` 주차부터 Z를 맡는다**(`tools/handover/handover.py`, 서비스 계정 키로 — 미션 중에는 보안 규칙상 운영자도 짝·코드·단서를 못 바꾼다). 같은 파트를 피하려면 다른 짝 하나를 더 바꿔야 해서(잘못 없는 두 사람의 대상·마니또가 바뀐다) 같은 파트를 허용했다.
+  - 스크립트가 바꾸는 것(한 묶음): `assignments/X = Z`·`assignments/Y` 삭제, Y의 `fromSlot`부터의 코드(Z 앞으로 발급된 것)를 X의 `giverCodes`로 옮김(그래서 `receiverCodes/Z`는 그대로), Z의 단서 6칸을 X의 답(X가 Y에게 낸 `clues/Y_*`)으로·파트 단서(`clues/Z_6`)를 X의 파트로(X가 안 채운 칸은 비움), `roster/Y`에 `dropout`·`leftGame`, `public/roster`의 Y에 `out`(추리 보드 후보에서 뺌 — `roster.js` `rosterSummary`·`Detective.jsx` `Suspects`), `--redo`면 X가 Y에게 이미 '완료'한 `fromSlot` 이후 주차를 되돌림(완료 표시·쪽지 수·완료 알림·추가 쪽지 삭제, `progress.doneCount`). 바꾸기 전 값은 모두 `meta/handover.items[].saved`와 실행한 폴더의 `handover-<Y>-<시각>.json`에. `--undo`는 가장 최근 기록을 되돌린다(X가 이어 받은 뒤 Z에게 완료했거나 Z가 그 코드로 인증했으면 멈춤). 멈추는 경우: 단계가 1이 아님, `fromSlot`이 열린 주차보다 앞, Y가 `fromSlot` 이후를 이미 완료, 그 뒤 코드로 인증한 기록, 맞마니또가 되는 경우.
+  - **지난 주차의 "누가 누구에게"는 `meta/handover`로 계산한다**(`src/lib/handover.js` `slotPairs`: `receiverAt`·`giverAt`·`pairsAt`·`takenOver`, 여러 번 이어 붙여도 맞게 최근 기록부터 거꾸로 되돌린다). 넘겨받는 곳: 응모권(`computeTickets`·`noticedWeeks`의 `handover`), 짝 현황(`pairRows` — 주차마다 `slots[주차].receiverPid`, 빠진 사람 줄 `left: true`·이어 받은 뒤 주차 `status: "left"`), 받은 게 없어요·재촉 메일·수호천사(`needyReceivers`는 주차별 대상 기준), 고른 카드, 받는 사람 기준 코드 자동 채우기(`receiverCodesOf`), 코드 점검(`codeProblems`), 배정 점검(`assignmentHealth`: 빠진 사람은 명단에서 빼고, 이어 붙인 짝은 "다른 파트끼리" 검사에서 뺌), 매주 추측(`midGuessStats`: 그 주차의 마니또가 정답), 칭호(`computeTitles`: 쪽지는 그 주차의 마니또에게, 이어 받은 마니또는 투명 마니또에서 뺌 — 같은 파트라 대상이 최종 지목 전까지 고를 수 없었다), 백업 메시지 모음(`messageRows`의 `meta.handover`). 운영 화면은 `useHandover()`(1건 구독)로 받는다. **짝을 쓰는 계산을 새로 만들면 이 기록도 넘긴다.**
+  - 빠진 사람의 응모권: `dropout`이라 0장이지만 1주차처럼 한 미션은 그대로 계산된다 — 송년회에 오면 운영 화면에서 중도 이탈 표시를 풀면 반영(정답 지목·은신은 지금 짝이 없어 없음).
+  - 같은 파트 짝의 대상(Z) 추리 보드: 미션 기간에는 그대로 내 파트를 빼고(미리 알리면 파트 힌트가 된다), **최종 지목 단계의 파트 단서가 내 파트면 내 파트를 빼지 않는다**(`Suspects` `byPart`: `hintPart !== myPart`. 빼면 후보가 0명). 응모권과 무관한 주차별 추측은 Z가 미션 기간에 X를 고를 수 없었다(사용자에게 알림).
+  - 11/26 첫 적용(2주차부터, `--redo` — 이탈자의 마니또가 미션 전에 '완료'를 누른 상태였다). **누가 빠졌고 누가 누구를 이어 받았는지, 그 짝이 같은 파트인지, 고른 카드 같은 구체적인 내용은 공개 저장소인 이 문서·코드·커밋·PR에 적지 않는다**(이어 받은 대상이 읽으면 마니또를 좁힐 수 있다 — `meta/handover`에만 있다). 사용자가 스크립트를 실행해야 실제로 바뀐다(실행 여부는 이 문서를 쓴 시점에 모름).
 - 단서 답 형식: 고르기 문항(0~2번)은 `firestore.rules`의 `clueAnswerOk`에 적힌 보기 중 하나, 직접 쓰기(3~5번: 책상 물건·TMI·요즘 빠진 것)는 공백 빼고 2자 이상, 모두 60자까지. **`PROFILE_QUESTIONS`의 보기를 바꾸면 규칙의 보기 목록도 같이 고친다**(`npm test`가 같은지 확인).
 - 이미 공개된 단서 칸(`idx < cluesReleased`)은 같은 답으로만 다시 쓸 수 있다(프로필 화면도 그 칸을 잠금). 비어 있던 칸 새로 쓰기와 지난 회차 덮어쓰기는 된다.
 - 파트 단서는 단서 문서 7번째 칸(`idx 6`). 배정할 때 운영자 브라우저가 쓰고 참여자는 쓸 수 없다. 받는 사람은 phase 2부터 읽는다.
@@ -223,6 +230,8 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 | `src/lib/titles.js` | 송년회 칭호 4개 계산(`computeTitles`, 기준은 `TITLES`), 발표에 보일 칭호(`shownTitles`)·커피 쿠폰 당첨자(`goldWinnerWeeks`) |
 | `src/lib/schedule.js` | 예약(자동 진행): 예약할 수 있는 작업(`AUTO_ITEMS`), 지금 실행할 것 계산(`autoPlan`·`nextDue`) |
 | `src/lib/reminders.js` | 재촉: 참여자 할 일(`myReminders`, 주차별 추측 줄 `guessReminderOpen`), 재촉 메일 받는 사람(`reminderTargets`)·글(`reminderMessage`) |
+| `src/lib/handover.js` | 중도 이탈 이어 붙이기 기록(`meta/handover`)으로 주차별 짝 계산(`slotPairs`: `receiverAt`·`giverAt`·`pairsAt`·`takenOver`) |
+| `tools/handover/handover.py` | 중도 이탈 처리(Python, 서비스 계정 키): 짝·코드·단서·명단을 한 묶음으로 바꾸고 기록, `--redo`(이미 누른 완료 되돌리기), `--undo`. 사용법은 README "중도 이탈 처리" |
 | `src/lib/progress.js`, `src/lib/progressDigest.js` | 모두의 미션 진행: 완료율 계산(`progressPercents`)·화면 값(`progressView`)·같은지(`sameProgress`), 운영자 화면이 개수를 세어 완료율만 `public/progress`에 쓰는 `ProgressWriter` |
 | `src/lib/backup.js` | 운영 화면 백업: 전체 백업 내용(`buildBackup`), 메시지·후기 모음(`messageRows`), 엑셀용 CSV(`toCsv`) |
 | `src/lib/writes.js` | 쓰기 횟수 `bump()` = `{ n: increment(1) }` |
@@ -241,7 +250,7 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 | `src/xmas.jsx`, `src/xmas.css`, `src/assets/xmas/` | 연말·크리스마스 장식(시즌 한정). 빼는 방법은 README "연말 장식" |
 | `tools/xmas/` | 크리스마스 꾸밈 캐릭터(`leader1~4.png`)와 사람별 PNG(투명·4배·카드)를 만드는 Python 스크립트 |
 | `tests/rules.test.js` | 보안 규칙 테스트 |
-| `e2e/` | 화면 흐름 검증(`npm run test:e2e`, `run-all.cjs`가 15개를 차례로. `gold.cjs`는 2주차 새 카드·황금 카드·추첨을 화면으로 확인하고 사진을 `e2e/shots/gold`에, `awards.cjs`는 칭호·커피 쿠폰 장면 사진을 `e2e/shots/awards`에 남긴다). 로컬 에뮬레이터 데이터를 지우고 시작한다. `restore.cjs`는 Python `google-cloud-firestore`가 필요하다(`PYTHON=경로`) |
+| `e2e/` | 화면 흐름 검증(`npm run test:e2e`, `run-all.cjs`가 16개를 차례로. `handover.cjs`는 중도 이탈 스크립트를 에뮬레이터에 실행해 짝·코드·단서·되돌리기·완료 전 쪽지·운영 화면 점검·최종 지목 보드·집계를 확인한다. `gold.cjs`는 2주차 새 카드·황금 카드·추첨을 화면으로 확인하고 사진을 `e2e/shots/gold`에, `awards.cjs`는 칭호·커피 쿠폰 장면 사진을 `e2e/shots/awards`에 남긴다). 로컬 에뮬레이터 데이터를 지우고 시작한다. `restore.cjs`·`handover.cjs`는 Python `google-cloud-firestore`가 필요하다(`PYTHON=경로`) |
 | `tools/restore/restore_backup.py` | 전체 백업 JSON으로 Firestore 되살리기(지우지 않음, 기본은 없어진 문서만) |
 | `tools/report/` | 부서 공지용 주차 결산 그림(PNG)·메일 글(`report.mjs`, 숫자 계산 `compute.js` `computeReport` — 사이트 완료율·운영 화면 추측 통계와 같은 식, 이름·짝·파트별 숫자 없음, 맞힌 사람 0명이면 안 적음). 사용법은 README "부서 공지용 결산 그림과 메일 글" |
 | `src/pages/*` | 화면 |

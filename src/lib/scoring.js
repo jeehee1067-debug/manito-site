@@ -1,6 +1,7 @@
 import { PRIZES, TICKET_RULES as R } from "../config/prizes.js";
 import { secureRandom, seededRandom } from "./random.js";
 import { MISSION_CARDS } from "./constants.js";
+import { slotPairs } from "./handover.js";
 
 // 카드 목록(번호 → 난이도·글). 고른 카드(choice)의 번호·난이도·글이 목록과 모두 같을 때만 그 난이도를 인정한다.
 // 저장된 난이도를 그대로 믿으면, 쉬운 카드를 "도전"이라고 적어 추가 응모권을 받을 수 있다(보안 규칙은 번호와 난이도가 맞는지만 본다).
@@ -37,6 +38,8 @@ export function cardCost(choice) {
  * cluesDone: Set(giverPid) 프로필을 채워 단서 6개가 지금 대상에게 간 마니또. 주지 않으면(null) 은신 조건에서 단서를 보지 않는다.
  * angels: { receiverPid: angelPid } 운영자가 연결한 수호천사(마니또가 미션을 안 한 사람에게 지원자를 연결)
  * angelGifts: [{ receiverPid, k, confirmed }] 수호천사 미션(받는 사람이 확인하면 confirmed)
+ * handover: meta/handover(중도 이탈로 짝을 이어 붙인 기록, handover.js). 주면 주차마다 그 주차의 짝으로 센다
+ *   (이어 받은 마니또의 지난 주차는 빠진 사람에게 한 미션, 빠진 사람의 지난 주차도 그 사람의 미션). 정답 지목·은신은 지금 짝으로 본다.
  * verdicts: { "받는사람pid_주차": "received" | "missing" }
  *   마니또가 완료를 알렸는데 인증이 없는 주차를 운영자가 확인한 결과(받는 사람이 "받은 게 없어요"로 신고한 주차 포함).
  *
@@ -60,7 +63,7 @@ export function cardCost(choice) {
  *  - 파트 대항전: 미션 완수율 1위 파트원에게 1장(동률이면 모두). 내 미션이 1건 이상 인증된 사람만.
  *  - 가입 안 한 사람, 중도 이탈, 수상 제외는 0장.
  */
-export function computeTickets({ people, assignments, giverCodes, redemptions, missions, guesses, deliveries = [], verdicts = {}, cluesDone = null, angels = {}, angelGifts = [] }) {
+export function computeTickets({ people, assignments, giverCodes, redemptions, missions, guesses, deliveries = [], verdicts = {}, cluesDone = null, angels = {}, angelGifts = [], handover = null }) {
   const out = {};
   const absent = new Set(); // 불참: 가입 안 함 또는 중도 이탈
   for (const p of people) {
@@ -68,16 +71,22 @@ export function computeTickets({ people, assignments, giverCodes, redemptions, m
     if (p.joined === false || p.dropout) absent.add(p.pid);
   }
   const valid = (code) => redemptions[code] && !redemptions[code].voided;
-  const delivered = new Set(deliveries.map((d) => `${d.receiverPid}:${d.slot}`));
+  // 완료를 알린 주차: 완료 알림(mission·praise). 추가 쪽지(note)는 빼고 본다 — 완료 전에도 쪽지를 먼저 보낼 수 있어서(규칙 20261128)
+  const delivered = new Set(deliveries.filter((d) => d.kind !== "note").map((d) => `${d.receiverPid}:${d.slot}`));
   const autoPraise = new Set(deliveries.filter((d) => d.kind === "praise" && !d.hidden).map((d) => `${d.receiverPid}:${d.slot}`));
-  for (const [giver, receiver] of Object.entries(assignments)) {
-    for (const [slot, on] of Object.entries(missions[giver]?.done || {})) if (on === true) delivered.add(`${receiver}:${slot}`);
+  // 주차별 짝(중도 이탈로 이어 붙인 기록이 없으면 모든 주차가 지금 짝과 같다)
+  const at = slotPairs(assignments, handover);
+  for (const giver of at.givers) {
+    for (const [slot, on] of Object.entries(missions[giver]?.done || {})) {
+      const receiver = at.receiverAt(giver, slot);
+      if (on === true && receiver) delivered.add(`${receiver}:${slot}`);
+    }
   }
   const cluesOk = (giver) => !R.hiddenNeedsClues || cluesDone == null || cluesDone.has(giver);
   const verdictOf = (receiver, slot) => verdicts[`${receiver}_${slot}`] || null;
   const credited = {}; // giverPid -> 인증(또는 인정)된 미션 수
 
-  for (const [giver, receiver] of Object.entries(assignments)) {
+  for (const giver of at.givers) {
     if (!out[giver]) continue;
     const codes = giverCodes[giver] || {};
     let redeemed = 0;
@@ -85,6 +94,8 @@ export function computeTickets({ people, assignments, giverCodes, redemptions, m
     let assumed = 0;
     let paid = false; // 돈이 드는 카드 미션이 대상의 확인까지 받았는지
     for (const [slot, code] of Object.entries(codes)) {
+      const receiver = at.receiverAt(giver, slot);
+      if (!receiver) continue; // 빠진 사람의, 이어 받은 뒤 주차(그 코드는 이어 받은 마니또에게 옮겨 갔다)
       const byReceiver = valid(code);
       const v = verdictOf(receiver, slot);
       const key = `${receiver}:${slot}`;
@@ -109,6 +120,9 @@ export function computeTickets({ people, assignments, giverCodes, redemptions, m
     out[giver].completion = redeemed / R.maxMissions;
     out[giver].assumed = assumed;
 
+    // 정답 지목·은신은 지금 짝으로(빠진 사람은 지금 대상이 없어 둘 다 없다)
+    const receiver = assignments[giver];
+    if (!receiver) continue;
     if (guesses[receiver] === giver && !absent.has(receiver)) {
       if (out[receiver]) out[receiver].guess = R.correctGuess;
     } else if (credited[giver] >= R.hiddenMinMissions && cluesOk(giver)) {
@@ -137,16 +151,19 @@ export function computeTickets({ people, assignments, giverCodes, redemptions, m
   }
 
   // ① 보상: 인증 기록이 없는 주차 중, 마니또가 완료를 알리지 않았거나 운영자가 "못 받음"으로 확인한 주차
-  for (const [giver, receiver] of Object.entries(assignments)) {
-    if (!out[receiver] || (credited[receiver] || 0) < R.compMinMissions) continue;
-    const codes = giverCodes[giver] || {};
-    let missed = 0;
-    for (const [slot, code] of Object.entries(codes)) {
-      if (redemptions[code]) continue;
-      if (!delivered.has(`${receiver}:${slot}`) || verdictOf(receiver, slot) === "missing") missed++;
+  //    받는 사람마다 주차별로 센다(중도 이탈로 마니또가 주차 중간에 바뀌었어도 그 주차의 마니또 기준)
+  const missed = {};
+  for (const giver of at.givers) {
+    for (const [slot, code] of Object.entries(giverCodes[giver] || {})) {
+      const receiver = at.receiverAt(giver, slot);
+      if (!receiver || redemptions[code]) continue;
+      if (!delivered.has(`${receiver}:${slot}`) || verdictOf(receiver, slot) === "missing") missed[receiver] = (missed[receiver] || 0) + 1;
     }
+  }
+  for (const [receiver, n] of Object.entries(missed)) {
+    if (!out[receiver] || (credited[receiver] || 0) < R.compMinMissions) continue;
     const room = R.maxReceiverEntries * R.perReceiverEntry - out[receiver].entries;
-    out[receiver].comp = Math.max(0, Math.min(missed * R.compPerMissedWeek, room));
+    out[receiver].comp = Math.max(0, Math.min(n * R.compPerMissedWeek, room));
   }
 
   const zero = new Set(people.filter((p) => p.disqualified).map((p) => p.pid));
@@ -381,13 +398,15 @@ export function missionLikes(rows) {
  * 반환: { receiverPid: 1 | 2 | 3 | 4 } (4 = 최종 지목에서야 맞힘). 최종 지목이 틀렸거나 없으면 넣지 않는다.
  * 중간에 다른 사람을 찍었거나 비운 주차가 있으면 그다음 주차부터 센다. 응모권과는 상관없다(송년회 발표용 칭호).
  */
-export function noticedWeeks(assignments, midGuesses = {}, guesses = {}) {
+export function noticedWeeks(assignments, midGuesses = {}, guesses = {}, handover = null) {
   const out = {};
+  const at = slotPairs(assignments, handover);
   for (const [giver, receiver] of Object.entries(assignments)) {
     if (guesses[receiver] !== giver) continue;
     let week = 4;
     for (let w = 3; w >= 1; w--) {
-      if (midGuesses[receiver]?.[w] === giver) week = w;
+      // 중도 이탈로 마니또가 바뀐 사람은 지금 마니또가 맡은 주차까지만 센다(그 전 주차의 정답은 다른 사람이었다)
+      if (midGuesses[receiver]?.[w] === giver && at.giverAt(receiver, w) === giver) week = w;
       else break;
     }
     out[receiver] = week;
