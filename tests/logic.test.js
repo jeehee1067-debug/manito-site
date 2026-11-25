@@ -1723,3 +1723,205 @@ test("운영 화면 매주 남긴 마니또 추측: 주차마다 남긴 사람·
   assert.equal(rows.find((r) => r.pid === "a").cells[1], null, "안 남긴 주차는 null");
   assert.deepEqual(midGuessStats({ midGuesses, assignments, roster, week: 1 }).summary.map((x) => x.week), [1], "열린 주차까지만");
 });
+
+// 부서 공지용 결산 숫자(tools/report/compute.js): 사이트와 같은 식, 이름·짝은 결과에 없음
+import { computeReport } from "../tools/report/compute.js";
+test("결산 숫자: 완료율은 사이트 식, 인증·쪽지·공감·후기·추측", () => {
+  const easySite = MISSION_CARDS.easy.find((c) => !c.real && !c.from);
+  const normalReal = MISSION_CARDS.normal.find((c) => c.real && !c.from);
+  const pick = (c, level) => ({ level, cardId: c.id, text: c.text });
+  const backup = { collections: {
+    roster: {
+      a: { name: "가나", part: "P1", uid: "ua" }, b: { name: "다라", part: "P2", uid: "ub" }, c: { name: "마바", part: "P3", uid: "uc" },
+      d: { name: "사아", part: "P1", uid: "ud", dropout: true }, e: { name: "자차", part: "P2", uid: null },
+    },
+    assignments: { a: { receiverPid: "b" }, b: { receiverPid: "c" }, c: { receiverPid: "d" }, d: { receiverPid: "e" }, e: { receiverPid: "a" } },
+    giverMissions: {
+      a: { done: { 1: true }, choices: { 1: pick(easySite, "easy") } },
+      b: { done: { 1: true }, choices: { 1: pick(normalReal, "normal") } },
+      c: { done: { 2: true }, choices: { 1: pick(easySite, "easy") } },
+    },
+    redemptions: { K1: { receiverPid: "b", slot: 1 }, K2: { receiverPid: "c", slot: 1, voided: true } },
+    deliveries: {
+      b_1: { slot: 1, message: "안녕" }, c_1: { slot: 1, message: "반가워" }, c_1_n1: { slot: 1, message: "가린 쪽지", hidden: true },
+      x: { slot: 1, message: "  " }, d_2: { slot: 2, message: "2주차" },
+    },
+    feed: {
+      f1: { slot: 1, review: "첫 후기", likes: 3, createdAt: "2026-11-19T01:00:00.000Z" },
+      f2: { slot: 1, review: "둘째 후기", likes: 5, createdAt: "2026-11-19T02:00:00.000Z" },
+      f3: { slot: 1, review: "", hidden: true, likes: 10 }, f4: { slot: 1, review: "무효", voided: true, likes: 9 },
+      f5: { slot: 2, review: "2주차 후기", likes: 7 }, f6: { slot: 1, review: "공감 없음", likes: 0 },
+    },
+    midGuesses: { b: { guesses: { 1: "a" } }, c: { guesses: { 1: "a" } } },
+  } };
+  const r = computeReport(backup, { week: 1 });
+  assert.equal(r.completion, 50, "완료 2 ÷ 가입 4(uid 있는 사람, 사이트 progressPercents와 같음)");
+  assert.equal(r.nextCompletion, 25, "2주차 지금까지 1 ÷ 4");
+  assert.equal(r.verifiedPct, 50, "완료한 a·b 중 대상 b만 인증(c의 인증은 무효)");
+  assert.equal(r.notes, 2, "가린 쪽지·빈 쪽지·다른 주차 제외");
+  assert.equal(r.likes, 8, "가린 글·무효 글·다음 주차 글 제외");
+  assert.deepEqual(r.topReviews, [{ text: "둘째 후기", likes: 5 }, { text: "첫 후기", likes: 3 }]);
+  assert.deepEqual(r.levelMix, { easy: 50, normal: 50, hard: 0, praise: 0 }, "완료한 주차의 카드만(c의 1주차 카드는 완료 전)");
+  assert.deepEqual(r.howMix, { real: 50, site: 50 });
+  assert.equal(r.popular.length, 2);
+  assert.equal(r.guessPct, 67, "가입했고 중도 이탈이 아닌 3명 중 2명(운영 화면 midGuessStats와 같음)");
+  assert.equal(r.guessCorrect, 1, "b의 마니또는 a");
+  const out = JSON.stringify(r);
+  for (const n of ["가나", "다라", "마바", "사아", "자차", "ua", "P1"]) assert.ok(!out.includes(n), `결과에 ${n} 없음`);
+  assert.equal(computeReport(backup, { week: 3 }).nextCompletion, null, "3주차 다음은 없음");
+});
+
+// 중도 이탈로 짝 이어 붙이기(lib/handover.js, tools/handover): X → Y → Z에서 Y가 빠지고 X가 2주차부터 Z를 맡는다
+import { slotPairs } from "../src/lib/handover.js";
+import { assignmentHealth, midGuessStats as midStats } from "../src/lib/pairs.js";
+import { computeTitles as titlesOf } from "../src/lib/titles.js";
+import { messageRows as messagesOf } from "../src/lib/backup.js";
+const HO = (() => {
+  const hard = MISSION_CARDS.hard.find((c) => !c.from && !c.gold);
+  const normal = MISSION_CARDS.normal.find((c) => !c.from);
+  const pick = (c, level) => ({ level, cardId: c.id, text: c.text });
+  return {
+    // 원래 원: A → X → Y → Z → B → A. Y가 빠져서 지금 짝은 A → X → Z → B → A
+    assignments: { A: "X", X: "Z", Z: "B", B: "A" },
+    handover: { items: [{ left: "Y", giver: "X", receiver: "Z", fromSlot: 2, at: 1 }] },
+    // X는 Y의 남은 주차 코드(y2·y3)를 넘겨받았고, Y에게는 1주차 코드만 남았다
+    giverCodes: { A: { 1: "a1", 2: "a2", 3: "a3" }, X: { 1: "x1", 2: "y2", 3: "y3" }, Y: { 1: "y1" }, Z: { 1: "z1", 2: "z2", 3: "z3" }, B: { 1: "b1", 2: "b2", 3: "b3" } },
+    missions: { X: { done: { 1: true, 2: true }, choices: { 1: pick(hard, "hard"), 2: pick(normal, "normal") } }, Y: { done: { 1: true } } },
+    redemptions: {
+      x1: { receiverPid: "Y", slot: 1, cardMatch: true }, // Y가 X의 1주차를 인증
+      y1: { receiverPid: "Z", slot: 1 }, // Z가 Y의 1주차를 인증
+      y2: { receiverPid: "Z", slot: 2, cardMatch: true }, // Z가 X의 2주차(이어 받은 뒤)를 인증
+    },
+    people: [
+      { pid: "A", part: "P3" }, { pid: "X", part: "P1" }, { pid: "Y", part: "P3", dropout: true }, { pid: "Z", part: "P1" }, { pid: "B", part: "P2" },
+    ],
+  };
+})();
+
+test("이어 붙이기: 주차별 짝", () => {
+  const at = slotPairs(HO.assignments, HO.handover);
+  assert.equal(at.receiverAt("X", 1), "Y");
+  assert.equal(at.receiverAt("X", "2"), "Z");
+  assert.equal(at.receiverAt("Y", 1), "Z");
+  assert.equal(at.receiverAt("Y", 2), null, "빠진 사람은 이어 받은 뒤 주차에 대상이 없다");
+  assert.equal(at.giverAt("Z", 1), "Y");
+  assert.equal(at.giverAt("Z", 3), "X");
+  assert.equal(at.giverAt("Y", 1), "X");
+  assert.equal(at.giverAt("Y", 2), null);
+  assert.ok(at.givers.includes("Y"));
+  assert.ok(at.takenOver("X") && !at.takenOver("A"));
+  // 기록이 없으면 모든 주차가 지금 짝
+  const plain = slotPairs(HO.assignments, null);
+  assert.equal(plain.receiverAt("X", 1), "Z");
+  // 두 번 이어 붙여도: Y가 2주차부터, 그다음 X가 3주차부터 빠지면 A가 3주차에 Z를 맡는다
+  const twice = slotPairs({ A: "Z", Z: "B", B: "A" }, [
+    { left: "Y", giver: "X", receiver: "Z", fromSlot: 2 }, { left: "X", giver: "A", receiver: "Z", fromSlot: 3 },
+  ]);
+  assert.deepEqual([1, 2, 3].map((s) => twice.receiverAt("A", s)), ["X", "X", "Z"]);
+  assert.deepEqual([1, 2, 3].map((s) => twice.receiverAt("X", s)), ["Y", "Z", null]);
+  assert.deepEqual([1, 2, 3].map((s) => twice.giverAt("Z", s)), ["Y", "X", "A"]);
+});
+
+test("이어 붙이기: 응모권은 주차마다 그 주차의 짝으로", () => {
+  const t = computeTickets({ ...HO, guesses: {}, deliveries: [] });
+  assert.equal(t.X.mission, 2, "X: 1주차(Y가 인증) + 2주차(Z가 인증)");
+  assert.equal(t.X.card, TICKET_RULES.cardBonus.hard + TICKET_RULES.cardBonus.normal, "두 주차 모두 카드 추가분");
+  assert.equal(t.Z.entries, 2, "Z: Y의 1주차·X의 2주차 인증");
+  assert.equal(t.Y.mission, 1, "빠진 Y도 1주차 미션은 기록된다(송년회에 오면 이탈 표시를 풀어 반영)");
+  assert.equal(t.Y.total, 0, "중도 이탈 표시 중에는 0장");
+  const back = computeTickets({ ...HO, people: HO.people.map((p) => ({ ...p, dropout: false })), guesses: {}, deliveries: [] });
+  assert.equal(back.Y.mission, 1);
+  assert.equal(back.Y.entries, 1, "Y가 인증한 X의 1주차");
+  assert.equal(back.Y.comp, 0, "Y는 1주차만 대상이라 보상할 주차가 없다");
+  assert.ok(back.Y.total >= 2);
+  // 기록 없이 계산하면(예전 코드처럼) X의 1주차가 Z 기준으로 잘못 보인다 — 이 차이를 막는 것이 handover다
+  const wrong = computeTickets({ ...HO, handover: null, guesses: {}, deliveries: [] });
+  assert.equal(wrong.Y.mission, 0, "기록이 없으면 빠진 사람의 미션이 사라진다");
+
+  // 2주차를 되돌리지 않고 3주차부터 이어 받은 경우: X의 2주차는 빠진 Y에게 한 것(대상 불참이라 확인 없이 인정, 카드 추가분 없음)
+  // Z의 2주차는 Y가 안 보냈으므로 보상
+  const late = computeTickets({
+    ...HO,
+    handover: { items: [{ left: "Y", giver: "X", receiver: "Z", fromSlot: 3 }] },
+    giverCodes: { ...HO.giverCodes, X: { 1: "x1", 2: "x2", 3: "y3" }, Y: { 1: "y1", 2: "y2" } },
+    missions: { ...HO.missions, Z: { done: { 1: true } } }, // 보상은 내 미션이 1건 이상 인증된 사람만
+    redemptions: { x1: HO.redemptions.x1, y1: HO.redemptions.y1, z1: { receiverPid: "B", slot: 1 } },
+    guesses: {}, deliveries: [],
+  });
+  assert.equal(late.X.mission, 2, "X의 2주차: 대상(Y)이 중도 이탈이라 확인 없이 인정");
+  assert.equal(late.X.assumed, 1);
+  assert.equal(late.X.card, TICKET_RULES.cardBonus.hard, "인정된 주차에는 카드 추가분이 없다");
+  assert.equal(late.Z.comp, 2, "Z: Y가 안 보낸 2주차 + 아직 안 온 3주차");
+});
+
+test("이어 붙이기: 짝 현황·코드·배정 점검·추측·칭호·백업", () => {
+  const assignments = Object.fromEntries(Object.entries(HO.assignments).map(([g, r]) => [g, { receiverPid: r }]));
+  const giverCodes = Object.fromEntries(Object.entries(HO.giverCodes).map(([g, c]) => [g, { codes: c }]));
+  const rows = pairRows({ assignments, giverCodes, missions: HO.missions, redemptions: HO.redemptions, handover: HO.handover });
+  const x = rows.find((r) => r.giverPid === "X");
+  assert.equal(x.receiverPid, "Z");
+  assert.equal(x.slots[1].receiverPid, "Y");
+  assert.equal(x.slots[1].status, "redeemed");
+  assert.equal(x.slots[2].receiverPid, "Z");
+  const y = rows.find((r) => r.giverPid === "Y");
+  assert.ok(y && y.left, "빠진 사람의 줄도 있다");
+  assert.equal(y.receiverPid, "Z");
+  assert.equal(y.slots[1].status, "redeemed");
+  assert.equal(y.slots[2].status, "left");
+  assert.equal(cardPicks(rows, 2).people.length, 4, "이탈 줄의 이어 받은 뒤 주차는 세지 않는다");
+  assert.deepEqual(needyReceivers({ rows, week: 3, people: HO.people.map((p) => ({ ...p, joined: true })) }), ["A", "B", "X"].filter((pid) => !rows.some((r) => Object.values(r.slots).some((s) => s.done && s.receiverPid === pid))),
+    "Z는 Y에게 1주차를 받았으므로 수호천사 대상이 아니다");
+  assert.ok(!needyReceivers({ rows, week: 3, people: HO.people.map((p) => ({ ...p, joined: true })) }).includes("Z"));
+
+  assert.deepEqual(receiverCodesOf(assignments, giverCodes, HO.handover).Z, { 1: "y1", 2: "y2", 3: "y3" }, "Z의 코드는 그대로");
+  assert.deepEqual(receiverCodesOf(assignments, giverCodes, HO.handover).Y, { 1: "x1" });
+  const codes = { x1: { receiverPid: "Y", slot: 1 }, y1: { receiverPid: "Z", slot: 1 }, y2: { receiverPid: "Z", slot: 2 }, y3: { receiverPid: "Z", slot: 3 } };
+  for (const g of ["A", "Z", "B"]) for (const s of [1, 2, 3]) codes[`${g.toLowerCase()}${s}`] = { receiverPid: HO.assignments[g], slot: s };
+  assert.deepEqual(codeProblems(assignments, giverCodes, codes, HO.handover), []);
+  assert.ok(codeProblems(assignments, giverCodes, codes).length > 0, "기록 없이 보면 X의 1주차 코드가 어긋나 보인다");
+
+  const roster = HO.people.map((p) => ({ ...p, uid: `u${p.pid}` }));
+  const hints = [["X", "A"], ["Z", "X"], ["B", "Z"], ["A", "B"]].map(([receiverPid, giver]) => ({ receiverPid, answer: HO.people.find((p) => p.pid === giver).part, ver: 2 }));
+  const health = assignmentHealth({ roster, assignments, hints, config: { assignVer: 2, partExcluded: true }, handover: HO.handover });
+  assert.equal(health.status, "ok", "빠진 사람은 명단에서 빼고, 이어 붙인 같은 파트 짝은 다른 파트 검사에서 뺀다");
+  assert.equal(assignmentHealth({ roster, assignments, hints, config: { assignVer: 2, partExcluded: true } }).status, "mismatch", "기록 없이 보면 명단과 짝이 안 맞는다");
+
+  const ms = midStats({ midGuesses: { Z: { guesses: { 1: "Y", 2: "X" } } }, assignments, roster, week: 2, handover: HO.handover });
+  const z = ms.rows.find((r) => r.pid === "Z");
+  assert.equal(z.cells[1].correct, true, "1주차 정답은 그때의 마니또 Y");
+  assert.equal(z.cells[2].correct, true);
+  assert.equal(noticedWeeks(HO.assignments, { Z: { 1: "Y", 2: "X", 3: "X" } }, { Z: "X" }, HO.handover).Z, 2, "지금 마니또가 맡은 주차부터");
+
+  const people = HO.people.map((p) => ({ ...p, joined: true }));
+  const deliveries = [
+    { receiverPid: "Y", slot: 1, kind: "mission", message: "X가 Y에게" }, { receiverPid: "Z", slot: 1, kind: "mission", message: "Y가 Z에게" },
+    { receiverPid: "Z", slot: 2, kind: "mission", message: "X가 Z에게" },
+  ];
+  const titles = titlesOf({ people, assignments: HO.assignments, giverCodes: HO.giverCodes, redemptions: HO.redemptions, missions: HO.missions, deliveries, midGuesses: {}, tickets: { X: { hidden: 2 } }, handover: HO.handover });
+  const notes = titles.find((t) => t.key === "notes");
+  assert.deepEqual(notes.winners, ["X"]);
+  assert.equal(notes.value, 2, "X의 쪽지: Y에게 1통 + Z에게 1통(Y가 Z에게 보낸 것은 X 것이 아니다)");
+  assert.deepEqual(titles.find((t) => t.key === "invisible").winners, ["X"], "이어 받은 마니또도 투명 마니또는 같은 기준(추리 보드가 내 파트를 빼지 않아 대상이 고를 수 있다)");
+  const guessed = titlesOf({ people, assignments: HO.assignments, giverCodes: HO.giverCodes, redemptions: HO.redemptions, missions: HO.missions, deliveries, midGuesses: { Z: { 2: "X" } }, tickets: { X: { hidden: 2 } }, handover: HO.handover });
+  assert.deepEqual(guessed.find((t) => t.key === "invisible").winners, [], "대상이 한 번이라도 고르면 아니다");
+
+  const msg = messagesOf({ assignments, giverCodes, deliveries: Object.fromEntries(deliveries.map((d, i) => [`d${i}`, d])), meta: { handover: HO.handover } });
+  assert.deepEqual(msg.map((m) => `${m.fromPid}>${m.toPid}:${m.text}`).sort(), ["X>Y:X가 Y에게", "X>Z:X가 Z에게", "Y>Z:Y가 Z에게"]);
+});
+
+// 중도 이탈 안내 팝업 글(lib/notices.js → HandoverPopup.jsx): 이름·파트를 쓰지 않는다(대상에게 파트를 알리면 마니또가 드러난다)
+import { noticeText } from "../src/lib/notices.js";
+test("이어 붙이기 안내 글: 마니또·대상 모두 파트·이름 없이", () => {
+  const g = noticeText({ kind: "giver", fromSlot: 2, redo: true });
+  const r = noticeText({ kind: "receiver", fromSlot: 2 });
+  assert.equal(g.title, "내 대상이 바뀌었어요");
+  assert.equal(r.title, "내 마니또가 바뀌었어요");
+  assert.ok(g.items.some((x) => x.includes("2주차 미션은 새 대상에게 다시")), "되돌린 주차를 다시 하라고 알린다");
+  assert.ok(!noticeText({ kind: "giver", fromSlot: 3 }).items.some((x) => x.includes("다시 해")), "되돌리지 않았으면 그 말은 없다");
+  for (const t of [g, r]) {
+    const all = [t.lead, ...t.items, t.title].join(" ");
+    assert.doesNotMatch(all, /파트|같은 팀|EFA|PFA|VSEM/, "파트 이야기는 없다");
+  }
+  assert.match(r.lead, /2주차부터는 새 마니또/);
+  assert.equal(r.go, "detective"); assert.equal(g.go, "mission");
+});

@@ -75,6 +75,7 @@ async function seed({ phase = 1, week = 1, cluesReleased = 2, admins = [ADMIN], 
     b.set(doc(db, "redemptions", "B1B1"), { receiverPid: "p003", slot: 1, review: review20, voided: false, feedId: FEED_B1, createdAt: new Date(2026, 10, 1) });
     b.set(doc(db, "feed", FEED_B1), { slot: 1, review: review20, voided: false, createdAt: new Date(2026, 10, 1) });
     b.set(doc(db, "nudges", "p002"), { at: 1 });
+    b.set(doc(db, "notices", "p001"), { id: "handover-1", kind: "giver", fromSlot: 2, redo: true, at: 1 });
     b.set(doc(db, "deliveries", "dv1"), { receiverPid: "p002", slot: 1, kind: "mission", message: "책상 확인", code: "A1A1" });
     b.set(doc(db, "meta", "assignment"), { codes: Object.values(CODES).flatMap((c) => Object.values(c)).sort(), pids: Object.keys(UID).sort() });
     await b.commit();
@@ -113,9 +114,9 @@ function sendMission(db, slot, { receiverPid = "p002", kind, message, id, gm, de
   return b.commit();
 }
 // 쪽지 더 보내기(MyMission.jsx MoreNotes): 쪽지(문서 ID = 받는사람_주차_n순번)와 쪽지 수(notes)를 한 묶음으로 쓴다
-function sendNote(db, slot, k, { message = "또 응원해요", bump = true, id } = {}) {
+function sendNote(db, slot, k, { message = "또 응원해요", bump = true, id, code = null } = {}) {
   const b = writeBatch(db);
-  b.set(doc(db, "deliveries", id || `p002_${slot}_n${k}`), { receiverPid: "p002", slot, kind: "note", message, code: null, createdAt: serverTimestamp() });
+  b.set(doc(db, "deliveries", id || `p002_${slot}_n${k}`), { receiverPid: "p002", slot, kind: "note", message, code, createdAt: serverTimestamp() });
   if (bump) b.set(doc(db, "giverMissions", "p001"), { notes: { [slot]: N }, n: N }, { merge: true });
   return b.commit();
 }
@@ -944,6 +945,7 @@ describe("5. 미션 슬롯: 완료한 슬롯의 난이도는 못 바꾸고, 지�
     await assertFails(gm({ choices: { 1: card("hard") } })); // 지난 주차 카드 바꾸기
     await assertFails(gm({ choices: { 1: null } }));
     await assertFails(sendMission(p("p001"), 1)); // 지난 주차 완료 알리기
+    await assertFails(sendNote(p("p001"), 1, 1)); // 완료하지 않은 지난 주차에는 쪽지도 못 보낸다(완료 전 쪽지는 지금 열린 주차만)
     await assertSucceeds(gm({ choices: { 2: card("normal") } })); // 지금 열린 주차는 된다
     await assertSucceeds(sendMission(p("p001"), 2));
     await setPhase(1, { week: 3 });
@@ -1197,6 +1199,13 @@ describe("앱 흐름: 참여자 화면", () => {
     await assertSucceeds(getDoc(doc(db, "nudges", "p002"))); // 내 대상에게 온 운영자 알림
     await assertFails(getDoc(doc(p("p003"), "nudges", "p002"))); // 남의 대상(누가 받은 게 없는지)
     await assertFails(getDocs(collection(db, "nudges")));
+    // 운영진 안내(중도 이탈로 대상·마니또가 바뀐 사람의 팝업, HandoverPopup.jsx): 본인만 읽고, 아무도 쓰지 못한다(스크립트가 쓴다)
+    await assertSucceeds(getDoc(doc(db, "notices", "p001")));
+    await assertSucceeds(getDoc(doc(p("p003"), "notices", "p003"))); // 내 안내가 없어도 읽기는 된다(없음)
+    await assertFails(getDoc(doc(p("p003"), "notices", "p001"))); // 남의 안내(누구의 짝이 바뀌었는지)
+    await assertFails(getDocs(collection(db, "notices")));
+    await assertFails(setDoc(doc(db, "notices", "p001"), { id: "x", kind: "giver" }));
+    await assertSucceeds(getDocs(collection(admin(), "notices")));
     const none = await assertSucceeds(getDoc(doc(db, "redemptions", "A1A1"))); // 아직 인증 전(문서 없음)
     if (none.exists()) throw new Error("인증 문서가 있음");
     await assertSucceeds(getDoc(doc(db, "reports", "p002_1"))); // 내 대상이 "받은 게 없어요"로 신고했는지(없어도 읽힘)
@@ -1227,17 +1236,23 @@ describe("앱 흐름: 참여자 화면", () => {
     if (!inbox.docs.some((d) => d.id === "p002_1")) throw new Error("완료 알림이 안 보임");
   });
 
-  test("쪽지 더 보내기 (MyMission.jsx MoreNotes): 완료한 주차에만, 쪽지 수와 순번을 맞춰서, 주차마다 5건까지", async () => {
+  test("쪽지 더 보내기 (MyMission.jsx MoreNotes): 완료한 주차, 지금 열린 주차는 완료 전에도(코드 없이), 쪽지 수와 순번을 맞춰서, 주차마다 5건까지", async () => {
     const db = p("p001");
-    await assertFails(sendNote(db, 1, 1)); // 완료를 알리기 전
-    await assertSucceeds(sendMission(db, 1));
-    await assertFails(sendNote(db, 1, 1, { bump: false })); // 쪽지 수를 안 올림(개수 제한 우회)
-    await assertFails(sendNote(db, 1, 1, { message: "" })); // 빈 쪽지
-    await assertFails(sendNote(db, 1, 1, { id: "아무ID아무ID" })); // 순번 ID가 아님
-    await assertFails(sendNote(db, 1, 3)); // 순번 건너뛰기
+    // 완료 전 쪽지(메뉴판·예고, 규칙 20261128): 지금 열린 주차는 완료 전에도 되지만 인증 코드는 실을 수 없다
+    await assertFails(sendNote(db, 1, 1, { code: "A1A1" }));
+    await assertFails(sendNote(db, 2, 1)); // 안 열린 주차
+    // 화면은 카드를 고른 뒤에만 이 버튼을 보인다(미션 문서가 있을 때)
+    await assertSucceeds(setDoc(doc(db, "giverMissions", "p001"), { choices: { 1: EASY }, n: N }, { merge: true }));
+    await assertSucceeds(sendNote(db, 1, 1, { message: "마니또 카페 메뉴판: 1) 커피 2) 차 3) 초코" }));
+    await assertSucceeds(sendMission(db, 1)); // 완료 알리기는 그대로 된다(쪽지 수는 그대로 둔 채)
+    await assertFails(sendNote(db, 1, 2, { bump: false })); // 쪽지 수를 안 올림(개수 제한 우회)
+    await assertFails(sendNote(db, 1, 2, { message: "" })); // 빈 쪽지
+    await assertFails(sendNote(db, 1, 2, { id: "아무ID아무ID" })); // 순번 ID가 아님
+    await assertFails(sendNote(db, 1, 4)); // 순번 건너뛰기
     await assertFails(sendNote(db, 2, 1)); // 완료하지 않은(열리지 않은) 주차
-    await assertFails(setDoc(doc(db, "giverMissions", "p001"), { notes: { 1: 3 }, n: N }, { merge: true })); // 쪽지 없이 숫자만(가짜 "+쪽지 3")
-    for (let i = 1; i <= 5; i++) await assertSucceeds(sendNote(db, 1, i, { message: `${i + 1}번째 날 응원` }));
+    await assertFails(setDoc(doc(db, "giverMissions", "p001"), { notes: { 1: 4 }, n: N }, { merge: true })); // 쪽지 없이 숫자만(가짜 "+쪽지 4")
+    await assertSucceeds(sendNote(db, 1, 2, { code: "A1A1", message: "완료한 뒤에는 코드도 다시 보낼 수 있다" }));
+    for (let i = 3; i <= 5; i++) await assertSucceeds(sendNote(db, 1, i, { message: `${i + 1}번째 날 응원` }));
     await assertFails(sendNote(db, 1, 6)); // 6건째
     const gm = await getDoc(doc(db, "giverMissions", "p001"));
     if (gm.data().notes["1"] !== 5) throw new Error("쪽지 수가 5가 아님");

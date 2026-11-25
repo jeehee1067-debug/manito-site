@@ -1,7 +1,7 @@
 // 화면 흐름 검증을 차례로 돌린다. 먼저 다른 터미널에서 `npm run dev:emu`를 띄워 둘 것.
 // 각 스크립트는 로컬 에뮬레이터(demo-manito 프로젝트)의 데이터를 지우고 시작한다. 실제 Firebase 프로젝트에는 붙지 않는다.
 // 필요한 것: Playwright와 Chromium (`npm i --no-save playwright && npx playwright install chromium`)
-// restore.cjs는 Python 패키지도 필요하다: pip install google-cloud-firestore (다른 Python을 쓰려면 PYTHON=경로 npm run test:e2e)
+// restore.cjs·handover.cjs는 Python 패키지도 필요하다: pip install google-cloud-firestore (다른 Python을 쓰려면 PYTHON=경로 npm run test:e2e)
 const { spawnSync } = require("node:child_process");
 const path = require("node:path");
 
@@ -21,6 +21,7 @@ const SCRIPTS = [
   ["awards.cjs", "송년회 칭호·커피 쿠폰 당첨자 장면, 현장 시상(24명): 2등·3등 순위, 4·5등 종이로 뽑힌 이름 입력, 1등이 겹칠 때 자리 다시 채우기와 다시 뽑기, 6등 사이트 추첨·검증, 뽑은 뒤 고치기 거부"],
   ["gold.cjs", "2주차 새 카드와 황금 카드: NEW 카드, 황금 카드 고르기·완료·인증, 주차가 끝난 뒤 추첨, 뽑힌 마니또만 자기 화면에서 확인"],
   ["restore.cjs", "백업 되살리기(tools/restore): 통째로 지운 뒤 되살리면 문서가 백업과 같음, 기본은 없어진 것만·덮어쓰기는 설정 제외, 되살린 뒤 사이트 동작"],
+  ["handover.cjs", "중도 이탈 이어 붙이기(tools/handover): 짝·코드·단서·명단 바꾸기와 되돌리기, 새 대상에게 다시 한 주차 인증, 운영 화면 점검, 완료 전 쪽지, 안내 팝업, 최종 지목 보드(내 파트 단서), 집계"],
 ];
 
 async function main() {

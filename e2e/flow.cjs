@@ -213,14 +213,15 @@ const step = (s) => console.log("▶", s);
   const pidOf = Object.fromEntries((await readDoc("roster?pageSize=50")).documents.map((d) => [d.fields.name.stringValue, d.name.split("/").pop()]));
   const uidOf = Object.fromEntries((await readDoc("roster?pageSize=50")).documents.map((d) => [d.fields.name.stringValue, d.fields.uid.stringValue]));
 
-  step("추리 보드: 처음부터 우리 파트는 후보에서 빠짐 / 파트 순위 탭: 아직 발표 전");
+  step("추리 보드: 나만 빼고 모두 후보(내 파트도 — 11/26부터 '같은 파트 제외'를 안내하지 않음) / 파트 순위 탭: 아직 발표 전");
   for (const p of PEOPLE) {
     const page = users[p.name];
     await tab(page, "추리 보드");
     const board = panel(page, "용의자 보드");
-    await board.getByText("우리 파트 사람은 내 마니또가 될 수 없어서 처음부터 빠져 있어요.").waitFor();
+    await board.getByText("아닌 것 같은 사람을 눌러 지워 보세요.").waitFor();
+    assert.equal(await board.getByText(/우리 파트 사람은/).count(), 0, "같은 파트 제외 안내는 없다");
     const names = await board.locator(".suspect span").allInnerTexts();
-    const want = PEOPLE.filter((x) => x.part !== p.part).map((x) => x.name).sort((a, b) => a.localeCompare(b, "ko"));
+    const want = PEOPLE.filter((x) => x.name !== p.name).map((x) => x.name).sort((a, b) => a.localeCompare(b, "ko"));
     assert.deepEqual(names, want, `${p.name}의 처음 용의자`);
     assert.equal(await page.locator("nav.tabs button", { hasText: "우리 팀" }).count(), 0, "'우리 팀' 탭 없음");
     await tab(page, "파트 순위");
@@ -253,7 +254,8 @@ const step = (s) => console.log("▶", s);
       assert.ok((await tl.locator("li.tl-next").count()) <= 1, "'다음' 표시는 하나까지");
       await tl.getByText("오늘은").waitFor();
     }
-    await panel(page, "파트 대항전").getByText("같은 파트끼리는 마니또가 되지 않아요.").waitFor();
+    await panel(page, "파트 대항전").getByText(/파트 순위.*탭에 매주 금요일 중간 순위/).waitFor();
+    assert.equal(await panel(page, "파트 대항전").getByText("같은 파트끼리는 마니또가 되지 않아요.").count(), 0, "참여자 규칙에 같은 파트 제외를 적지 않는다(11/26)");
     await panel(page, "응모권 받는 법").getByText("마지막 집계에서 미션 완수율 1위").waitFor();
     await panel(page, "응모권 받는 법").getByText("상대방 때문에 손해 보지 않아요").waitFor();
     await panel(page, "미션 카드").getByText(/분석실 신발장을 이용해 보세요/).waitFor();

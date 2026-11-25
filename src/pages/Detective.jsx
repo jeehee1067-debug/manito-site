@@ -71,7 +71,8 @@ function Inbox({ myPid, items, onUseCode }) {
   const redeemedCodes = new Set((mine || []).map((r) => r.code));
   const redeemedSlots = new Set((mine || []).map((r) => r.slot));
   // 마니또가 완료를 알렸는데 내가 아직 인증하지 않은 1·2주차(3주차 칭찬 카드는 사이트로 바로 오므로 "받은 게 없어요"가 없다)
-  const waiting = [...new Set(items.filter((it) => it.slot !== PRAISE_SLOT).map((it) => it.slot))]
+  // (쪽지는 빼고 본다: 마니또는 완료 전에도 메뉴판·예고 쪽지를 먼저 보낼 수 있다)
+  const waiting = [...new Set(items.filter((it) => it.kind !== "note" && it.slot !== PRAISE_SLOT).map((it) => it.slot))]
     .filter((slot) => !redeemedSlots.has(slot))
     .sort((a, b) => a - b);
   const canRedeem = config.phase === PHASE.RUNNING || config.phase === PHASE.GUESSING;
@@ -647,11 +648,12 @@ function Clues({ myPid, partsInUse, hintOpen, hintPart, active = true }) {
 }
 
 function Suspects({ myPid, hintPart }) {
-  const { roster, byPid, me, user, config, myPart } = useApp();
+  const { roster, byPid, me, user, config } = useApp();
   const myLoc = byPid[myPid]?.loc;
   const bySite = Boolean(config.siteMatched && myLoc);
-  // 같은 파트끼리 짝이 하나도 없게 배정됐을 때만 내 파트를 뺀다(예전 배정이나 한 파트가 절반을 넘는 경우는 빼지 않는다).
-  const byPart = config.partExcluded === true && Boolean(myPart);
+  // 내 파트는 후보에서 빼지 않는다(사용자가 정함, 11/26: 중도 이탈로 짝을 이어 붙이면(tools/handover) 마니또가 같은 파트일 수 있어서,
+  // 참여자에게 보이는 규칙에서 "같은 파트끼리는 마니또가 되지 않아요"를 지웠다. 그 사람만 내 파트가 보이면 티가 나므로 모두 같게).
+  // 배정은 여전히 다른 파트끼리 한다(운영 화면만 아는 사실).
   const [guess, setGuess] = useState(null);
   const [pick, setPick] = useState("");
   const [msg, setMsg] = useState("");
@@ -661,9 +663,9 @@ function Suspects({ myPid, hintPart }) {
   const suspects = useMemo(
     () =>
       roster
-        .filter((r) => r.pid !== myPid && (!byPart || r.part !== myPart) && (!bySite || r.loc === myLoc) && (!hintPart || r.part === hintPart))
+        .filter((r) => r.pid !== myPid && !r.out && (!bySite || r.loc === myLoc) && (!hintPart || r.part === hintPart))
         .sort((a, b) => a.name.localeCompare(b.name, "ko")),
-    [roster, myPid, myPart, myLoc, byPart, bySite, hintPart]
+    [roster, myPid, myLoc, bySite, hintPart]
   );
   const remaining = suspects.filter((s) => !eliminated.has(s.pid));
 
@@ -710,8 +712,7 @@ function Suspects({ myPid, hintPart }) {
   return (
     <Panel title={`용의자 보드 (남은 후보 ${remaining.length}명)`} id="suspects">
       <p className="small">
-        {byPart && bySite ? "우리 파트와 다른 근무지 사람은 " : byPart ? "우리 파트 사람은 " : bySite ? "다른 근무지 사람은 " : ""}
-        {byPart || bySite ? "내 마니또가 될 수 없어서 처음부터 빠져 있어요. " : ""}
+        {bySite ? "다른 근무지 사람은 내 마니또가 될 수 없어서 처음부터 빠져 있어요. " : ""}
         {hintPart ? `마지막 단서에 따라 ${hintPart} 사람만 남겼어요. ` : ""}
         아닌 것 같은 사람을 눌러 지워 보세요.
       </p>

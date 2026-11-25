@@ -43,8 +43,10 @@ export function angelQueue(volunteers = {}, people = []) {
 export function needyReceivers({ rows = [], angels = {}, week = 1, people = [] }) {
   if (week < 2) return [];
   const byPid = Object.fromEntries(people.map((p) => [p.pid, p]));
+  // 받은 적이 있는 사람: 주차마다 그 주차의 대상 기준(중도 이탈로 마니또가 바뀐 사람은 앞 마니또에게 받은 것도 센다)
+  const got = new Set(rows.flatMap((r) => MISSION_SLOTS.filter((s) => r.slots?.[s]?.done).map((s) => r.slots[s].receiverPid || r.receiverPid)));
   return rows
-    .filter((r) => !MISSION_SLOTS.some((s) => r.slots?.[s]?.done) && !angels[r.receiverPid] && takingPart(byPid[r.receiverPid]))
+    .filter((r) => !r.left && !got.has(r.receiverPid) && !angels[r.receiverPid] && takingPart(byPid[r.receiverPid]))
     .map((r) => r.receiverPid)
     .sort();
 }
@@ -62,7 +64,7 @@ export function ownMissionsDone(rows, pid, week) {
  * 반환: [{ receiverPid, angelPid, order }]
  */
 export function matchAngels({ rows = [], volunteers = {}, angels = {}, week = 1, people = [], skips = {} }) {
-  const giverOf = Object.fromEntries(rows.map((r) => [r.receiverPid, r.giverPid]));
+  const giverOf = Object.fromEntries(rows.filter((r) => !r.left).map((r) => [r.receiverPid, r.giverPid]));
   const taken = new Set(Object.values(angels).map((a) => a.angelPid));
   const free = angelQueue(volunteers, people).filter((v) => !taken.has(v.pid) && ownMissionsDone(rows, v.pid, week));
   const out = [];

@@ -1,3 +1,4 @@
+import { slotPairs } from "./handover.js";
 // 운영 화면 "백업 내려받기"에 쓰는 계산(사용자가 정함: "사람들이 보낸 메시지·기록을 전부 백업해서, 송년회 때 돌아보는 자료로 정리하고 싶다").
 // 무료 요금제에는 자동 백업이 없어서, 운영자가 누를 때 전체 자료를 파일로 내려받는다.
 // 여기에는 Firestore를 부르는 코드가 없다(읽은 값을 받아 파일 내용만 만든다) — tests/logic.test.js가 확인한다.
@@ -9,7 +10,7 @@ export const BACKUP_COLLECTIONS = [
   "assignments", "giverCodes", "codes", "receiverCodes", "giverMissions", "progress",
   "deliveries", "noteFlags", "redemptions", "feed", "feedLikes", "hiddenFeed",
   "reports", "verdicts", "clues", "nudges", "guesses", "midGuesses", "toManito",
-  "angelVolunteers", "angels", "angelGifts", "modNotes", "goldWins", "public", "results", "meta",
+  "angelVolunteers", "angels", "angelGifts", "modNotes", "goldWins", "notices", "public", "results", "meta",
 ];
 // 문서 하나만 읽는 것(컬렉션 목록 읽기는 규칙이 허용하지 않는다)
 export const BACKUP_DOCS = [["config", "app"]];
@@ -59,10 +60,11 @@ const KIND_LABEL = {
  */
 export function messageRows({
   nameOf = (pid) => pid, assignments = {}, giverCodes = {}, deliveries = {}, redemptions = {}, feed = {}, hiddenFeed = {},
-  toManito = {}, angels = {}, angelGifts = {},
+  toManito = {}, angels = {}, angelGifts = {}, meta = {},
 }) {
-  const giverOf = {}; // 받는 사람 → 그 사람의 마니또
-  for (const [g, a] of Object.entries(assignments)) if (a?.receiverPid) giverOf[a.receiverPid] = g;
+  // 받는 사람 → 그 주차의 마니또(중도 이탈로 짝을 이어 붙인 기록 meta/handover가 있으면 바뀌기 전 주차는 원래 마니또)
+  const at = slotPairs(assignments, meta?.handover || null);
+  const giverOf = (receiverPid, slot) => at.giverAt(receiverPid, slot);
   const giverOfCode = {};
   for (const [g, c] of Object.entries(giverCodes)) for (const code of Object.values(c?.codes || {})) giverOfCode[code] = g;
   const rows = [];
@@ -77,7 +79,7 @@ export function messageRows({
   // 마니또 → 대상: 완료 알림 쪽지, 칭찬 카드, 추가 쪽지
   for (const d of Object.values(deliveries)) {
     const kind = d.kind === "praise" ? "praise" : d.kind === "note" ? "note" : "mission";
-    push(kind, d.slot, giverOf[d.receiverPid], d.receiverPid, d.message, d.createdAt, {
+    push(kind, d.slot, giverOf(d.receiverPid, d.slot), d.receiverPid, d.message, d.createdAt, {
       card: d.card?.text || "", note: d.hidden ? "운영진이 가린 쪽지" : "",
     });
   }
@@ -94,7 +96,7 @@ export function messageRows({
     if (f?.thanks) push("thanks", r.slot, r.receiverPid, giverOfCode[code], f.thanks, r.createdAt, { note: "후기에 붙인 답장(시각은 후기 시각)" });
   }
   // 대상 → 마니또: 마니또에게 한마디
-  for (const m of Object.values(toManito)) push("toManito", m.slot, m.receiverPid, giverOf[m.receiverPid], m.message, m.createdAt);
+  for (const m of Object.values(toManito)) push("toManito", m.slot, m.receiverPid, giverOf(m.receiverPid, m.slot), m.message, m.createdAt);
   // 수호천사 → 받는 사람: 한 일과 쪽지, 받는 사람의 후기
   for (const g of Object.values(angelGifts)) {
     const angel = angels[g.receiverPid]?.angelPid || null;

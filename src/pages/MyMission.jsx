@@ -550,6 +550,10 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
           <button className="pk-btn main" disabled={busy}>{isPraise ? (hasCard ? "칭찬 보내고 미션 완료 알리기" : "칭찬 카드 보내기") : "미션 완료 알리기"}</button>
         </form>
       )}
+      {/* 완료 전 쪽지(메뉴판·예고): 지금 열린 주차, 카드를 고른 뒤. 인증 코드는 싣지 않는다(보안 규칙 20261128) */}
+      {(hasCard || praiseOnly) && open && !done && (
+        <MoreNotes pre slot={slot} myPid={myPid} receiverPid={receiverPid} receiverName={receiverName} code={null} sent={notes} showCode={false} />
+      )}
 
       {done && (
         <div className="stack tight">
@@ -566,7 +570,9 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
             {redeemed
               ? redeemed.voided
                 ? verdict === "received" ? "운영진이 인증(후기)은 무효 처리했지만, 전달된 것으로 확인해 미션은 인정돼요." : "운영진이 이 인증을 무효 처리했어요."
-                : `${receiverName}이 인증했어요.`
+                : redeemed.receiverPid && redeemed.receiverPid !== receiverPid
+                  ? "이전 대상이 인증했어요(중도 이탈로 대상이 바뀌기 전 주차예요. 응모권은 그대로 인정돼요)."
+                  : `${receiverName}이 인증했어요.`
               : verdict === "received" ? "운영진이 전달된 것으로 확인했어요. 미션으로 인정돼요(카드 추가분은 직접 인증된 경우에만 있어요)."
                 : verdict === "missing" ? "운영진이 전달되지 않은 것으로 확인했어요. 이 주차는 미션으로 인정되지 않아요."
                   : isPraise ? `칭찬 카드가 전달됐어요. 미션으로 인정돼요(${receiverName}이 인증하면 ${receiverName}도 응모권을 받아요).${hasCard ? ` 고른 카드의 추가분은 ${receiverName}이 인증하면서 카드와 같다고 확인해야 붙어요.` : ""}`
@@ -588,7 +594,9 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
 
 // 쪽지 더 보내기: 완료를 알린 주차에 쪽지를 더 보낸다. "3일 연속 매일 다른 응원 쪽지" 카드처럼 여러 날에 걸친 미션을 할 수 있게 둔 것.
 // 완료 표시와 응모권에는 영향이 없다(받는 사람 화면의 "마니또에게서 온 것"에 쪽지로 쌓인다).
-function MoreNotes({ slot, myPid, receiverPid, receiverName, code, sent, showCode }) {
+// pre: 완료 전에 먼저 보내는 쪽지(사용자가 정함, 11/26: 마니또 카페 메뉴판·타임어택 예고를 보내려고 미션 전에 "완료"를 누르던 것).
+//   지금 열린 주차만, 인증 코드 없이. 같은 쪽지 수(주차마다 EXTRA_NOTES_MAX건)를 쓴다.
+function MoreNotes({ slot, myPid, receiverPid, receiverName, code, sent, showCode, pre = false }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [withCode, setWithCode] = useState(Boolean(showCode)); // 아직 인증 전이면 기본으로 코드를 같이 보낸다(대상이 코드를 못 받았을 때 다시 보내는 길)
@@ -613,27 +621,33 @@ function MoreNotes({ slot, myPid, receiverPid, receiverName, code, sent, showCod
       setText("");
       setWithCode(false);
       setOpen(false);
-      setMsg({ type: "ok", text: `${receiverName}에게 쪽지를 보냈어요.` });
+      setMsg({ type: "ok", text: pre ? `${receiverName}에게 쪽지를 보냈어요. 미션을 다 한 뒤에 위의 "미션 완료 알리기"를 눌러 주세요.` : `${receiverName}에게 쪽지를 보냈어요.` });
     } catch (err) {
-      setMsg({ type: "error", text: err.code === "permission-denied" ? "지금은 쪽지를 보낼 수 없어요(미션 진행 기간의 열린 주차에만 보낼 수 있어요)." : "보내지 못했어요. 다시 시도해 주세요." });
+      setMsg({ type: "error", text: err.code === "permission-denied" ? (pre ? "지금은 쪽지를 먼저 보낼 수 없어요(지금 열린 주차에만 보낼 수 있어요. 운영진에게 규칙 게시를 확인해 달라고 알려 주세요)." : "지금은 쪽지를 보낼 수 없어요(미션 진행 기간의 열린 주차에만 보낼 수 있어요).") : "보내지 못했어요. 다시 시도해 주세요." });
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div className="more-notes">
-      {sent > 0 && <p className="small muted">이 주차에 더 보낸 쪽지 {sent}건</p>}
+    <div className={`more-notes${pre ? " pre-notes" : ""}`}>
+      {pre && (
+        <p className="small">
+          메뉴판·예고처럼 미션 전에 먼저 알려야 할 게 있으면 쪽지만 먼저 보내세요. <b>"미션 완료 알리기"는 미션을 다 한 뒤에</b> 눌러 주세요.
+          이 쪽지에는 인증 코드가 실리지 않아요(코드는 완료 알리기 때 가요).
+        </p>
+      )}
+      {sent > 0 && <p className="small muted">이 주차에 {pre ? "보낸" : "더 보낸"} 쪽지 {sent}건</p>}
       {!open && left > 0 && (
-        <button type="button" className="pk-btn sm" onClick={() => { setOpen(true); setMsg({ type: "", text: "" }); }}>쪽지 더 보내기</button>
+        <button type="button" className="pk-btn sm" onClick={() => { setOpen(true); setMsg({ type: "", text: "" }); }}>{pre ? "완료 전에 쪽지 먼저 보내기" : "쪽지 더 보내기"}</button>
       )}
       {!open && left <= 0 && <p className="small muted">이 주차에 더 보낼 수 있는 쪽지({EXTRA_NOTES_MAX}건)를 모두 보냈어요.</p>}
       {open && (
         <form className="stack" onSubmit={send}>
           <label>
-            <span className="panel-label">{receiverName}에게 더 보내는 쪽지 (익명, 남은 횟수 {left})</span>
+            <span className="panel-label">{receiverName}에게 {pre ? "먼저 보내는" : "더 보내는"} 쪽지 (익명, 남은 횟수 {left})</span>
             <textarea className="pk-input" rows={3} maxLength={500} value={text} onChange={(e) => setText(e.target.value)}
-              placeholder="예: 둘째 날 응원이에요. 오늘도 힘내세요!" />
+              placeholder={pre ? "예: 마니또 카페 메뉴판 — 1) 아메리카노 2) 유자차 3) 초코 과자. '마니또에게 한마디'로 주문해 주세요!" : "예: 둘째 날 응원이에요. 오늘도 힘내세요!"} />
           </label>
           {showCode && (
             <label className="check">

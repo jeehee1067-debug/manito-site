@@ -20,6 +20,7 @@ import { parseRosterLine, rosterSummary, sameSummary } from "../lib/roster.js";
 import InviteMail, { ProfileMail, ReminderMail } from "./InviteMail.jsx";
 import { AUTO_ITEMS, CLAIM_MS, autoPlan, localInputToMs, msToLocalInput, nextDue } from "../lib/schedule.js";
 import { BACKUP_COLLECTIONS, BACKUP_DOCS, backupDocCount, buildBackup, messageRows, stamp, toCsv } from "../lib/backup.js";
+import { handoverItems } from "../lib/handover.js";
 
 // Firestore 배치는 500건 제한이라 나눠서 커밋한다.
 async function commitInChunks(ops) {
@@ -86,6 +87,14 @@ function useColl(name) {
   return map;
 }
 
+// 중도 이탈로 짝을 이어 붙인 기록(meta/handover, tools/handover/handover.py가 쓴다. lib/handover.js). 불러오기 전에는 null, 없으면 [].
+// 이 기록이 있으면 지난 주차의 "누가 누구에게"를 그 주차의 짝으로 계산한다(짝 현황·집계·칭호·추측·코드 점검).
+function useHandover() {
+  const [items, setItems] = useState(null);
+  useEffect(() => onSnapshot(doc(db, "meta", "handover"), (s) => setItems(handoverItems(s.exists() ? s.data() : null)), () => setItems([])), []);
+  return items;
+}
+
 // 짝 현황: 마니또별 주차 상태와 지목. "짝 현황" 표와 "받은 게 없어요 확인" 표가 같이 쓴다.
 function usePairs() {
   const assignments = useColl("assignments");
@@ -96,7 +105,8 @@ function usePairs() {
   const verdicts = useColl("verdicts");
   const guesses = useColl("guesses");
   const deliveries = useColl("deliveries");
-  const ready = [assignments, giverCodes, missions, redemptions, reports, verdicts, guesses, deliveries].every(Boolean);
+  const handover = useHandover();
+  const ready = [assignments, giverCodes, missions, redemptions, reports, verdicts, guesses, deliveries, handover].every(Boolean);
   const rows = useMemo(() => {
     if (!ready) return [];
     // 완료 알림 문서가 있는 주차도 "완료를 알린 주차"로 본다(집계 scoring.js와 같은 기준)
@@ -105,9 +115,9 @@ function usePairs() {
     const autoPraise = new Set(Object.values(deliveries).filter((d) => d.kind === "praise" && !d.hidden).map((d) => `${d.receiverPid}_${d.slot}`));
     // 인증 코드가 실린 완료 알림·쪽지가 간 주차(마니또가 "코드 함께 보내기"를 끄면 대상은 코드가 없어 인증할 수 없다)
     const codeSent = new Set(Object.values(deliveries).filter((d) => d.code && !d.hidden).map((d) => `${d.receiverPid}_${d.slot}`));
-    return pairRows({ assignments, giverCodes, missions, redemptions, reports, verdicts, guesses, delivered, autoPraise, codeSent });
-  }, [ready, assignments, giverCodes, missions, redemptions, reports, verdicts, guesses, deliveries]);
-  return { ready, rows, assignments, giverCodes, missions, guesses };
+    return pairRows({ assignments, giverCodes, missions, redemptions, reports, verdicts, guesses, delivered, autoPraise, codeSent, handover });
+  }, [ready, assignments, giverCodes, missions, redemptions, reports, verdicts, guesses, deliveries, handover]);
+  return { ready, rows, assignments, giverCodes, missions, guesses, handover };
 }
 
 // 운영 화면은 명단 전체(가입 여부·수상 제외 포함)를 쓴다. 참여자 화면은 public/roster 요약만 읽는다.
@@ -791,6 +801,7 @@ function AssignCheck() {
   const isOwner = useIsOwner();
   const roster = useFullRoster();
   const assignments = useColl("assignments");
+  const handover = useHandover();
   const [hints, setHints] = useState(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -801,8 +812,8 @@ function AssignCheck() {
       .then((s) => alive && setHints(s.docs.map((d) => d.data())), () => alive && setHints([]));
     return () => { alive = false; };
   }, [tick, config.assignVer]);
-  if (!roster || !assignments || !hints) return null;
-  const h = assignmentHealth({ roster, assignments, hints, config });
+  if (!roster || !assignments || !hints || !handover) return null;
+  const h = assignmentHealth({ roster, assignments, hints, config, handover });
   const phase = config.phase;
   if (phase === PHASE.SETUP && (h.status === "none" || h.status === "ok")) return null; // 배정 전이거나 정상: 준비 단계에서는 조용히
   if (h.status === "ok") {
@@ -1337,12 +1348,13 @@ function Moderation() {
 // 지금 자료를 새로 읽어 angels.js의 기준대로 연결한다. 주차를 올릴 때(자동)와 "지금 순서대로 연결"에서 쓴다.
 // 이미 수호천사가 있는 사람은 덮어쓰지 않는다(운영자 둘이 동시에 눌러도 한 번만).
 async function linkAngelsNow(week) {
-  const [assignments, missions, deliveries, volunteers, angels, roster, skipDoc] = await Promise.all([
+  const [assignments, missions, deliveries, volunteers, angels, roster, skipDoc, handoverDoc] = await Promise.all([
     ...["assignments", "giverMissions", "deliveries", "angelVolunteers", "angels", "roster"].map(readAll),
     getDoc(doc(db, "meta", "angelSkips")),
+    getDoc(doc(db, "meta", "handover")).catch(() => null),
   ]);
   const delivered = new Set(Object.values(deliveries).filter((d) => d.kind !== "note").map((d) => `${d.receiverPid}_${d.slot}`));
-  const rows = pairRows({ assignments, missions, delivered });
+  const rows = pairRows({ assignments, missions, delivered, handover: handoverItems(handoverDoc?.exists() ? handoverDoc.data() : null) });
   const pairs = matchAngels({ rows, volunteers, angels, week, people: angelPeople(Object.entries(roster).map(([pid, r]) => ({ pid, ...r }))), skips: skipDoc.exists() ? skipDoc.data().pairs || {} : {} });
   const made = [];
   for (const p of pairs) {
@@ -1902,7 +1914,7 @@ function Unresolved({ all = false }) {
 // 짝 현황: 누가 누구의 마니또인지와 주차별 진행. 운영자는 참여하지 않는 계정이라 언제든 볼 수 있다.
 function Pairs() {
   const { config, nameOf, byPid } = useApp();
-  const { ready, rows, assignments, giverCodes } = usePairs();
+  const { ready, rows, assignments, giverCodes, handover } = usePairs();
   const receiverCodes = useColl("receiverCodes");
   const phase = config.phase;
   const [shown, setShown] = useState(false); // 사무실에서 화면이 보일 수 있어서 처음에는 접어 둔다
@@ -1911,14 +1923,14 @@ function Pairs() {
   // 예전 방식으로 배정된 자료에는 "받는 사람 기준 코드"가 없어서 인증(피드 글 확인)이 거부된다. 미션이 시작된 뒤에는 여기서 채워 넣는다.
   // (준비 단계에서는 배정할 때 같이 쓰므로 건드리지 않는다. 다시 배정하는 중간 상태를 덮어쓰지 않게)
   useEffect(() => {
-    if (phase < PHASE.RUNNING || !assignments || !giverCodes || !receiverCodes) return;
-    const want = receiverCodesOf(assignments, giverCodes);
+    if (phase < PHASE.RUNNING || !assignments || !giverCodes || !receiverCodes || !handover) return;
+    const want = receiverCodesOf(assignments, giverCodes, handover);
     const fix = Object.entries(want).filter(([pid, codes]) => !sameCodes(receiverCodes[pid]?.codes, codes));
     if (!fix.length) return;
     const b = writeBatch(db);
     fix.forEach(([pid, codes]) => b.set(doc(db, "receiverCodes", pid), { codes }));
     b.commit().catch(() => {});
-  }, [phase, assignments, giverCodes, receiverCodes]);
+  }, [phase, assignments, giverCodes, receiverCodes, handover]);
 
   if (!ready) return null;
   if (rows.length === 0) {
@@ -1935,6 +1947,7 @@ function Pairs() {
     return (
       <td key={slot} className={`st-${x.status}`} title={x.text || undefined}>
         {x.status === "none" ? "-" : <>{level && <span className="small">{level} · </span>}{SLOT_STATUS_LABEL[x.status]}{x.notes > 0 && <span className="small"> +쪽지 {x.notes}</span>}</>}
+        {x.receiverPid && x.receiverPid !== r.receiverPid && <span className="small muted"> (→ {nameOf(x.receiverPid)})</span>}
       </td>
     );
   };
@@ -1954,7 +1967,7 @@ function Pairs() {
   };
 
   return (
-    <Panel title={`짝 현황 (${rows.length}쌍)`}>
+    <Panel title={`짝 현황 (${rows.filter((r) => !r.left).length}쌍)`}>
       <p className="small">
         누가 누구의 마니또인지와 주차별 진행이에요. 운영자 화면에만 보여요(운영자·공동 운영자는 참여하지 않는 계정이에요).
         {" "}인증됨 {count("redeemed")} · 인증 대기 {count("sent")} · 신고 {count("reported")} · 받았음 확인 {count("confirmed")} · 못 받음 확인 {count("missing")}
@@ -1977,8 +1990,8 @@ function Pairs() {
           </thead>
           <tbody>
             {sorted.map((r) => (
-              <tr key={r.giverPid}>
-                <td className="left">{nameOf(r.giverPid)}{partOf(r.giverPid) && <span className="small muted"> {partOf(r.giverPid)}</span>}</td>
+              <tr key={r.giverPid} className={r.left ? "row-left" : undefined}>
+                <td className="left">{nameOf(r.giverPid)}{partOf(r.giverPid) && <span className="small muted"> {partOf(r.giverPid)}</span>}{r.left && <span className="small"> (중도 이탈)</span>}</td>
                 <td className="left">{nameOf(r.receiverPid)}{partOf(r.receiverPid) && <span className="small muted"> {partOf(r.receiverPid)}</span>}</td>
                 {[1, 2, 3].map((slot) => cell(r, slot))}
                 {showGuess && (
@@ -1986,7 +1999,7 @@ function Pairs() {
                     {r.guessPid ? `${nameOf(r.guessPid)} (${r.correct ? "정답" : "오답"})` : "지목 안 함"}
                   </td>
                 )}
-                {clues && clueCell(r)}
+                {clues && (r.left ? <td className="muted">-</td> : clueCell(r))}
               </tr>
             ))}
           </tbody>
@@ -2011,10 +2024,11 @@ function MidGuesses() {
   const roster = useFullRoster();
   const midGuesses = useColl("midGuesses");
   const assignments = useColl("assignments");
+  const handover = useHandover();
   const [shown, setShown] = useState(false);
-  if (!roster || !midGuesses || !assignments) return null;
+  if (!roster || !midGuesses || !assignments || !handover) return null;
   const week = config.week || 1;
-  const { summary, rows } = midGuessStats({ midGuesses, assignments, roster, week });
+  const { summary, rows } = midGuessStats({ midGuesses, assignments, roster, week, handover });
   const nameOfPid = (pid) => roster.find((r) => r.pid === pid)?.name || "(알 수 없음)";
   const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
   const open = (w) => config.phase === PHASE.RUNNING && w === week;
@@ -2229,6 +2243,7 @@ function CodeCheck() {
   const { nameOf } = useApp();
   const assignments = useColl("assignments"); // 짝 현황과 같은 구독(한 번만 읽는다)
   const giverCodes = useColl("giverCodes");
+  const handover = useHandover();
   // 코드 문서(54명 기준 162건)는 운영 탭을 열 때마다 읽지 않고 "점검하기"를 누를 때만 읽는다(읽기 줄이기)
   const [codes, setCodes] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -2236,7 +2251,7 @@ function CodeCheck() {
     setBusy(true);
     try { setCodes(await readAll("codes")); } catch { setCodes(undefined); } finally { setBusy(false); }
   }
-  if (!assignments || !giverCodes) return null;
+  if (!assignments || !giverCodes || !handover) return null;
   const total = Object.keys(assignments).length * 3;
   if (!total) return null;
   if (!codes) {
@@ -2248,7 +2263,7 @@ function CodeCheck() {
       </p>
     );
   }
-  const bad = codeProblems(assignments, giverCodes, codes);
+  const bad = codeProblems(assignments, giverCodes, codes, handover);
   if (!bad.length) return <p className="note banner" role="status">인증 코드 점검: 정상이에요. 코드 {total}개가 모두 맞는 대상·주차를 가리켜요.</p>;
   return (
     <section className="panel warn-panel" role="alert">
@@ -2279,7 +2294,10 @@ async function calcAll(roster, assignVer, { awards = true } = {}) {
     pid: r.pid, part: (r.part || "").trim() || null,
     disqualified: Boolean(r.disqualified), joined: Boolean(r.uid), dropout: Boolean(r.dropout),
   }));
+  // 중도 이탈로 짝을 이어 붙인 기록: 지난 주차는 그 주차의 짝으로 센다(lib/handover.js)
+  const handover = handoverItems(await getDoc(doc(db, "meta", "handover")).then((s) => (s.exists() ? s.data() : null)).catch(() => null));
   const tickets = computeTickets({
+    handover,
     deliveries: Object.values(deliveries).map((d) => ({ receiverPid: d.receiverPid, slot: d.slot, kind: d.kind, hidden: Boolean(d.hidden) })),
     people,
     assignments: Object.fromEntries(Object.entries(assignments).map(([g, a]) => [g, a.receiverPid])),
@@ -2298,7 +2316,7 @@ async function calcAll(roster, assignVer, { awards = true } = {}) {
   // 송년회 발표용 자료(응모권과 무관)
   const finalGuess = Object.fromEntries(Object.entries(guesses).map(([r, g]) => [r, g.guessPid]));
   const assignMap = Object.fromEntries(Object.entries(assignments).map(([g, a]) => [g, a.receiverPid]));
-  const noticed = noticedWeeks(assignMap, Object.fromEntries(Object.entries(midGuesses).map(([r, m]) => [r, m.guesses || {}])), finalGuess);
+  const noticed = noticedWeeks(assignMap, Object.fromEntries(Object.entries(midGuesses).map(([r, m]) => [r, m.guesses || {}])), finalGuess, handover);
   // 마니또별 미션 이야기: 주차마다 고른 카드와 인증 여부
   const story = Object.fromEntries(Object.entries(assignments).map(([g]) => {
     const codes = giverCodes[g]?.codes || {};
@@ -2352,6 +2370,7 @@ async function calcAll(roster, assignVer, { awards = true } = {}) {
     deliveries: Object.values(deliveries),
     midGuesses: Object.fromEntries(Object.entries(midGuesses).map(([r, m]) => [r, m.guesses || {}])),
     tickets,
+    handover,
   });
   const goldRecord = awards ? await getDoc(doc(db, "meta", "goldDraw")).then((s) => (s.exists() ? s.data().weeks || {} : {})).catch(() => ({})) : {};
   const goldWinners = Object.fromEntries(GOLD_DRAW.weeks.filter((w) => goldRecord[String(w)])

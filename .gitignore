@@ -7,3 +7,7 @@ dist/
 e2e/shots/
 __pycache__/
 *.pyc
+# 중도 이탈 처리 스크립트가 남기는 바꾸기 전 값(누가 누구의 마니또인지가 들어 있다), 운영 화면 백업 파일
+handover-*.json
+manito-backup-*.json
+manito-messages-*.csv

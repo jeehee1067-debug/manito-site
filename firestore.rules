@@ -41,7 +41,7 @@ service cloud.firestore {
     // 게시된 규칙의 버전 확인용. 운영 화면이 이 경로를 읽어 보고, 거부되면 "콘솔의 규칙이 예전 것"이라고 알려 준다.
     // 화면이 쓰는 경로·값의 모양을 바꿀 때 src/lib/constants.js의 RULES_VERSION과 같이 올린다.
     match /rulesVersion/{v} {
-      allow get: if isAdmin() && v == '20261127';
+      allow get: if isAdmin() && v == '20261128';
     }
 
     // ── 설정 ──────────────────────────────────────────────────────────────
@@ -483,7 +483,9 @@ service cloud.firestore {
         && shortStr(request.resource.data.message, 500)
         && (request.resource.data.get('code', null) == null
             || (request.resource.data.code is string && request.resource.data.code.size() == 4))
-        // 완료 알림(mission·praise)은 지금 열린 주차만(지난 주차는 마감). 추가 쪽지(note)는 완료한 지난 주차에도 된다
+        // 완료 알림(mission·praise)은 지금 열린 주차만(지난 주차는 마감). 추가 쪽지(note)는 완료한 지난 주차에도 된다.
+        // 지금 열린 주차는 완료 전에도 쪽지를 먼저 보낼 수 있다(사용자가 정함, 11/26: 마니또 카페 메뉴판·타임어택 예고를 보내려고
+        // 미션을 하기 전에 "완료"를 누르던 것). 완료 전 쪽지에는 인증 코드를 싣지 않는다(받기 전에 인증하지 않게).
         && (((request.resource.data.kind == 'mission' && request.resource.data.slot < 3 && request.resource.data.slot == week()
                && missionCardOk(string(request.resource.data.slot)))
              || (request.resource.data.kind == 'praise' && request.resource.data.slot == 3 && request.resource.data.slot == week()
@@ -494,7 +496,8 @@ service cloud.firestore {
           || (request.resource.data.kind == 'note'
               && !('card' in request.resource.data)
               && request.resource.data.message.size() > 0
-              && doneIn(get(myMissions()).data, string(request.resource.data.slot))
+              && (doneIn(get(myMissions()).data, string(request.resource.data.slot))
+                  || (request.resource.data.slot == week() && request.resource.data.get('code', null) == null))
               && noteCount(getAfter(myMissions()).data, string(request.resource.data.slot))
                    == noteCount(get(myMissions()).data, string(request.resource.data.slot)) + 1
               && noteCount(getAfter(myMissions()).data, string(request.resource.data.slot)) <= 5
@@ -727,6 +730,13 @@ service cloud.firestore {
     // 운영자의 "대상이 기다리고 있어요" 알림: 그 사람의 마니또만 읽는다(누가 받은 게 없는지 다른 참여자에게 보이지 않게).
     match /nudges/{receiverPid} {
       allow get: if linked() && receiverPid == myReceiver();
+      allow read, write: if isAdmin();
+    }
+
+    // 운영진 안내(중도 이탈로 대상·마니또가 바뀐 사람에게 띄우는 팝업, src/pages/HandoverPopup.jsx). tools/handover/handover.py가 쓴다.
+    // { id, kind: "giver" | "receiver", fromSlot, redo, at } — 본인과 운영자만 읽는다(누구의 짝이 바뀌었는지 다른 사람에게 보이지 않게).
+    match /notices/{pid} {
+      allow get: if linked() && myPid() == pid;
       allow read, write: if isAdmin();
     }
 

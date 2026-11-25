@@ -11,6 +11,7 @@
 //              대상이 주차별 추측(midGuesses)에서도 한 번도 나를 고르지 않은 마니또. 대상이 가입하지 않았거나 중도 이탈이면 뺀다(추측할 사람이 없어서).
 import { cardLevel } from "./scoring.js";
 import { isGoldChoice } from "./gold.js";
+import { slotPairs } from "./handover.js";
 
 // measure·unit: 1등의 값을 보일 때 "도전 미션 3건"처럼. 값이 없는 칭호(황금손·투명 마니또)는 비워 둔다
 export const TITLES = [
@@ -40,14 +41,16 @@ function topOf(counts, min = 1) {
  * deliveries: [{ receiverPid, slot, kind, message, hidden }]
  * midGuesses: { receiverPid: { "1": pid, ... } }
  * tickets: computeTickets 결과 { pid: { hidden } }
+ * handover: 중도 이탈로 짝을 이어 붙인 기록(handover.js). 쪽지는 그 주차의 마니또에게 센다
+ *   (추리 보드는 내 파트를 빼지 않으므로 이어 받은 마니또도 대상이 주차별 추측에 고를 수 있다 — 투명 마니또는 다른 사람과 같은 기준).
  * 반환: [{ key, emoji, label, desc, measure, unit, winners: [pid], value }] — TITLES 순서, 받은 사람이 없는 칭호도 winners: []로 넣는다
  */
-export function computeTitles({ people = [], assignments = {}, giverCodes = {}, redemptions = {}, missions = {}, deliveries = [], midGuesses = {}, tickets = {} }) {
+export function computeTitles({ people = [], assignments = {}, giverCodes = {}, redemptions = {}, missions = {}, deliveries = [], midGuesses = {}, tickets = {}, handover = null }) {
   const byPid = Object.fromEntries(people.map((p) => [p.pid, p]));
   const present = (pid) => byPid[pid] && byPid[pid].joined !== false && !byPid[pid].dropout;
   const eligible = (pid) => present(pid) && !byPid[pid].disqualified;
   const givers = Object.keys(assignments).filter(eligible);
-  const giverOf = Object.fromEntries(Object.entries(assignments).map(([g, r]) => [r, g]));
+  const at = slotPairs(assignments, handover);
 
   // 대상이 인증하고 카드와 같다고 확인한 미션의 카드 목록
   const confirmedChoices = (giver) => Object.entries(giverCodes[giver] || {})
@@ -66,7 +69,7 @@ export function computeTitles({ people = [], assignments = {}, giverCodes = {}, 
 
   const notes = Object.fromEntries(givers.map((g) => [g, 0]));
   for (const d of deliveries) {
-    const g = giverOf[d.receiverPid];
+    const g = at.giverAt(d.receiverPid, d.slot);
     if (!(g in notes) || !NOTE_KINDS.has(d.kind) || d.hidden || !String(d.message || "").trim()) continue;
     notes[g]++;
   }

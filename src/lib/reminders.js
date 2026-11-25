@@ -45,8 +45,8 @@ export function reminderTargets(rows = [], roster = [], { kind, week = 1 }) {
     for (const [k, s] of Object.entries(row.slots || {})) {
       const slot = Number(k);
       if (slot > week) continue;
-      if (kind === "verify" && (s.status === "sent" || s.status === "auto")) add(row.receiverPid, slot);
-      if (kind === "mission" && !s.done && slot === week) add(row.giverPid, slot);
+      if (kind === "verify" && (s.status === "sent" || s.status === "auto")) add(s.receiverPid || row.receiverPid, slot); // 그 주차의 대상(중도 이탈로 바뀐 경우)
+      if (kind === "mission" && !s.done && slot === week && s.status !== "left") add(row.giverPid, slot);
     }
   }
   return [...slotsOf]

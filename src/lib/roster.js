@@ -8,6 +8,8 @@ export function rosterSummary(rows) {
   const people = {};
   for (const r of [...rows].sort((a, b) => a.pid.localeCompare(b.pid))) {
     people[r.pid] = { name: r.name ?? "", loc: r.loc ?? null, part: r.part ?? null };
+    // 중도 이탈로 짝에서 빠진 사람(tools/handover가 명단에 leftGame: true를 남긴다): 이제 누구의 마니또도 아니라 추리 보드 후보에서 뺀다
+    if (r.leftGame === true) people[r.pid].out = true;
   }
   return people;
 }
