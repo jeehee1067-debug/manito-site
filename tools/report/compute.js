@@ -5,6 +5,7 @@
 import { MISSION_CARDS, cardHow, findCard } from "../../src/lib/constants.js";
 import { progressPercents } from "../../src/lib/progress.js";
 import { midGuessStats } from "../../src/lib/pairs.js";
+import { TICKET_RULES as R } from "../../src/config/prizes.js";
 
 const pct = (a, b) => (b > 0 ? Math.round((a / b) * 100) : 0);
 const ms = (t) => (t ? new Date(t).getTime() || 0 : 0); // 백업의 시각은 ISO 글자
@@ -103,3 +104,17 @@ export function computeReport(backup, { week = 1, topN = 3, reviewChars = 0 } = 
 // 2주차부터 새로 나오는 카드 이름(그림·메일의 "NEW 카드")과 황금 카드 이름
 export const newCardNames = () => Object.values(MISSION_CARDS).flat().filter((c) => c.from === 2 && !c.gold).map((c) => c.name);
 export const goldCardNames = () => Object.values(MISSION_CARDS).flat().filter((c) => c.gold).map((c) => c.name);
+
+// 놓친 주차가 있어도 아직 모을 수 있는 최대 응모권(수호천사 제외, 사용자가 정함 11/26: "1주차를 놓쳤어도 아직 최대 12장" 문구).
+// 놓친 주차만큼 미션·카드 추가분이 줄고, 은신은 미션 hiddenMinMissions건(3건 모두)이 필요해 하나라도 놓치면 없다.
+// 정답 지목·대상으로서 받는 입력·비용 카드·우승 파트는 그대로(우승 파트·비용 카드는 내 미션이 1건 이상 인증돼야 하므로 3주를 다 놓치면 없다).
+export function maxTicketsIfMissed(missed = 0) {
+  const left = Math.max(0, R.maxMissions - missed);
+  const mission = left * R.perRedeemedMission;
+  const card = Math.min(R.maxCardBonus, left * Math.max(...Object.values(R.cardBonus)));
+  const cost = left > 0 ? R.costBonus : 0;
+  const entries = R.maxReceiverEntries * R.perReceiverEntry;
+  const hidden = left >= R.hiddenMinMissions ? R.hidden : 0;
+  const part = left >= R.partBonusMinMissions ? R.partBonus : 0;
+  return mission + card + cost + entries + hidden + R.correctGuess + part;
+}
