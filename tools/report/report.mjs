@@ -12,7 +12,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { SCHEDULE, CLUE_DATES, LEVEL_LABEL, shortDate, weekDeadline } from "../../src/lib/constants.js";
 import { GOLD_DRAW, PRIZES } from "../../src/config/prizes.js";
-import { computeReport, goldCardNames, newCardNames } from "./compute.js";
+import { computeReport, goldCardNames, maxTicketsIfMissed, newCardNames } from "./compute.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ICONS = path.resolve(HERE, "../../src/assets/icons");
@@ -88,7 +88,7 @@ export function renderHtml(d, { fontDir, width = 1400 } = {}) {
   const news = d.week === 1 ? `
       <li><span class="tag new">NEW</span><div><b>새 카드 ${newCardNames().length}장</b><small>${esc(newCardNames().join(" · "))}</small><small>쉬움·보통 카드 두 장 중 한 장은 새 카드예요</small></div></li>
       <li><span class="tag gold">✨ 황금</span><div><b>황금 카드 등장!</b><small>${esc(goldCardNames().slice(0, 2).join(" · "))} 등 · 응모권은 도전과 같아요</small><small>대상이 인증하면 매주 ${GOLD_DRAW.perWeek}명을 뽑아 ☕ ${esc(GOLD_DRAW.prize)}</small></div></li>
-      <li><span class="tag">다시</span><div><b>1주차를 놓쳤어도 괜찮아요</b><small>2주차부터 다시 참여할 수 있어요</small></div></li>
+      <li><span class="tag">다시</span><div><b>1주차를 놓쳤어도 괜찮아요</b><small>2주차부터 다시 참여해도 <b class="red">아직 최대 ${maxTicketsIfMissed(1)}장</b>까지 모을 수 있어요</small></div></li>
       <li><span class="tag">단서</span><div><b>${esc(info.nextClue)} 단서 2개 공개</b><small>단서를 보고 ${next}주차 추측도 남겨 보세요</small></div></li>` : `
       <li><span class="tag">단서</span><div><b>${esc(info.nextClue)} 단서 2개 공개</b><small>단서를 보고 ${next}주차 추측도 남겨 보세요</small></div></li>`;
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8">${fontCss(fontDir)}
@@ -150,6 +150,7 @@ export function renderHtml(d, { fontDir, width = 1400 } = {}) {
   .news { list-style:none; margin:0; padding:0; display:grid; grid-template-columns:1fr 1fr; gap:14px; }
   .news li { display:flex; gap:12px; align-items:flex-start; background:#fff; border:3px solid var(--ink); border-radius:12px; padding:14px; }
   .news b { display:block; font-size:22px; } .news small { display:block; font-size:16.5px; color:#4a4f5c; margin-top:5px; line-height:1.4; }
+  .news small b.red { display:inline; font-size:inherit; color: var(--red); }
   .tag { flex:none; font-size:16px; padding:5px 9px; border-radius:8px; border:2px solid var(--ink); background: var(--paper2); }
   .tag.new { background:#ff6b6b; color:#fff; } .tag.gold { background: linear-gradient(135deg,#ffe58a,#e0a400); }
   .now { margin:0 0 14px; text-align:center; font-size:24px; background: var(--ink); color:#fff; border-radius:10px; padding:10px; } .now b { color: var(--gold); font-size:30px; }
@@ -238,7 +239,7 @@ export function mailText(d) {
   }
   if (d.week === 1) {
     lines.push(
-      "- 1주차를 놓쳤어도 괜찮아요. 2주차부터 다시 참여할 수 있어요.",
+      `- 1주차를 놓쳤어도 괜찮아요. 2주차부터 다시 참여해도 아직 최대 ${maxTicketsIfMissed(1)}장까지 모을 수 있어요.`,
       `- NEW 카드: ${newCardNames().join(", ")} — 쉬움·보통 카드 두 장 중 한 장은 새 카드예요.`,
       `- ✨ 황금 카드: 응모권은 도전과 같고, 대상이 "카드와 같아요"로 인증하면 매주 ${GOLD_DRAW.perWeek}명을 뽑아 ${GOLD_DRAW.prize}을 드려요(송년회에서 발표).`,
     );

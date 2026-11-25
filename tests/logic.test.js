@@ -1725,7 +1725,12 @@ test("운영 화면 매주 남긴 마니또 추측: 주차마다 남긴 사람·
 });
 
 // 부서 공지용 결산 숫자(tools/report/compute.js): 사이트와 같은 식, 이름·짝은 결과에 없음
-import { computeReport } from "../tools/report/compute.js";
+import { computeReport, maxTicketsIfMissed } from "../tools/report/compute.js";
+test("결산 문구: 놓친 주차가 있어도 모을 수 있는 최대 응모권", () => {
+  assert.equal(maxTicketsIfMissed(0), 17, "규칙 탭의 최대 17장과 같다(수호천사 제외)");
+  assert.equal(maxTicketsIfMissed(1), 12, "1주차를 놓치면 미션 1·도전 추가분 2·은신 2가 빠진다");
+  assert.equal(maxTicketsIfMissed(3), 4, "3주를 다 놓치면 대상으로서 받는 것(입력 3 + 정답 1)만");
+});
 test("결산 숫자: 완료율은 사이트 식, 인증·쪽지·공감·후기·추측", () => {
   const easySite = MISSION_CARDS.easy.find((c) => !c.real && !c.from);
   const normalReal = MISSION_CARDS.normal.find((c) => c.real && !c.from);
