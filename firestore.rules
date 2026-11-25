@@ -37,11 +37,20 @@ service cloud.firestore {
     }
     // 문자열 길이 제한
     function shortStr(v, max) { return v is string && v.size() <= max; }
+    // 중도 이탈 이어 붙이기(운영 화면 "중도 이탈 처리", src/lib/handoverPlan.js — 규칙 20261129):
+    // 미션이 시작된 뒤에는 짝·코드·단서를 아무도 못 바꾸지만, 처음 운영자가 미션 진행 단계에 meta/handover 기록(items)을
+    // 같은 묶음에서 바꿀 때만 그 묶음의 짝·코드·단서·완료 표시 되돌리기를 허용한다(기록 없이 짝을 바꾸는 실수·악용 방지).
+    function handoverBatch() {
+      let p = /databases/$(database)/documents/meta/handover;
+      return isOwner() && phase() == 1
+        && existsAfter(p)
+        && getAfter(p).data.get('items', []).size() != (exists(p) ? get(p).data.get('items', []).size() : 0);
+    }
 
     // 게시된 규칙의 버전 확인용. 운영 화면이 이 경로를 읽어 보고, 거부되면 "콘솔의 규칙이 예전 것"이라고 알려 준다.
     // 화면이 쓰는 경로·값의 모양을 바꿀 때 src/lib/constants.js의 RULES_VERSION과 같이 올린다.
     match /rulesVersion/{v} {
-      allow get: if isAdmin() && v == '20261128';
+      allow get: if isAdmin() && v == '20261129';
     }
 
     // ── 설정 ──────────────────────────────────────────────────────────────
@@ -228,11 +237,13 @@ service cloud.firestore {
       allow get: if linked() && myPid() == pid;
       allow read: if isAdmin();
       allow write: if isAdmin() && phase() == 0;
+      allow write: if handoverBatch(); // 중도 이탈 이어 붙이기(위 handoverBatch)
     }
     match /giverCodes/{pid} {
       allow get: if linked() && myPid() == pid;
       allow read: if isAdmin();
       allow write: if isAdmin() && phase() == 0;
+      allow write: if handoverBatch();
     }
     // 인증 코드 -> 받는 사람. 받는 사람 본인만 자기 코드 확인 가능.
     match /codes/{code} {
@@ -506,6 +517,8 @@ service cloud.firestore {
       allow update: if isAdmin()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hidden'])
         && request.resource.data.hidden is bool;
+      // 중도 이탈 이어 붙이기를 되돌릴 때 지웠던 완료 알림·쪽지를 되살린다
+      allow create: if handoverBatch();
     }
     // 쪽지 신고: 받는 사람이 자기에게 온 쪽지 하나를 운영자에게 알린다(문서 ID = 쪽지 ID, 한 번만).
     match /noteFlags/{id} {
@@ -601,6 +614,8 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow create: if linked() && myPid() == pid && phase() == 1 && missionsOk(pid, {});
       allow update: if linked() && myPid() == pid && phase() == 1 && missionsOk(pid, resource.data);
+      // 중도 이탈 이어 붙이기: 빠진 사람에게 미리 "완료"한 주차를 되돌리기(--redo)와 그 되돌리기 취소. 완료 표시·쪽지 수만
+      allow update: if handoverBatch() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['done', 'notes']);
     }
 
     // 진행 상황(완료 알린 미션 수, 프로필 작성, 최근 접속 등): 본인과 운영자만 읽는다.
@@ -626,6 +641,8 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow create: if linked() && myPid() == pid && progressOk({});
       allow update: if linked() && myPid() == pid && progressOk(resource.data);
+      // 중도 이탈 이어 붙이기에서 되돌린 완료 수만
+      allow update: if handoverBatch() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['doneCount']);
     }
 
     // "받은 게 없어요" 신고: 마니또가 완료를 알렸는데 받은 것이 없을 때 받는 사람이 주차별로 남긴다.
@@ -696,6 +713,11 @@ service cloud.firestore {
         && (request.resource.data.idx >= cfg().get('cluesReleased', 0)
             || request.resource.data.answer == resource.data.answer
             || resource.data.get('ver', -1) != assignVer());
+      // 중도 이탈 이어 붙이기: 대상이 보는 단서를 이어 받은 마니또의 답으로(공개된 칸 포함), 파트 단서도
+      allow create, update: if handoverBatch()
+        && request.resource.data.keys().hasOnly(['receiverPid', 'idx', 'answer', 'ver', 'n'])
+        && id == request.resource.data.receiverPid + '_' + string(request.resource.data.idx);
+      allow delete: if handoverBatch();
       allow create, update: if isAdmin() && phase() == 0
         && request.resource.data.idx == 6
         && request.resource.data.ver is int

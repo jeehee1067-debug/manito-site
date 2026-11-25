@@ -319,10 +319,17 @@ def undo(db, project, args):
     ry = sv.get("rosterY") or {}
     b.update(col("roster").document(Y), {"dropout": ry.get("dropout", firestore.DELETE_FIELD), "leftGame": ry.get("leftGame", firestore.DELETE_FIELD)})
     b.update(col("public").document("roster"), {f"people.`{Y}`.out": firestore.DELETE_FIELD})
-    if sv.get("giverMissionsX"):
-        b.set(col("giverMissions").document(X), unplain(sv["giverMissionsX"]))
-    if sv.get("progressX"):
-        b.set(col("progress").document(X), unplain(sv["progressX"]))
+    # 되돌렸던 주차의 완료 표시·쪽지 수와 완료 수만 되돌린다(그 뒤 마니또가 바꾼 다른 칸은 그대로)
+    gm = sv.get("giverMissionsX") or {}
+    back = {}
+    for k, v in (gm.get("done") or {}).items():
+        if int(k) >= F and v is True:
+            back[f"done.`{k}`"] = True
+            back[f"notes.`{k}`"] = (gm.get("notes") or {}).get(k, firestore.DELETE_FIELD)
+    if back:
+        b.update(col("giverMissions").document(X), back)
+    if (sv.get("progressX") or {}).get("doneCount") is not None:
+        b.update(col("progress").document(X), {"doneCount": sv["progressX"]["doneCount"]})
     for doc_id, d in (sv.get("deliveriesRemoved") or {}).items():
         b.set(col("deliveries").document(doc_id), unplain(d))
     saved_notices = sv.get("notices") or {}

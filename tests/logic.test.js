@@ -1930,3 +1930,103 @@ test("이어 붙이기 안내 글: 마니또·대상 모두 파트·이름 없�
   assert.match(r.lead, /2주차부터는 새 마니또/);
   assert.equal(r.go, "detective"); assert.equal(g.go, "mission");
 });
+
+// 운영 화면 "중도 이탈 처리"(lib/handoverPlan.js): 계획 → 적용 → 되돌리면 원래대로
+import { DELETE as HO_DEL, planHandover, planUndo } from "../src/lib/handoverPlan.js";
+function applyOps(store, ops) {
+  const out = structuredClone(store);
+  for (const o of ops) {
+    const [col, id] = o.path;
+    out[col] ||= {};
+    if (o.op === "delete") { delete out[col][id]; continue; }
+    if (o.op === "set") { out[col][id] = structuredClone(o.data); continue; }
+    if (o.op === "merge") {
+      const merge = (a, b) => { for (const [k, v] of Object.entries(b)) a[k] = v && typeof v === "object" && !Array.isArray(v) ? merge(a[k] && typeof a[k] === "object" ? a[k] : {}, v) : v; return a; };
+      out[col][id] = merge(out[col][id] || {}, structuredClone(o.data));
+      continue;
+    }
+    const docv = out[col][id] ||= {};
+    for (const [path, v] of Object.entries(o.data)) {
+      const keys = path.split(".");
+      let cur = docv;
+      for (const k of keys.slice(0, -1)) cur = cur[k] ||= {};
+      if (v === HO_DEL) delete cur[keys.at(-1)];
+      else cur[keys.at(-1)] = v;
+    }
+  }
+  return out;
+}
+test("중도 이탈 처리: 계획·적용·되돌리기", () => {
+  // 원: A(P3) → X(P1) → Y(P3) → Z(P1) → B(P2) → A. X가 2주차를 Y에게 미리 완료(메뉴판만)
+  const store = {
+    config: { app: { phase: 1, week: 2, assignVer: 2, cluesReleased: 2 } },
+    roster: { A: { name: "가", part: "P3", uid: "a" }, X: { name: "나", part: "P1", uid: "x" }, Y: { name: "다", part: "P3", uid: "y" }, Z: { name: "라", part: "P1", uid: "z" }, B: { name: "마", part: "P2", uid: "b" } },
+    assignments: { A: { receiverPid: "X" }, X: { receiverPid: "Y" }, Y: { receiverPid: "Z" }, Z: { receiverPid: "B" }, B: { receiverPid: "A" } },
+    giverCodes: { X: { codes: { 1: "x1", 2: "x2", 3: "x3" } }, Y: { codes: { 1: "y1", 2: "y2", 3: "y3" } } },
+    receiverCodes: { Y: { codes: { 1: "x1", 2: "x2", 3: "x3" } }, Z: { codes: { 1: "y1", 2: "y2", 3: "y3" } } },
+    giverMissions: { X: { done: { 1: true, 2: true }, notes: { 2: 1 }, choices: { 2: { level: "hard", cardId: "h15", text: "카페" } } }, Y: { done: { 1: true } } },
+    progress: { X: { doneCount: 2, lastSeen: 1 } },
+    deliveries: { Y_1: { slot: 1, message: "1주차" }, Y_2: { slot: 2, message: "메뉴판" }, Y_2_n1: { slot: 2, message: "추가" }, Z_1: { slot: 1, message: "Y가 Z에게" } },
+    clues: {
+      ...Object.fromEntries([0, 1, 2, 3, 4, 5].map((i) => [`Y_${i}`, { receiverPid: "Y", idx: i, answer: `X답${i}`, ver: 2, n: 1 }])),
+      ...Object.fromEntries([0, 1, 2, 3, 4, 5].map((i) => [`Z_${i}`, { receiverPid: "Z", idx: i, answer: `Y답${i}`, ver: 2, n: 1 }])),
+      Z_6: { receiverPid: "Z", idx: 6, answer: "P3", ver: 2 },
+    },
+    public: { roster: { people: { Y: { name: "다", part: "P3" } } } },
+    notices: {}, meta: {},
+  };
+  const data = (st) => ({
+    config: st.config.app, roster: st.roster, assignments: st.assignments, giverCodes: st.giverCodes, receiverCodes: st.receiverCodes,
+    missions: st.giverMissions, progress: st.progress, deliveries: st.deliveries, clues: st.clues, notices: st.notices, handover: st.meta.handover,
+    redeemed: new Set(Object.keys(st.redemptions || {})), angels: {},
+  });
+  assert.equal(planHandover(data(store), { leaver: "Y" }).needChoice, true, "X가 2주차를 완료했으면 되돌릴지 묻는다");
+  assert.match(planHandover({ ...data(store), config: { ...store.config.app, phase: 0 } }, { leaver: "Y" }).error, /미션 진행 단계/);
+  const p = planHandover(data(store), { leaver: "Y", redo: true, now: 1000 });
+  assert.equal(p.error, undefined);
+  assert.deepEqual([p.X, p.Y, p.Z, p.F, p.samePart], ["X", "Y", "Z", 2, true]);
+  const after = applyOps(store, p.ops);
+  assert.deepEqual(after.assignments.X, { receiverPid: "Z" });
+  assert.equal(after.assignments.Y, undefined);
+  assert.deepEqual(after.giverCodes.X.codes, { 1: "x1", 2: "y2", 3: "y3" });
+  assert.deepEqual(after.giverCodes.Y.codes, { 1: "y1" });
+  assert.deepEqual(after.receiverCodes.Z.codes, { 1: "y1", 2: "y2", 3: "y3" }, "Z 쪽 코드는 그대로");
+  for (let i = 0; i < 6; i++) assert.equal(after.clues[`Z_${i}`].answer, `X답${i}`);
+  assert.equal(after.clues.Z_6.answer, "P1");
+  assert.deepEqual(after.giverMissions.X.done, { 1: true }, "2주차 완료를 되돌림");
+  assert.deepEqual(after.giverMissions.X.notes, {});
+  assert.equal(after.giverMissions.X.choices[2].cardId, "h15", "골라 둔 카드는 그대로");
+  assert.equal(after.progress.X.doneCount, 1);
+  assert.equal(after.progress.X.lastSeen, 1);
+  assert.ok(!after.deliveries.Y_2 && !after.deliveries.Y_2_n1 && after.deliveries.Y_1 && after.deliveries.Z_1);
+  assert.deepEqual([after.roster.Y.dropout, after.roster.Y.leftGame, after.public.roster.people.Y.out], [true, true, true]);
+  assert.equal(after.public.roster.people.Y.name, "다", "요약의 다른 칸은 그대로(merge)");
+  assert.deepEqual([after.notices.X.kind, after.notices.Z.kind, after.notices.X.redo], ["giver", "receiver", true]);
+  assert.ok(!after.notices.X.id.includes("Y"), "안내 번호에 빠진 사람이 없다");
+  assert.equal(after.meta.handover.items.length, 1);
+  // 이미 빠진 사람은 다시 못 고른다
+  assert.match(planHandover(data(after), { leaver: "Y", redo: true }).error, /짝이 없어요/);
+  // 되돌리기
+  const u = planUndo(data(after));
+  assert.equal(u.error, undefined);
+  const back = applyOps(after, u.ops);
+  for (const col of ["assignments", "giverCodes", "receiverCodes", "clues", "deliveries"]) assert.deepEqual(back[col], store[col], `되돌리면 ${col}가 원래대로`);
+  assert.deepEqual(back.giverMissions.X.done, store.giverMissions.X.done);
+  assert.deepEqual(back.giverMissions.X.notes, store.giverMissions.X.notes);
+  assert.equal(back.progress.X.doneCount, 2);
+  assert.deepEqual([back.roster.Y.dropout, back.roster.Y.leftGame, back.public.roster.people.Y.out], [undefined, undefined, undefined]);
+  assert.deepEqual(back.notices, {});
+  assert.deepEqual(back.meta.handover.items, []);
+  // 이어 받은 뒤 새 대상에게 완료했으면 버튼으로는 되돌리지 않는다
+  const done = structuredClone(after); done.giverMissions.X.done[2] = true;
+  assert.match(planUndo(data(done)).error, /이미 완료/);
+  // 다음 주차부터(되돌리지 않음): X의 2주차는 그대로, 3주차 코드만 옮긴다
+  const late = planHandover(data(store), { leaver: "Y", fromSlot: 3, now: 2000 });
+  const a2 = applyOps(store, late.ops);
+  assert.deepEqual(a2.giverCodes.X.codes, { 1: "x1", 2: "x2", 3: "y3" });
+  assert.deepEqual(a2.giverMissions.X.done, { 1: true, 2: true });
+  assert.equal(a2.notices.X.redo, false);
+  // 맞마니또가 되는 경우는 막는다
+  const mutual = structuredClone(store); mutual.assignments.Z = { receiverPid: "X" };
+  assert.match(planHandover(data(mutual), { leaver: "Y", redo: true }).error, /맞마니또/);
+});

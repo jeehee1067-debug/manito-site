@@ -24,7 +24,7 @@ const runFail = (...args) => { try { run(...args); return null; } catch (e) { re
   }
   await H.reset();
   const { PROFILE_QUESTIONS: PQ } = await import(require("node:url").pathToFileURL(path.join(__dirname, "../src/lib/constants.js")).href);
-  const b = await chromium.launch(); const errs = []; const mk = H.maker(b, errs);
+  const b = await chromium.launch(); const errs = []; const dialogs = []; const mk = H.maker(b, errs, dialogs);
   const admin = await mk("운영자", { width: 1200, height: 900 });
   const NAMES = ["가나", "다라", "마바", "사아"];
   const PART = { 가나: "가파트", 다라: "나파트", 마바: "가파트", 사아: "나파트" };
@@ -93,7 +93,7 @@ const runFail = (...args) => { try { run(...args); return null; } catch (e) { re
   const yPid = pidOf[Y], xPid = pidOf[X], zPid = pidOf[Z];
   const before = { codesX: (await H.readDoc(`giverCodes/${xPid}`)).codes, codesY: (await H.readDoc(`giverCodes/${yPid}`)).codes, rcZ: (await H.readDoc(`receiverCodes/${zPid}`)).codes };
 
-  step("스크립트: 계획 보기 → 막히는 경우 → 적용");
+  step("스크립트(PC용 예비): 계획 보기와 막히는 경우 — 아무것도 안 바뀜");
   {
     const out = runFail("--leaver", Y);
     assert.match(out, /이미 .*'완료'했어요/, "X가 2주차를 완료했으면 --redo나 --from-slot을 요구");
@@ -101,8 +101,29 @@ const runFail = (...args) => { try { run(...args); return null; } catch (e) { re
     assert.match(plan, /같은 파트\(가파트\) 짝이 돼요/);
     assert.match(plan, /계획만 보여 드렸어요/);
     assert.equal((await H.readDoc(`assignments/${xPid}`)).receiverPid, yPid, "계획만 보면 아무것도 안 바뀜");
-    const done = run("--leaver", Y, "--redo", "--apply", "--yes");
-    assert.match(done, /끝났어요/);
+  }
+
+  step("운영 화면 '빠지는 사람 짝 이어 붙이기' 버튼: 계획 보기 → 되돌릴지 고르기 → 이름 입력 확인 → 적용");
+  const hoPanel = () => H.panel(admin, "빠지는 사람 짝 이어 붙이기"); // 제목에 "중도 이탈"을 넣지 않는다(fairness.cjs가 "중도 이탈" 패널을 제목으로 찾는다)
+  {
+    await admin.reload(); await H.tab(admin, "운영");
+    const ho = hoPanel();
+    await ho.locator("select").selectOption({ label: `${Y} (나파트)` });
+    await ho.getByRole("button", { name: "계획 보기" }).click();
+    await ho.getByText(new RegExp(`${X}님이 2주차를 이미 ${Y}님에게 "완료"했어요`)).waitFor();
+    await ho.getByRole("button", { name: "그 완료를 되돌리고 새 대상에게 다시 하게(권장)" }).click();
+    await ho.getByText(`원래: ${X} [가파트] → ${Y} [나파트] → ${Z} [가파트]`).waitFor();
+    await ho.getByText(/같은 파트\(가파트\) 짝이 돼요/).waitFor();
+    await ho.getByText(new RegExp(`${X}의 2주차 '완료'를 되돌려요`)).waitFor();
+    // 이름을 틀리게 넣으면 멈춘다
+    dialogs.answers = ["아무개"];
+    await ho.getByRole("button", { name: "이대로 적용하기" }).click();
+    await ho.getByText("이름이 달라서 멈췄어요. 아무것도 바꾸지 않았어요.").waitFor();
+    assert.equal((await H.readDoc(`assignments/${xPid}`)).receiverPid, yPid);
+    dialogs.answers = [Y];
+    await ho.getByRole("button", { name: "이대로 적용하기" }).click();
+    await ho.getByText(/적용했어요\./).waitFor();
+    await ho.getByText(`${Y} 빠짐 → ${X}이(가) 2주차부터 ${Z}을(를) 맡음`).waitFor();
   }
   const checkApplied = async () => {
     assert.equal((await H.readDoc(`assignments/${xPid}`)).receiverPid, zPid, "X → Z");
@@ -127,10 +148,12 @@ const runFail = (...args) => { try { run(...args); return null; } catch (e) { re
   await checkApplied();
   console.log(`  적용: ${X} → ${Z}(2주차부터), ${X}의 2주차 완료 되돌림, ${Z}의 단서 6칸 = ${X}의 답, 파트 단서 가파트, ${Y} 중도 이탈`);
 
-  step("되돌리기(--undo) → 원래대로 → 다시 적용");
+  step("되돌리기(버튼) → 원래대로 → 스크립트로 다시 적용(두 길이 같은 결과)");
   {
-    assert.match(run("--undo"), /계획만 보여 드렸어요/);
-    run("--undo", "--apply", "--yes");
+    const ho = hoPanel();
+    await ho.getByRole("button", { name: "가장 최근 것 되돌리기" }).click();
+    await ho.getByRole("button", { name: "되돌리기 실행" }).click();
+    await ho.getByText("되돌렸어요. 원래 짝·코드·단서로 돌아갔어요.").waitFor();
     assert.equal((await H.readDoc(`assignments/${xPid}`)).receiverPid, yPid);
     assert.equal((await H.readDoc(`assignments/${yPid}`)).receiverPid, zPid);
     assert.deepEqual((await H.readDoc(`giverCodes/${xPid}`)).codes, before.codesX);
@@ -144,7 +167,9 @@ const runFail = (...args) => { try { run(...args); return null; } catch (e) { re
     assert.deepEqual(await H.readDoc(`notices/${xPid}`), {}, "되돌리면 안내도 지운다");
     run("--leaver", Y, "--redo", "--apply", "--yes");
     await checkApplied();
-    console.log("  되돌리기도 그대로 원래 값으로 돌아오고, 다시 적용해도 같다");
+    // 스크립트의 계획 보기·되돌리기도 같은 기록을 다룬다
+    assert.match(run("--undo"), /계획만 보여 드렸어요/);
+    console.log("  버튼으로 되돌리면 원래 값으로 돌아오고, 스크립트로 다시 적용해도 버튼과 같은 결과");
   }
 
   step("안내 팝업: X에게 '내 대상이 바뀌었어요', Z에게 '내 마니또가 바뀌었어요'(파트·이름 없음), 다른 사람은 없음");
