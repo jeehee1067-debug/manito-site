@@ -18,6 +18,7 @@ import {
 } from "firebase/firestore";
 
 import { PROFILE_QUESTIONS, RULES_VERSION } from "../src/lib/constants.js";
+import { DELETE as HO_DELETE, planHandover, planUndo } from "../src/lib/handoverPlan.js";
 
 let env;
 const N = increment(1); // 참여자가 고치는 문서에는 쓴 횟수(n)를 1 올려서 같이 쓴다
@@ -1966,5 +1967,81 @@ describe("황금 카드 추첨: 당첨은 운영자만 쓰고, 당첨된 본인�
     await assertFails(setDoc(doc(p("p004"), "goldWins", "p004"), { weeks: { 2: true }, at: serverTimestamp() }));
     await assertFails(setDoc(doc(p("p003"), "public", "goldDraw"), { weeks: {} }));
     await assertSucceeds(getDoc(doc(admin(), "goldWins", "p003")));
+  });
+});
+
+// 운영 화면 "중도 이탈 처리"(Admin.jsx HandoverPanel, lib/handoverPlan.js — 규칙 20261129 handoverBatch)
+describe("중도 이탈 처리: 처음 운영자가 미션 진행 단계에 기록과 같은 묶음일 때만 짝·코드·단서를 바꾼다", () => {
+  // 화면 runOps와 같은 방식으로 ops를 한 묶음에 쓴다
+  const run = (db, ops) => {
+    const b = writeBatch(db);
+    for (const o of ops) {
+      const ref = doc(db, ...o.path);
+      if (o.op === "delete") b.delete(ref);
+      else if (o.op === "update") b.update(ref, Object.fromEntries(Object.entries(o.data).map(([k, v]) => [k, v === HO_DELETE ? deleteField() : v])));
+      else if (o.op === "merge") b.set(ref, o.data, { merge: true });
+      else b.set(ref, o.data);
+    }
+    return b.commit();
+  };
+  async function readData(leaver) {
+    let d;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      const all = async (n) => Object.fromEntries((await getDocs(collection(db, n))).docs.map((x) => [x.id, x.data()]));
+      const [config, roster, assignments, giverCodes, receiverCodes, missions, progress, deliveries, redemptions, clues, notices, meta] = await Promise.all(
+        ["config", "roster", "assignments", "giverCodes", "receiverCodes", "giverMissions", "progress", "deliveries", "redemptions", "clues", "notices", "meta"].map(all));
+      d = { config: config.app, roster, assignments, giverCodes, receiverCodes, missions, progress, deliveries, redeemed: new Set(Object.keys(redemptions)), clues, notices, handover: meta.handover, angels: {} };
+    });
+    return planHandover(d, { leaver, redo: true, now: 5000 });
+  }
+  beforeEach(async () => {
+    await seed({ phase: 1, week: 2, admins: [ADMIN, CO] });
+    // p001(마니또) → p002(빠짐) → p003. p002는 1주차를 p003에게 했다(시드). p001이 2주차를 p002에게 미리 "완료"했다(되돌릴 대상)
+    await put("giverMissions/p001", { done: { 1: true, 2: true }, notes: {}, choices: { 2: { cardId: "e1", level: "easy", text: "쪽지" } }, n: 1 });
+    await put("deliveries/p002_2", { receiverPid: "p002", slot: 2, kind: "mission", message: "메뉴판", code: null });
+    await put("clues/p002_0", { receiverPid: "p002", idx: 0, answer: A(0, 1), ver: 0, n: 1 });
+    await put("clues/p003_0", { receiverPid: "p003", idx: 0, answer: A(0, 2), ver: 0, n: 1 });
+    await put("clues/p003_6", { receiverPid: "p003", idx: 6, answer: "나파트", ver: 0 });
+  });
+
+  test("처음 운영자: 적용과 되돌리기가 된다", async () => {
+    const plan = await readData("p002");
+    if (plan.error || !plan.ops) throw new Error(`계획 실패: ${plan.error}`);
+    await assertSucceeds(run(admin(), plan.ops));
+    const a = await getDoc(doc(admin(), "assignments", "p001"));
+    if (a.data().receiverPid !== "p003") throw new Error("p001 → p003이 아님");
+    if ((await getDoc(doc(admin(), "clues", "p003_0"))).data().answer !== A(0, 1)) throw new Error("단서가 이어 받은 마니또의 답이 아님");
+    if ((await getDoc(doc(admin(), "giverMissions", "p001"))).data().done["2"] !== undefined) throw new Error("완료를 되돌리지 않음");
+    // 이어 받은 대상(p003)은 자기 안내를 읽는다
+    await assertSucceeds(getDoc(doc(p("p003"), "notices", "p003")));
+    // 되돌리기
+    let undo;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      const meta = (await getDoc(doc(db, "meta", "handover"))).data();
+      const missions = Object.fromEntries((await getDocs(collection(db, "giverMissions"))).docs.map((x) => [x.id, x.data()]));
+      undo = planUndo({ handover: meta, missions, redeemed: new Set() });
+    });
+    if (undo.error) throw new Error(undo.error);
+    await assertSucceeds(run(admin(), undo.ops));
+    if ((await getDoc(doc(admin(), "assignments", "p002"))).data().receiverPid !== "p003") throw new Error("되돌린 뒤 p002의 짝이 없음");
+    if ((await getDoc(doc(admin(), "deliveries", "p002_2"))).data().message !== "메뉴판") throw new Error("지운 완료 알림이 돌아오지 않음");
+  });
+
+  test("막는 것: 공동 운영자, 참여자, 기록 없이, 미션 진행이 아닐 때", async () => {
+    const plan = await readData("p002");
+    await assertFails(run(as(CO), plan.ops)); // 공동 운영자
+    await assertFails(run(p("p001"), plan.ops)); // 참여자(이어 받을 마니또 본인)
+    const noRecord = plan.ops.filter((o) => o.path[0] !== "meta");
+    await assertFails(run(admin(), noRecord)); // 기록(meta/handover) 없이 짝·코드·단서만
+    await assertFails(updateDoc(doc(admin(), "assignments", "p001"), { receiverPid: "p003" })); // 짝 하나만 따로
+    await assertFails(setDoc(doc(admin(), "clues", "p003_0"), { receiverPid: "p003", idx: 0, answer: "아무거나", ver: 0, n: 1 })); // 단서 하나만 따로
+    await assertFails(updateDoc(doc(admin(), "giverMissions", "p001"), { "done.2": deleteField() })); // 완료 되돌리기만 따로
+    // 같은 묶음이라도 완료 표시·쪽지 수 말고 다른 칸(카드)은 못 바꾼다
+    const withCard = plan.ops.map((o) => (o.path[0] === "giverMissions" ? { ...o, data: { ...o.data, "choices.2": deleteField() } } : o));
+    await assertFails(run(admin(), withCard));
+    await setPhase(2);
+    await assertFails(run(admin(), plan.ops)); // 최종 지목 단계
   });
 });

@@ -21,6 +21,7 @@ import InviteMail, { ProfileMail, ReminderMail } from "./InviteMail.jsx";
 import { AUTO_ITEMS, CLAIM_MS, autoPlan, localInputToMs, msToLocalInput, nextDue } from "../lib/schedule.js";
 import { BACKUP_COLLECTIONS, BACKUP_DOCS, backupDocCount, buildBackup, messageRows, stamp, toCsv } from "../lib/backup.js";
 import { handoverItems } from "../lib/handover.js";
+import { DELETE as HO_DELETE, planHandover, planUndo } from "../lib/handoverPlan.js";
 
 // Firestore 배치는 500건 제한이라 나눠서 커밋한다.
 async function commitInChunks(ops) {
@@ -319,6 +320,7 @@ function AdminFull() {
       {phase >= PHASE.RUNNING && phase <= PHASE.CLOSED && <Unresolved />}
       {phase >= PHASE.RUNNING && <Angels />}
       <Pairs />
+      {phase === PHASE.RUNNING && <HandoverPanel />}
       {phase >= PHASE.RUNNING && <CardPicks />}
       {phase >= PHASE.RUNNING && <GoldDraw />}
       {phase >= PHASE.RUNNING && <MidGuesses />}
@@ -1907,6 +1909,174 @@ function Unresolved({ all = false }) {
         </div>
       )}
       {msg && <p className="error" role="alert">{msg}</p>}
+    </Panel>
+  );
+}
+
+// 중도 이탈 처리(사용자가 정함, 11/26: "운영 화면 버튼으로 만들어줘"). 빠지는 사람만 빼고 그 사람의 마니또가 그 사람의 대상을 이어 받는다.
+// 계산은 lib/handoverPlan.js(planHandover·planUndo), 지난 주차를 그 주차의 짝으로 세는 것은 lib/handover.js.
+// 처음 운영자만, 미션 진행 단계에만(보안 규칙 handoverBatch: meta/handover 기록과 같은 묶음일 때만 짝·코드·단서를 바꿀 수 있다).
+// 버튼을 누를 때만 자료를 읽는다(짝·코드 각 54건 정도 + 단서 13건).
+const toFirestore = (data) => Object.fromEntries(Object.entries(data).map(([k, v]) => [k, v === HO_DELETE ? deleteField() : v]));
+// 예전 스크립트(tools/handover)가 남긴 기록의 시각은 ISO 글자라 되살릴 때 시각 값으로 바꾼다
+const reviveTimes = (v) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(v) ? new Date(v)
+  : Array.isArray(v) ? v.map(reviveTimes) : v && typeof v === "object" && !(v instanceof Date) && typeof v.toDate !== "function" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, reviveTimes(x)])) : v);
+async function runOps(ops) {
+  const b = writeBatch(db);
+  for (const o of ops) {
+    const ref = doc(db, ...o.path);
+    if (o.op === "delete") b.delete(ref);
+    else if (o.op === "update") b.update(ref, toFirestore(o.data));
+    else if (o.op === "merge") b.set(ref, o.data, { merge: true });
+    else b.set(ref, reviveTimes(o.data));
+  }
+  await b.commit();
+}
+async function handoverData(leaver) {
+  const [config, roster, assignments, giverCodes, receiverCodes, missions, progress, angels, deliveries, redemptions, handoverDoc] = await Promise.all([
+    getDoc(doc(db, "config", "app")).then((x) => x.data()),
+    readAll("roster"), readAll("assignments"), readAll("giverCodes"), readAll("receiverCodes"), readAll("giverMissions"), readAll("progress"), readAll("angels"),
+    readAll("deliveries"), readAll("redemptions"),
+    getDoc(doc(db, "meta", "handover")).then((x) => (x.exists() ? x.data() : null)),
+  ]);
+  const Z = assignments[leaver]?.receiverPid;
+  const X = Object.keys(assignments).find((g) => assignments[g]?.receiverPid === leaver);
+  const clues = {};
+  const notices = {};
+  await Promise.all([
+    ...[leaver, Z].filter(Boolean).flatMap((pid) => Array.from({ length: 7 }, (_, i) => getDoc(doc(db, "clues", `${pid}_${i}`)).then((x) => { if (x.exists()) clues[x.id] = x.data(); }))),
+    ...[X, Z].filter(Boolean).map((pid) => getDoc(doc(db, "notices", pid)).then((x) => { if (x.exists()) notices[pid] = x.data(); })),
+  ]);
+  return { config, roster, assignments, giverCodes, receiverCodes, missions, progress, angels, handover: handoverDoc, deliveries, redeemed: new Set(Object.keys(redemptions)), clues, notices };
+}
+
+function HandoverPanel() {
+  const isOwner = useIsOwner();
+  const { nameOf } = useApp();
+  const roster = useFullRoster();
+  const handover = useHandover();
+  const [leaver, setLeaver] = useState("");
+  const [plan, setPlan] = useState(null);
+  const [redo, setRedo] = useState(null); // true: 그 주차의 완료를 되돌리고 새 대상에게 다시 / false: 다음 주차부터
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [undoPlan, setUndoPlan] = useState(null);
+  if (!roster || !handover) return null;
+  const leftSet = new Set(handover.map((x) => x.left));
+  const choices = roster.filter((r) => r.uid && !leftSet.has(r.pid)).sort((a, b) => (a.name || "").localeCompare(b.name || "", "ko"));
+
+  async function makePlan(who = leaver, redoChoice = redo) {
+    setMsg(""); setPlan(null); setUndoPlan(null);
+    if (!who) return;
+    setBusy(true);
+    try {
+      const d = await handoverData(who);
+      let p = planHandover(d, { leaver: who, redo: redoChoice === true });
+      if (p.needChoice && redoChoice === false) p = planHandover(d, { leaver: who, fromSlot: Math.max(...p.xDoneLate) + 1 });
+      setPlan(p);
+    } catch (e) {
+      setMsg(`자료를 읽지 못했어요(${e.code || e.message}). 잠시 뒤 다시 눌러 주세요.`);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function apply() {
+    if (!plan?.ops) return;
+    const typed = window.prompt(`${nameOf(plan.Y)}님을 짝에서 빼고 ${nameOf(plan.X)}님이 ${plan.F}주차부터 ${nameOf(plan.Z)}님을 맡게 합니다.\n확인하려면 빠지는 사람 이름(${nameOf(plan.Y)})을 그대로 입력하세요.`);
+    if (typed == null) return;
+    if (typed.trim() !== nameOf(plan.Y)) return setMsg("이름이 달라서 멈췄어요. 아무것도 바꾸지 않았어요.");
+    setBusy(true);
+    try {
+      await runOps(plan.ops);
+      setMsg(`적용했어요. ${nameOf(plan.X)}님·${nameOf(plan.Z)}님이 사이트를 열면 안내 팝업이 떠요(이미 열어 둔 사람은 새로 고쳐야 보여요).`);
+      setPlan(null); setLeaver(""); setRedo(null);
+    } catch (e) {
+      setMsg(e.code === "permission-denied"
+        ? "보안 규칙이 거부했어요. 콘솔의 규칙이 최신(20261129)인지, 처음 운영자 계정인지, 미션 진행 단계인지 확인해 주세요. 아무것도 바뀌지 않았어요."
+        : `저장하지 못했어요(${e.code || e.message}). 아무것도 바뀌지 않았어요.`);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function prepareUndo() {
+    setMsg(""); setPlan(null);
+    setBusy(true);
+    try {
+      const [missions, redemptions, hoDoc] = await Promise.all([readAll("giverMissions"), readAll("redemptions"), getDoc(doc(db, "meta", "handover")).then((x) => (x.exists() ? x.data() : null))]);
+      setUndoPlan(planUndo({ handover: hoDoc, missions, redeemed: new Set(Object.keys(redemptions)) }));
+    } catch (e) {
+      setMsg(`자료를 읽지 못했어요(${e.code || e.message}).`);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function undo() {
+    if (!undoPlan?.ops || !window.confirm("가장 최근 이어 붙이기를 되돌려 원래 짝으로 돌아갈까요?")) return;
+    setBusy(true);
+    try {
+      await runOps(undoPlan.ops);
+      setMsg("되돌렸어요. 원래 짝·코드·단서로 돌아갔어요.");
+      setUndoPlan(null);
+    } catch (e) {
+      setMsg(e.code === "permission-denied" ? "보안 규칙이 거부했어요(규칙 20261129 게시·처음 운영자 확인). 아무것도 바뀌지 않았어요." : `되돌리지 못했어요(${e.code || e.message}).`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Panel title="빠지는 사람 짝 이어 붙이기">
+      <p className="small">
+        참여자가 사정으로 빠지면 그 사람만 빼고 원을 이어 붙여요: <b>빠지는 사람의 마니또가 그 사람의 대상을 이어 받아요</b>.
+        지난 주차는 원래 짝 그대로 세고, 대상이 보는 단서는 새 마니또의 답으로, 두 사람에게는 안내 팝업이 떠요(이름·파트는 쓰지 않아요).
+        빠지는 사람은 중도 이탈로 표시되고 추리 보드 후보에서 빠져요. 바꾸기 전 값은 모두 기록에 남아 되돌릴 수 있어요. 먼저 아래 "백업 내려받기"로 백업을 받아 두세요.
+      </p>
+      {!isOwner && <p className="small muted">처음 운영자만 할 수 있어요.</p>}
+      {handover.length > 0 && (
+        <ul className="small">
+          {handover.map((x) => (
+            <li key={x.at}>{nameOf(x.left)} 빠짐 → {nameOf(x.giver)}이(가) {x.fromSlot}주차부터 {nameOf(x.receiver)}을(를) 맡음</li>
+          ))}
+        </ul>
+      )}
+      {isOwner && (
+        <div className="stack">
+          <div className="inline">
+            <select className="pk-input" value={leaver} onChange={(e) => { setLeaver(e.target.value); setPlan(null); setRedo(null); }} aria-label="빠지는 사람">
+              <option value="">빠지는 사람 고르기</option>
+              {choices.map((r) => <option key={r.pid} value={r.pid}>{r.name}{r.part ? ` (${r.part})` : ""}</option>)}
+            </select>
+            <button type="button" className="pk-btn sm" disabled={!leaver || busy} onClick={() => makePlan()}>계획 보기</button>
+            {handover.length > 0 && <button type="button" className="pk-btn sm ghost" disabled={busy} onClick={prepareUndo}>가장 최근 것 되돌리기</button>}
+          </div>
+          {plan?.error && <p className="error small" role="alert">{plan.error}</p>}
+          {plan?.needChoice && (
+            <div className="warn-line small">
+              <p>{nameOf(plan.X)}님이 {plan.xDoneLate.join("·")}주차를 이미 {nameOf(plan.Y)}님에게 "완료"했어요. 어떻게 할까요?</p>
+              <div className="inline">
+                <button type="button" className="pk-btn sm" disabled={busy} onClick={() => { setRedo(true); makePlan(leaver, true); }}>그 완료를 되돌리고 새 대상에게 다시 하게(권장)</button>
+                <button type="button" className="pk-btn sm ghost" disabled={busy} onClick={() => { setRedo(false); makePlan(leaver, false); }}>그대로 두고 다음 주차부터</button>
+              </div>
+            </div>
+          )}
+          {plan?.ops && (
+            <div className="handover-plan">
+              <p className="panel-label">바꿀 것</p>
+              <ul className="small">{plan.lines.map((l) => <li key={l}>{l}</li>)}</ul>
+              {plan.warnings.map((w) => <p key={w} className="warn-line small">⚠ {w}</p>)}
+              <button type="button" className="pk-btn main" disabled={busy} onClick={apply}>이대로 적용하기</button>
+            </div>
+          )}
+          {undoPlan?.error && <p className="error small" role="alert">{undoPlan.error}</p>}
+          {undoPlan?.ops && (
+            <div className="handover-plan">
+              <ul className="small">{undoPlan.lines.map((l) => <li key={l}>{l.replace(undoPlan.item.giver, nameOf(undoPlan.item.giver)).replace(undoPlan.item.left, nameOf(undoPlan.item.left)).replace(undoPlan.item.receiver, nameOf(undoPlan.item.receiver))}</li>)}</ul>
+              <button type="button" className="pk-btn sm" disabled={busy} onClick={undo}>되돌리기 실행</button>
+            </div>
+          )}
+        </div>
+      )}
+      {msg && <p className="note small" role="status">{msg}</p>}
     </Panel>
   );
 }
