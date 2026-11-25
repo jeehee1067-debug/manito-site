@@ -448,6 +448,9 @@ ul.plain.redeem-status li { flex: 0 0 auto; width: auto; margin: 0; }
 .board-rank { font-weight: 700; font-size: 17px; color: var(--blue-dark); }
 .board-main { display: grid; gap: 4px; min-width: 0; }
 .board-name { font-weight: 700; }
+/* 운영 화면 "매주 남긴 마니또 추측" */
+.mid-guess-summary li { margin: 2px 0; }
+.mid-guess-table td.mid-hit { background: #e3f4e8; font-weight: 700; }
 /* 내 미션 맨 위 "모두의 미션 진행"(이번 주 완료 인원) */
 .crowd-progress { display: grid; gap: 6px; margin-bottom: 14px; padding: 10px 14px; border: 3px solid var(--ink); border-radius: 10px; background: #fff; }
 .crowd-line { margin: 0; font-size: 15px; }

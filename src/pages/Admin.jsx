@@ -8,7 +8,7 @@ import { patchFeedDigest } from "../lib/feedDigest.js";
 import { useApp } from "../App.jsx";
 import { HowTag, Panel } from "../ui.jsx";
 import { PHASE, PHASES, CARD_HOW, CLUE_COUNT, LEVEL_LABEL, MAIL_DOMAIN, PART_HINT_IDX, PRAISE_SLOT, REVIEW_EDITS_MAX, RULES_VERSION } from "../lib/constants.js";
-import { SLOT_STATUS_LABEL, assignmentHealth, cardPicks, clueAnswers, codeProblems, cluesDoneSet, pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../lib/pairs.js";
+import { SLOT_STATUS_LABEL, assignmentHealth, cardPicks, clueAnswers, codeProblems, cluesDoneSet, midGuessStats, pairRows, receiverCodesOf, sameCodes, unresolvedSlots } from "../lib/pairs.js";
 import { assignManito, assignmentMemo, generateCodes, makeInviteCode, previewAssignments } from "../lib/assign.js";
 import { computeTickets, missionLikes, noticedWeeks, partStandings, rankReviews, reviewLikes, weeklyPartBoard } from "../lib/scoring.js";
 import { angelQueue, angelQueueStatus, matchAngels, needyReceivers } from "../lib/angels.js";
@@ -311,6 +311,7 @@ function AdminFull() {
       <Pairs />
       {phase >= PHASE.RUNNING && <CardPicks />}
       {phase >= PHASE.RUNNING && <GoldDraw />}
+      {phase >= PHASE.RUNNING && <MidGuesses />}
       {phase >= PHASE.RUNNING && phase <= PHASE.SCORING && <Moderation />}
       {phase === PHASE.SCORING && <Scoring />}
       {phase >= PHASE.RUNNING && <Accounts />}
@@ -2001,6 +2002,66 @@ function Pairs() {
 // 대상: 그 주에 황금 카드를 골라 완료를 알렸고 대상이 "카드와 같아요"로 인증한 마니또(lib/gold.js). 같은 확률로 GOLD_DRAW.perWeek명,
 // 앞 주 당첨자는 빼고, 앞 주에 남은 자리는 넘긴다. 한 번만(트랜잭션으로 확인). 기록은 meta/goldDraw(운영자만: 대상·당첨자·숫자),
 // 참여자에게는 public/goldDraw(주차별 추첨 여부·인원 수만)와 goldWins/{당첨자}(본인만 읽음). 당첨자 이름은 송년회 전까지 공개하지 않는다.
+// 매주 남긴 마니또 추측(사용자가 정함, 11/25: "운영자가 볼 수 있게"). 참여자가 용의자 보드 아래에서 주차마다 남긴 추측(midGuesses).
+// 주차마다 남긴 사람·맞힌 사람 수는 바로 보이고, 누가 누구를 골랐는지(= 짝이 드러남)는 "사람별 보기"를 눌러야 보인다.
+// 읽기: midGuesses 컬렉션(가입한 사람 수만큼)과 배정·명단(다른 패널과 같은 구독). "운영 자료 불러오기"를 눌렀을 때만(AdminFull).
+// 패널 제목에 "주차"를 넣지 않는다(E2E가 "주차" 패널을 제목으로 찾는다).
+function MidGuesses() {
+  const { config } = useApp();
+  const roster = useFullRoster();
+  const midGuesses = useColl("midGuesses");
+  const assignments = useColl("assignments");
+  const [shown, setShown] = useState(false);
+  if (!roster || !midGuesses || !assignments) return null;
+  const week = config.week || 1;
+  const { summary, rows } = midGuessStats({ midGuesses, assignments, roster, week });
+  const nameOfPid = (pid) => roster.find((r) => r.pid === pid)?.name || "(알 수 없음)";
+  const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+  const open = (w) => config.phase === PHASE.RUNNING && w === week;
+  return (
+    <Panel title="매주 남긴 마니또 추측">
+      <p className="small">
+        참여자가 추리 보드의 용의자 보드 아래에서 매주 남긴 "내 마니또는 이 사람 같아요" 추측이에요. 지금 열린 주차만 남기거나 바꿀 수 있고,
+        다음 주차가 열리면 그 주차는 마감돼요. 응모권과는 상관없고, 송년회에서 명탐정("가장 먼저 알아챈 사람")과 투명 마니또 칭호에 쓰여요.
+      </p>
+      <ul className="plain mid-guess-summary">
+        {summary.map((x) => (
+          <li key={x.week}>
+            <b>{x.week}주차</b> {open(x.week) ? <span className="small">(받는 중)</span> : <span className="small muted">(마감)</span>}
+            {" "}· 남김 <b>{x.guessed}</b>/{x.eligible}명({pct(x.guessed, x.eligible)}%) · 맞힘 <b>{x.correct}</b>명
+          </li>
+        ))}
+      </ul>
+      <p className="small muted">가입한 사람(중도 이탈 제외) 기준이에요.</p>
+      <div className="reveal-row">
+        <button type="button" className="pk-btn sm" aria-pressed={shown} onClick={() => setShown(!shown)}>{shown ? "사람별 가리기" : "사람별 보기"}</button>
+        {shown && <span className="small warn-text">누가 누구를 맞혔는지(= 짝)가 보여요. 화면을 공유할 때는 가려 주세요.</span>}
+      </div>
+      {shown && (
+        <div className="table-wrap">
+          <table className="pk-table pick-table mid-guess-table">
+            <thead>
+              <tr><th className="left">추측한 사람</th>{summary.map((x) => <th key={x.week}>{x.week}주차</th>)}</tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.pid}>
+                  <td className="left">{r.name}{r.part && <span className="small muted"> {r.part}</span>}</td>
+                  {summary.map((x) => {
+                    const c = r.cells[x.week];
+                    return <td key={x.week} className={c?.correct ? "mid-hit" : ""}>{c ? `${nameOfPid(c.pid)}${c.correct ? " ✔" : ""}` : <span className="muted">-</span>}</td>;
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="small muted">✔ = 실제 마니또를 맞힌 추측</p>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 function GoldDraw() {
   const { config, nameOf } = useApp();
   const roster = useFullRoster();

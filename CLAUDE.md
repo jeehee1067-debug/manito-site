@@ -63,7 +63,7 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 - 참여 재미 기능(응모권과 무관):
   - `prefs/{pid}`(`likes, avoid, nope, n`, 각 100자): 본인이 쓰고, 본인·나를 맡은 마니또(`myReceiver() == pid`)·운영자만 읽는다.
   - `toManito/{받는사람}_{주차}`(`receiverPid, slot, message, createdAt`): 받는 사람이 phase 1~2, 열린 주차까지, 주차마다 한 번 만든다(고칠 수 없음, 1~200자). 받는 사람·그 마니또(list `where receiverPid ==`)·운영자만 읽고, 운영자만 지운다.
-  - `midGuesses/{pid}`(`guesses: { "주차": pid }, n`): phase 1에 열린 주차 칸만 쓰고 바꾼다(명단에 있는 다른 사람, 용의자 보드 아래 목록에서 고른다). 본인·운영자만 읽는다. 집계 때 `noticedWeeks`로 "몇 주차부터 계속 맞혔나"를 결과에 넣는다(투명 마니또 칭호에도 쓴다). 이번 주 단서가 나온 뒤 아직 안 남긴 사람에게는 맨 위 할 일 줄에 뜬다(아래 "재촉 알림").
+  - `midGuesses/{pid}`(`guesses: { "주차": pid }, n`): phase 1에 열린 주차 칸만 쓰고 바꾼다(명단에 있는 다른 사람, 용의자 보드 아래 목록에서 고른다). 본인·운영자만 읽는다. 집계 때 `noticedWeeks`로 "몇 주차부터 계속 맞혔나"를 결과에 넣는다(투명 마니또 칭호에도 쓴다). 이번 주 단서가 나온 뒤 아직 안 남긴 사람에게는 맨 위 할 일 줄에 뜬다(아래 "재촉 알림"). **운영 화면 "매주 남긴 마니또 추측"**(사용자가 정함, 11/25: 운영자가 볼 수 있게. `Admin.jsx` `MidGuesses`, 계산 `pairs.js` `midGuessStats`, `AdminFull`이라 "운영 자료 불러오기"를 눌렀을 때만 읽음): 주차마다 받는 중/마감, 남긴 인원/가입 인원(%), 맞힌 인원이 바로 보이고, 누가 누구를 골랐는지(✔ = 실제 마니또)는 "사람별 보기"를 눌러야 보인다(짝이 드러나므로). 가입 안 함·중도 이탈은 뺀다. 패널 제목에 "주차"를 넣지 않는다(E2E가 "주차" 패널을 제목으로 찾는다). E2E `fun.cjs`가 확인.
   - 피드 공감: `feed.likes`를 1 올리는 것과 `feedLikes/{글ID}_{pid}`(`pid, feedId, at`) 만들기를 한 묶음으로(규칙이 `exists`/`existsAfter`·`getAfter`로 서로 확인). 글마다 한 번, 취소 없음, phase 1~4, 가린 글·무효 글 불가. 공감 표시는 본인·운영자만 읽는다.
 - 수호천사(응모권과 연결됨):
   - `angelVolunteers/{pid}`(`active, at, n`): 본인이 **phase 1에만** 지원·취소한다(규칙과 화면 모두) — 가입 기간에 먼저 가입한 사람이 순서에서 앞서지 않게. 본인·운영자만 읽는다.
@@ -217,7 +217,7 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 | `src/lib/cards.js` | 미션 카드 뽑기(`dealCards`: 난이도를 고르면 사람·주차마다 고정된 두 장, 보통·도전은 비용 카드 한 장 + 무비용 한 장, 다른 주차에 고른 카드는 빼고) |
 | `src/lib/assign.js` | 배정(같은 파트 제외. 조건에 맞는 원을 만든 뒤 자리 맞바꾸기로 섞음), 코드 생성 |
 | `src/lib/scoring.js` | 응모권 계산(운영자 확인 `verdicts`·`cardMatch`·단서 6칸·비용 카드 반영), 파트 대항전 순위(주간·최종), 가중 추첨, 수상자 정하기(`resolvePrizes`: 큰 상 우선, 한 사람은 하나만. 2등 `seededTop`, 3등 `rankReviews`), 6등 사이트 추첨(`drawOnline`)과 검증(`verifyOnline`) |
-| `src/lib/pairs.js` | 운영 화면 짝 현황(마니또별 주차 상태·지목), 운영자가 확인할 주차, 받는 사람 기준 코드(`receiverCodes`), 마니또가 낸 단서(`clueAnswers`·`cluesDoneSet`) |
+| `src/lib/pairs.js` | 운영 화면 짝 현황(마니또별 주차 상태·지목), 운영자가 확인할 주차, 받는 사람 기준 코드(`receiverCodes`), 마니또가 낸 단서(`clueAnswers`·`cluesDoneSet`), 매주 남긴 마니또 추측(`midGuessStats`) |
 | `src/lib/angels.js` | 수호천사 자동 연결 기준: 지원 순서(`angelQueue`), 도움이 필요한 사람(`needyReceivers`), 짝짓기(`matchAngels`), 운영 화면 표시(`angelQueueStatus`) |
 | `src/lib/gold.js` | 황금 카드 추첨: 추첨 대상(`goldCandidates`), 뽑을 수(`goldCount`), 뽑기(`drawGold`), 그 주가 끝났는지(`goldWeekClosed`) |
 | `src/lib/titles.js` | 송년회 칭호 4개 계산(`computeTitles`, 기준은 `TITLES`), 발표에 보일 칭호(`shownTitles`)·커피 쿠폰 당첨자(`goldWinnerWeeks`) |
@@ -234,7 +234,7 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 | `src/pages/InviteMail.jsx`, `src/lib/inviteMail.js` | 운영 화면 "가입 안내 메일": 받는 사람(`inviteRecipients`)·본문(`inviteMessage`)·가입 링크(`joinUrl`, `?join`)·메일 앱 주소(`mailtoHref`) |
 | `src/pages/Claim.jsx` | "연결 전" 화면: 회사 메일 인증 확인(`claimWithMail`, 창으로 돌아오면 스스로 확인), 초대 코드 연결(예비), 공동 운영자로 지정받을 계정의 계정 번호 |
 | `src/pages/Feed.jsx`, `src/lib/feedTop.js`, `src/lib/feedCache.js`, `src/lib/feedDigest.js` | 익명 피드(`feed` 문서와 요약 `public/feed`만 읽음), 맨 위 "공감 많은 후기" 3건(`pickTop`), 다시 들어올 때 쓰는 읽어 둔 목록(`freshList`·`forgetFeed`), 요약 읽기·쓰기·고치기(`loadFeed`·`FeedDigestWriter`·`patchFeedDigest`, 순수 계산 `mergeDigest`·`digestKey`·`patchPosts`) |
-| `src/pages/Admin.jsx` | 운영 화면(미션 기간에는 가볍게 열기 `AdminLight` → "운영 자료 불러오기" → `AdminFull`): 단계, 명단·배정, 주차·단서, 짝 현황(`Pairs`), 고른 미션 카드(`CardPicks`), 받은 게 없어요·집계 전 확인(`Unresolved`), 수호천사 연결(`Angels`), 인증 검토(`Moderation`), 쪽지 검토(`NotesReview`), 쓰기 횟수(`WriteCounts`), 백업 내려받기(`Backup`), 집계·검산, 공동 운영자, 규칙 버전 경고(`RulesCheck`) |
+| `src/pages/Admin.jsx` | 운영 화면(미션 기간에는 가볍게 열기 `AdminLight` → "운영 자료 불러오기" → `AdminFull`): 단계, 명단·배정, 주차·단서, 짝 현황(`Pairs`), 고른 미션 카드(`CardPicks`), 매주 남긴 마니또 추측(`MidGuesses`), 받은 게 없어요·집계 전 확인(`Unresolved`), 수호천사 연결(`Angels`), 인증 검토(`Moderation`), 쪽지 검토(`NotesReview`), 쓰기 횟수(`WriteCounts`), 백업 내려받기(`Backup`), 집계·검산, 공동 운영자, 규칙 버전 경고(`RulesCheck`) |
 | `src/ui.jsx` | 패널·대사창·캐릭터 공통 컴포넌트, 역할 낱말 강조(`Giver`·`Target`·`RoleNote`), 카드 방법 표시(`HowTag`). 패널 제목 앞 아이콘은 제목의 낱말로 고른다(`icons.jsx` `iconForTitle`) |
 | `src/icons.jsx`, `src/assets/icons/`, `tools/icons/make_icons.py` | 픽셀 아이콘(16×16 SVG): 메뉴(탭)와 패널 제목. 그림은 Python 스크립트의 글자 격자에서 만든다(고치면 `python3 tools/icons/make_icons.py`). 시즌과 무관한 기본 디자인이다 |
 | `src/firebase.js` | Firebase 연결. `npm run dev:emu`(`.env.emulator`)일 때만 에뮬레이터 연결. `appCheckSiteKey`가 있으면 App Check. `?longpoll`로 연 기기는 Firestore 긴 폴링(사내 프록시 대비) |
