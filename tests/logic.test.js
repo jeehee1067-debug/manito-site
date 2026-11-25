@@ -1901,7 +1901,9 @@ test("이어 붙이기: 짝 현황·코드·배정 점검·추측·칭호·백�
   const notes = titles.find((t) => t.key === "notes");
   assert.deepEqual(notes.winners, ["X"]);
   assert.equal(notes.value, 2, "X의 쪽지: Y에게 1통 + Z에게 1통(Y가 Z에게 보낸 것은 X 것이 아니다)");
-  assert.deepEqual(titles.find((t) => t.key === "invisible").winners, [], "이어 받은 마니또는 투명 마니또에서 뺀다");
+  assert.deepEqual(titles.find((t) => t.key === "invisible").winners, ["X"], "이어 받은 마니또도 투명 마니또는 같은 기준(추리 보드가 내 파트를 빼지 않아 대상이 고를 수 있다)");
+  const guessed = titlesOf({ people, assignments: HO.assignments, giverCodes: HO.giverCodes, redemptions: HO.redemptions, missions: HO.missions, deliveries, midGuesses: { Z: { 2: "X" } }, tickets: { X: { hidden: 2 } }, handover: HO.handover });
+  assert.deepEqual(guessed.find((t) => t.key === "invisible").winners, [], "대상이 한 번이라도 고르면 아니다");
 
   const msg = messagesOf({ assignments, giverCodes, deliveries: Object.fromEntries(deliveries.map((d, i) => [`d${i}`, d])), meta: { handover: HO.handover } });
   assert.deepEqual(msg.map((m) => `${m.fromPid}>${m.toPid}:${m.text}`).sort(), ["X>Y:X가 Y에게", "X>Z:X가 Z에게", "Y>Z:Y가 Z에게"]);

@@ -2,7 +2,7 @@
 //  원: 가파트 → 나파트 → 가파트 → 나파트(파트가 번갈아 원이 된다). 나파트 Y가 빠지면 Y의 마니또 X(가파트)가 Y의 대상 Z(가파트)를 맡는다 = 같은 파트 짝.
 //  1주차 모두 완료·인증 → 단서 2개 공개 → 2주차에 X가 Y에게 미리 '완료'(마니또 카페처럼) → 스크립트로 Y를 빼고 X의 2주차를 되돌림
 //  → 되돌리기(--undo)·다시 적용 → X가 Z에게 2주차를 새로 하고 Z가 인증 → Z의 단서가 X의 답으로, 추리 보드에서 Y가 빠짐
-//  → 운영 화면 짝 현황·배정 점검·코드 점검 → 최종 지목 단계에서 파트 단서가 내 파트면 내 파트도 후보 → 집계 응모권
+//  → 운영 화면 짝 현황·배정 점검·코드 점검 → 최종 지목 단계의 파트 단서(내 파트)로 후보가 좁혀짐 → 집계 응모권
 // Python 패키지가 필요하다: pip install google-cloud-firestore (다른 Python이면 PYTHON=경로)
 const { chromium } = require("playwright");
 const assert = require("node:assert/strict");
@@ -213,12 +213,13 @@ const runFail = (...args) => { try { run(...args); return null; } catch (e) { re
     await entry.locator("textarea").fill("2주차 쪽지도 잘 받았어요. 새 마니또님 고마워요!");
     await entry.getByRole("button", { name: "인증하기" }).click();
     await z.getByText("인증했어요. 응모권 1장이 쌓였어요.").waitFor();
-    // 단서: X의 답, 용의자 보드: Y는 빠지고(이제 누구의 마니또도 아님), 미션 기간에는 내 파트(가파트)도 빠짐
+    // 단서: X의 답, 용의자 보드: Y는 빠지고(이제 누구의 마니또도 아님), 내 파트(가파트)인 X도 후보(추리 보드는 내 파트를 빼지 않는다)
     const clues = H.panel(z, "단서 2 / 6");
     await clues.locator(".clue-a", { hasText: answers[X][0] }).first().waitFor();
     const opts = await H.panel(z, "용의자 보드").locator("select").first().locator("option").allInnerTexts();
     assert.ok(!opts.includes(Y), `용의자 보드에 ${Y}가 없다: ${opts}`);
-    assert.ok(!opts.includes(X), "미션 기간에는 내 파트를 뺀다(최종 지목 단계의 파트 단서 전까지)");
+    assert.ok(opts.includes(X), "내 파트인 새 마니또도 미션 기간에 추측할 수 있다");
+    assert.equal(await H.panel(z, "용의자 보드").getByText(/우리 파트 사람은/).count(), 0);
     console.log(`  ${Z}: 1번 단서 "${answers[X][0]}"(${X}의 답), 용의자 후보 ${opts.filter((o) => o && !o.includes("고르")).join("·")}`);
     // 다른 사람의 용의자 보드에서도 Y는 빠진다
     const o = u[NAMES.find((n) => ![X, Y, Z].includes(n))]; await o.reload(); await H.tab(o, "추리 보드");
@@ -243,7 +244,7 @@ const runFail = (...args) => { try { run(...args); return null; } catch (e) { re
     console.log("  배정 점검·코드 점검 정상, 짝 현황 3쌍 + 중도 이탈 줄, X의 1주차는 (→ Y)");
   }
 
-  step("최종 지목: 파트 단서가 내 파트(가파트)면 내 파트도 후보 → Z가 X를 지목");
+  step("최종 지목: 파트 단서(내 파트 가파트)로 후보가 좁혀짐 → Z가 X를 지목");
   await H.panel(admin, "주차").getByRole("button", { name: "3주차" }).click();
   await admin.locator(".hud-chip", { hasText: "3주차" }).waitFor();
   await advance("최종 지목");

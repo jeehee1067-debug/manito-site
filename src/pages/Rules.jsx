@@ -208,7 +208,6 @@ export default function Rules() {
       {partsInUse && (
         <Panel title="파트 대항전">
           <ul className="rules-list">
-            <li>같은 파트끼리는 마니또가 되지 않아요.</li>
             <li>"파트 순위" 탭에 매주 금요일 중간 순위가 나와요. 미션 완수율(파트의 미션 수 ÷ 가입한 파트 인원 × 주차 수)로 비교해요.</li>
             <li>마지막 순위는 대상이 인증한 미션으로 매기고, 1위 파트의 파트원은 +{R.partBonus}장이에요(내 미션이 {R.partBonusMinMissions}건 이상 인증된 사람만).</li>
           </ul>

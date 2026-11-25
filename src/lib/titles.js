@@ -41,8 +41,8 @@ function topOf(counts, min = 1) {
  * deliveries: [{ receiverPid, slot, kind, message, hidden }]
  * midGuesses: { receiverPid: { "1": pid, ... } }
  * tickets: computeTickets 결과 { pid: { hidden } }
- * handover: 중도 이탈로 짝을 이어 붙인 기록(handover.js). 쪽지는 그 주차의 마니또에게 세고, 이어 받은 마니또는 투명 마니또에서 뺀다
- *   (이어 받은 짝은 같은 파트일 수 있는데, 추리 보드가 최종 지목 전까지 내 파트를 후보에서 빼서 대상이 그 사람을 주차별 추측에 고를 수 없었다).
+ * handover: 중도 이탈로 짝을 이어 붙인 기록(handover.js). 쪽지는 그 주차의 마니또에게 센다
+ *   (추리 보드는 내 파트를 빼지 않으므로 이어 받은 마니또도 대상이 주차별 추측에 고를 수 있다 — 투명 마니또는 다른 사람과 같은 기준).
  * 반환: [{ key, emoji, label, desc, measure, unit, winners: [pid], value }] — TITLES 순서, 받은 사람이 없는 칭호도 winners: []로 넣는다
  */
 export function computeTitles({ people = [], assignments = {}, giverCodes = {}, redemptions = {}, missions = {}, deliveries = [], midGuesses = {}, tickets = {}, handover = null }) {
@@ -76,7 +76,7 @@ export function computeTitles({ people = [], assignments = {}, giverCodes = {}, 
 
   const invisible = givers.filter((g) => {
     const receiver = assignments[g];
-    if (!present(receiver) || !((tickets[g]?.hidden || 0) > 0) || at.takenOver(g)) return false;
+    if (!present(receiver) || !((tickets[g]?.hidden || 0) > 0)) return false;
     return !Object.values(midGuesses[receiver] || {}).includes(g);
   }).sort();
 
