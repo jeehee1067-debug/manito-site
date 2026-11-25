@@ -324,6 +324,23 @@ const step = (s) => console.log("▶", s);
   }
   await u[R].getByText("내 추측: 1주차 가나 · 2주차 가나 · 3주차 가나").waitFor();
   console.log(`  ${R}: 1·2·3주차 모두 가나로 추측`);
+  {
+    // 운영 화면 "매주 남긴 마니또 추측": 주차마다 남긴 사람·맞힌 사람, "사람별 보기"를 눌러야 누가 누구를 골랐는지
+    await H.tab(admin, "운영");
+    const mg = H.panel(admin, "매주 남긴 마니또 추측");
+    await mg.waitFor();
+    const sum = (await mg.locator(".mid-guess-summary").innerText()).replace(/\s+/g, " ");
+    assert.match(sum, /3주차 \(받는 중\) · 남김 1\/4명\(25%\) · 맞힘 1명/, sum);
+    assert.match(sum, /1주차 \(마감\)/, sum);
+    assert.equal(await mg.locator("table").count(), 0, "누가 누구를 골랐는지는 처음에 안 보인다");
+    await mg.getByRole("button", { name: "사람별 보기" }).click();
+    const row = mg.locator("tbody tr", { hasText: R });
+    assert.deepEqual((await row.locator("td").allInnerTexts()).slice(1).map((t) => t.trim()), ["가나 ✔", "가나 ✔", "가나 ✔"]);
+    await admin.screenshot({ path: path.join(__dirname, "shots", "fun", "admin-mid-guesses.png"), fullPage: false });
+    await mg.locator("tbody").screenshot({ path: path.join(__dirname, "shots", "fun", "admin-mid-guesses-table.png") });
+    await mg.getByRole("button", { name: "사람별 가리기" }).click();
+    console.log(`  운영 화면 '매주 남긴 마니또 추측': ${sum} / 사람별 보기에서 ${R}의 1·2·3주차 '가나 ✔'`);
+  }
 
   step("최종 지목 → 마감 → 집계 → 공개(발표 화면)");
   await advance("최종 지목");

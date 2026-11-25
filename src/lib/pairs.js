@@ -196,3 +196,34 @@ export function codeProblems(assignments = {}, giverCodes = {}, codes = {}) {
   }
   return out;
 }
+
+/**
+ * 운영 화면 "매주 남긴 마니또 추측"(사용자가 정함, 11/25: 운영자가 주차별 추측을 볼 수 있게).
+ * midGuesses: { 추측한 사람 pid: { guesses: { "1": 추측한 pid, … } } }, assignments: { giverPid: { receiverPid } },
+ * roster: 명단 원본 [{ pid, name, part, uid, dropout }], week: 열린 주차(1~3)
+ * 셀 대상은 가입했고 중도 이탈이 아닌 사람. 정답 = 그 사람의 실제 마니또(assignments에서 receiverPid가 그 사람인 giver).
+ * 반환 { summary: [{ week, eligible, guessed, correct }], rows: [{ pid, name, part, cells: { 주차: { pid, correct } | null } }] } (rows는 파트·이름순)
+ */
+export function midGuessStats({ midGuesses = {}, assignments = {}, roster = [], week = 1 }) {
+  const giverOf = {};
+  for (const [g, a] of Object.entries(assignments)) if (a?.receiverPid) giverOf[a.receiverPid] = g;
+  const weeks = Array.from({ length: Math.max(1, Math.min(3, week)) }, (_, i) => i + 1);
+  const rows = roster
+    .filter((r) => r.uid && !r.dropout)
+    .map((r) => {
+      const g = midGuesses[r.pid]?.guesses || {};
+      const cells = Object.fromEntries(weeks.map((w) => {
+        const pid = g[String(w)];
+        return [w, pid ? { pid, correct: pid === giverOf[r.pid] } : null];
+      }));
+      return { pid: r.pid, name: r.name || r.pid, part: r.part || "", cells };
+    })
+    .sort((a, b) => a.part.localeCompare(b.part, "ko") || a.name.localeCompare(b.name, "ko"));
+  const summary = weeks.map((w) => ({
+    week: w,
+    eligible: rows.length,
+    guessed: rows.filter((x) => x.cells[w]).length,
+    correct: rows.filter((x) => x.cells[w]?.correct).length,
+  }));
+  return { summary, rows };
+}

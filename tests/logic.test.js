@@ -1699,3 +1699,27 @@ test("모두의 미션 진행: 완료율만 적고 보인다(인원 수 없음),
   assert.equal(sameProgress({ v: 1, joined: 50, weeks: { 1: 45 } }, { v: 2, weeks: { 1: 90 } }), false, "예전 모양은 새 모양으로 다시 쓴다");
   assert.equal(sameProgress(null, { v: 2, weeks: {} }), false);
 });
+
+test("운영 화면 매주 남긴 마니또 추측: 주차마다 남긴 사람·맞힌 사람, 사람별 추측과 정답 표시, 가입 안 함·중도 이탈은 빼고", async () => {
+  const { midGuessStats } = await import("../src/lib/pairs.js");
+  const roster = [
+    { pid: "a", name: "가나", part: "가", uid: "u1" }, { pid: "b", name: "다라", part: "나", uid: "u2" },
+    { pid: "c", name: "마바", part: "가", uid: "u3" }, { pid: "d", name: "사아", part: "나", uid: null },
+    { pid: "e", name: "자차", part: "다", uid: "u5", dropout: true },
+  ];
+  // 원: a→b→c→d→e→a (giver → receiver)
+  const assignments = { a: { receiverPid: "b" }, b: { receiverPid: "c" }, c: { receiverPid: "d" }, d: { receiverPid: "e" }, e: { receiverPid: "a" } };
+  const midGuesses = {
+    b: { guesses: { 1: "a", 2: "a" } }, // b의 마니또는 a → 1·2주차 모두 정답
+    c: { guesses: { 1: "a", 2: "b" } }, // c의 마니또는 b → 2주차만 정답
+    a: { guesses: { 2: "c" } }, // a의 마니또는 e → 오답
+    d: { guesses: { 1: "a" } }, // 가입 안 함 — 빠진다
+    e: { guesses: { 1: "d" } }, // 중도 이탈 — 빠진다
+  };
+  const { summary, rows } = midGuessStats({ midGuesses, assignments, roster, week: 2 });
+  assert.deepEqual(summary, [{ week: 1, eligible: 3, guessed: 2, correct: 1 }, { week: 2, eligible: 3, guessed: 3, correct: 2 }]);
+  assert.deepEqual(rows.map((r) => r.name), ["가나", "마바", "다라"], "파트·이름순");
+  assert.deepEqual(rows.find((r) => r.pid === "c").cells, { 1: { pid: "a", correct: false }, 2: { pid: "b", correct: true } });
+  assert.equal(rows.find((r) => r.pid === "a").cells[1], null, "안 남긴 주차는 null");
+  assert.deepEqual(midGuessStats({ midGuesses, assignments, roster, week: 1 }).summary.map((x) => x.week), [1], "열린 주차까지만");
+});
