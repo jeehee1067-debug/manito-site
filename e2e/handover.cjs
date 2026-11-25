@@ -13,6 +13,8 @@ const step = (s) => console.log("▶", s);
 const PY = process.env.PYTHON || "python3";
 const SCRIPT = path.join(__dirname, "../tools/handover/handover.py");
 const run = (...args) => execFileSync(PY, [SCRIPT, "--emulator", "127.0.0.1:8080", "--project", H.P, ...args], { encoding: "utf8", cwd: require("node:os").tmpdir() });
+const SHOTS = path.join(__dirname, "shots", "handover");
+require("node:fs").mkdirSync(SHOTS, { recursive: true });
 const runFail = (...args) => { try { run(...args); return null; } catch (e) { return `${e.stdout || ""}${e.stderr || ""}`; } };
 
 (async () => {
@@ -139,9 +141,41 @@ const runFail = (...args) => { try { run(...args); return null; } catch (e) { re
     assert.equal((await H.readDoc(`roster/${yPid}`)).dropout, undefined);
     assert.equal((await H.readDoc("public/roster")).people[yPid].out, undefined);
     assert.deepEqual((await H.readDoc("meta/handover")).items || [], []);
+    assert.deepEqual(await H.readDoc(`notices/${xPid}`), {}, "되돌리면 안내도 지운다");
     run("--leaver", Y, "--redo", "--apply", "--yes");
     await checkApplied();
     console.log("  되돌리기도 그대로 원래 값으로 돌아오고, 다시 적용해도 같다");
+  }
+
+  step("안내 팝업: X에게 '내 대상이 바뀌었어요', Z에게 '내 마니또가 바뀌었어요'(파트·이름 없음), 다른 사람은 없음");
+  {
+    const n = await H.readDoc(`notices/${xPid}`);
+    assert.equal(n.kind, "giver"); assert.equal(n.fromSlot, 2); assert.equal(n.redo, true);
+    assert.ok(!String(n.id).includes(yPid), "안내 번호에 빠진 사람의 번호를 넣지 않는다");
+    assert.equal((await H.readDoc(`notices/${zPid}`)).kind, "receiver");
+    const g = u[X]; await g.reload();
+    const gp = g.locator(".gold-pop.is-notice");
+    await gp.getByText("내 대상이 바뀌었어요").waitFor();
+    await gp.getByText("2주차 미션은 새 대상에게 다시 해 주세요. 골라 둔 카드는 그대로예요.").waitFor();
+    await g.waitForTimeout(800); // 팝업 등장 애니메이션
+    await gp.screenshot({ path: path.join(SHOTS, "notice-giver.png") });
+    await gp.getByRole("button", { name: "확인" }).click();
+    await gp.waitFor({ state: "detached" });
+    await g.reload(); await g.locator("nav.tabs").waitFor(); await g.waitForTimeout(800);
+    assert.equal(await g.locator(".gold-pop.is-notice").count(), 0, "한 번 보면 이 기기에서는 다시 안 뜬다");
+    const z = u[Z]; await z.reload();
+    const zp = z.locator(".gold-pop.is-notice");
+    await zp.getByText("내 마니또가 바뀌었어요").waitFor();
+    await z.waitForTimeout(800);
+    await zp.screenshot({ path: path.join(SHOTS, "notice-receiver.png") });
+    const text = await zp.innerText();
+    assert.doesNotMatch(text, /파트/, "대상에게는 파트 이야기를 하지 않는다");
+    assert.ok(![X, Y, Z].some((nm) => text.includes(nm)), "이름도 쓰지 않는다");
+    await zp.getByRole("button", { name: "추리 보드 보러 가기" }).click();
+    await z.locator("nav.tabs button.is-on", { hasText: "추리 보드" }).waitFor();
+    const o = u[NAMES.find((nm) => ![X, Y, Z].includes(nm))]; await o.reload(); await o.locator("nav.tabs").waitFor(); await o.waitForTimeout(800);
+    assert.equal(await o.locator(".gold-pop.is-notice").count(), 0, "다른 사람에게는 뜨지 않는다");
+    console.log(`  ${X}: "내 대상이 바뀌었어요" → 확인 뒤 다시 안 뜸, ${Z}: "내 마니또가 바뀌었어요"(파트·이름 없음) → 추리 보드, 다른 사람은 없음`);
   }
 
   step(`${X}: 내 미션의 대상이 ${Z}로, 2주차를 새로 해서 완료 → ${Z}가 그 코드로 인증`);

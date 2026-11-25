@@ -733,6 +733,13 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    // 운영진 안내(중도 이탈로 대상·마니또가 바뀐 사람에게 띄우는 팝업, src/pages/HandoverPopup.jsx). tools/handover/handover.py가 쓴다.
+    // { id, kind: "giver" | "receiver", fromSlot, redo, at } — 본인과 운영자만 읽는다(누구의 짝이 바뀌었는지 다른 사람에게 보이지 않게).
+    match /notices/{pid} {
+      allow get: if linked() && myPid() == pid;
+      allow read, write: if isAdmin();
+    }
+
     match /guesses/{pid} {
       allow get: if linked() && myPid() == pid;
       allow read: if isAdmin();

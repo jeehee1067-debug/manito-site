@@ -9,6 +9,8 @@
   - 명단: Y에 dropout(중도 이탈)·leftGame(짝에서 빠짐) 표시. 참여자 추리 보드 후보에서 Y가 빠진다(public/roster의 out).
   - --redo: X가 Y에게 이미 "완료"를 누른 --from-slot 이후 주차를 되돌린다(완료 표시·완료 알림·추가 쪽지 삭제, 기록은 저장).
     X는 그 주차를 Z에게 새로 한다(예: 메뉴판만 보내고 완료를 누른 마니또 카페 카드).
+  - 안내: X와 Z에게 notices/{pid} = { id, kind: giver|receiver, fromSlot, redo, at }를 쓴다. 사이트가 두 사람에게만 팝업을 띄운다
+    (src/pages/HandoverPopup.jsx — 이름·파트는 쓰지 않는다. Z에게 "같은 파트일 수 있다"를 알리면 마니또의 파트가 드러난다).
   - 기록: meta/handover.items에 { left, giver, receiver, fromSlot, at, saved }를 더한다. 사이트(운영 화면·집계)는 이 기록으로
     지난 주차의 짝을 계산한다(src/lib/handover.js). saved에는 바꾸기 전 값을 모두 넣는다(되돌리기 --undo와 송년회 때 Y의 응모권 계산).
     같은 내용을 실행한 폴더에도 파일로 남긴다(handover-<Y>-<시각>.json).
@@ -198,6 +200,7 @@ def handover(db, project, args):
     from google.cloud.firestore_v1.base_query import FieldFilter
     angel_by_y = [s.id for s in db.collection("angels").where(filter=FieldFilter("angelPid", "==", Y)).stream()]
     nudge_y = get(db, "nudges", Y)
+    notices_before = {pid: plain(get(db, "notices", pid)) for pid in (X, Z)}
 
     saved = {
         "assignmentY": {"receiverPid": Z},
@@ -207,8 +210,11 @@ def handover(db, project, args):
         "giverMissionsX": plain(gm_x or {}), "progressX": plain(progress_x or {}),
         "rosterY": {k: plain(v) for k, v in (roster.get(Y) or {}).items() if k in ("dropout", "leftGame")},
         "deliveriesRemoved": removed,
+        "notices": {pid: v for pid, v in notices_before.items() if v},
     }
-    item = {"left": Y, "giver": X, "receiver": Z, "fromSlot": F, "at": int(time.time() * 1000), "saved": saved}
+    at = int(time.time() * 1000)
+    item = {"left": Y, "giver": X, "receiver": Z, "fromSlot": F, "at": at, "saved": saved}
+    notice_id = f"handover-{at}"  # 빠진 사람의 번호는 넣지 않는다(대상이 명단 요약과 맞춰 보면 이전 마니또를 알 수 있다)
 
     print(f"\n대상 프로젝트: {project}" + (f" (에뮬레이터 {args.emulator})" if args.emulator else ""))
     print(f"지금: 미션 진행, {week}주차 열림, 단서 {released}개 공개, 배정 회차 {ver}")
@@ -231,6 +237,7 @@ def handover(db, project, args):
         print(f"  · --redo: giverMissions/{X}의 {x_done_late}주차 완료 표시·추가 쪽지 수 지우기, progress/{X}.doneCount = {len(keep_done)}")
         for doc_id, d in removed.items():
             print(f"      deliveries/{doc_id} 삭제 (내용은 기록에 저장): {str(d.get('message', ''))[:60]!r}")
+    print(f"  · notices/{X}(대상이 바뀐 안내), notices/{Z}(마니또가 바뀐 안내): 두 사람이 사이트를 열면 팝업으로 뜬다(이름·파트는 쓰지 않음)")
     print(f"  · meta/handover에 기록 추가(바꾸기 전 값 저장)")
     if angel_of_y:
         print(f"  ⚠ {name(Y)}에게 수호천사가 연결돼 있어요(angels/{Y}). 운영 화면 수호천사에서 확인해 주세요(그대로 둡니다).")
@@ -239,7 +246,7 @@ def handover(db, project, args):
     if nudge_y:
         print(f"  · nudges/{Y}(대상이 기다리고 있어요 알림)는 그대로 둡니다(이제 읽을 사람이 없어요).")
 
-    n_writes = 2 + 2 + 2 + len(clue_ops) + 2 + 1 + (2 + len(removed) if args.redo else 0)
+    n_writes = 2 + 2 + 2 + len(clue_ops) + 2 + 2 + 1 + (2 + len(removed) if args.redo else 0)
     if not confirm(args, project, n_writes):
         return
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -269,6 +276,8 @@ def handover(db, project, args):
             b.update(col("progress").document(X), {"doneCount": len(keep_done)})
         for doc_id in removed:
             b.delete(col("deliveries").document(doc_id))
+    b.set(col("notices").document(X), {"id": notice_id, "kind": "giver", "fromSlot": F, "redo": bool(args.redo and x_done_late), "at": at})
+    b.set(col("notices").document(Z), {"id": notice_id, "kind": "receiver", "fromSlot": F, "redo": False, "at": at})
     b.set(col("meta").document("handover"), {"items": firestore.ArrayUnion([item])}, merge=True)
     b.commit()
     print(f"\n끝났어요. 바꾸기 전 값은 meta/handover와 이 폴더의 {local} 에 저장했어요.")
@@ -316,6 +325,10 @@ def undo(db, project, args):
         b.set(col("progress").document(X), unplain(sv["progressX"]))
     for doc_id, d in (sv.get("deliveriesRemoved") or {}).items():
         b.set(col("deliveries").document(doc_id), unplain(d))
+    saved_notices = sv.get("notices") or {}
+    for pid in (X, Z):
+        ref = col("notices").document(pid)
+        b.set(ref, unplain(saved_notices[pid])) if pid in saved_notices else b.delete(ref)
     b.set(col("meta").document("handover"), {"items": items[:-1]})
     b.commit()
     print("\n되돌렸어요. 사이트를 새로 고쳐 확인해 주세요.")

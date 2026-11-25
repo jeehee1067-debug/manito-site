@@ -75,6 +75,7 @@ async function seed({ phase = 1, week = 1, cluesReleased = 2, admins = [ADMIN], 
     b.set(doc(db, "redemptions", "B1B1"), { receiverPid: "p003", slot: 1, review: review20, voided: false, feedId: FEED_B1, createdAt: new Date(2026, 10, 1) });
     b.set(doc(db, "feed", FEED_B1), { slot: 1, review: review20, voided: false, createdAt: new Date(2026, 10, 1) });
     b.set(doc(db, "nudges", "p002"), { at: 1 });
+    b.set(doc(db, "notices", "p001"), { id: "handover-1", kind: "giver", fromSlot: 2, redo: true, at: 1 });
     b.set(doc(db, "deliveries", "dv1"), { receiverPid: "p002", slot: 1, kind: "mission", message: "책상 확인", code: "A1A1" });
     b.set(doc(db, "meta", "assignment"), { codes: Object.values(CODES).flatMap((c) => Object.values(c)).sort(), pids: Object.keys(UID).sort() });
     await b.commit();
@@ -1198,6 +1199,13 @@ describe("앱 흐름: 참여자 화면", () => {
     await assertSucceeds(getDoc(doc(db, "nudges", "p002"))); // 내 대상에게 온 운영자 알림
     await assertFails(getDoc(doc(p("p003"), "nudges", "p002"))); // 남의 대상(누가 받은 게 없는지)
     await assertFails(getDocs(collection(db, "nudges")));
+    // 운영진 안내(중도 이탈로 대상·마니또가 바뀐 사람의 팝업, HandoverPopup.jsx): 본인만 읽고, 아무도 쓰지 못한다(스크립트가 쓴다)
+    await assertSucceeds(getDoc(doc(db, "notices", "p001")));
+    await assertSucceeds(getDoc(doc(p("p003"), "notices", "p003"))); // 내 안내가 없어도 읽기는 된다(없음)
+    await assertFails(getDoc(doc(p("p003"), "notices", "p001"))); // 남의 안내(누구의 짝이 바뀌었는지)
+    await assertFails(getDocs(collection(db, "notices")));
+    await assertFails(setDoc(doc(db, "notices", "p001"), { id: "x", kind: "giver" }));
+    await assertSucceeds(getDocs(collection(admin(), "notices")));
     const none = await assertSucceeds(getDoc(doc(db, "redemptions", "A1A1"))); // 아직 인증 전(문서 없음)
     if (none.exists()) throw new Error("인증 문서가 있음");
     await assertSucceeds(getDoc(doc(db, "reports", "p002_1"))); // 내 대상이 "받은 게 없어요"로 신고했는지(없어도 읽힘)

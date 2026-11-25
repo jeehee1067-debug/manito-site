@@ -1906,3 +1906,20 @@ test("이어 붙이기: 짝 현황·코드·배정 점검·추측·칭호·백�
   const msg = messagesOf({ assignments, giverCodes, deliveries: Object.fromEntries(deliveries.map((d, i) => [`d${i}`, d])), meta: { handover: HO.handover } });
   assert.deepEqual(msg.map((m) => `${m.fromPid}>${m.toPid}:${m.text}`).sort(), ["X>Y:X가 Y에게", "X>Z:X가 Z에게", "Y>Z:Y가 Z에게"]);
 });
+
+// 중도 이탈 안내 팝업 글(lib/notices.js → HandoverPopup.jsx): 이름·파트를 쓰지 않는다(대상에게 파트를 알리면 마니또가 드러난다)
+import { noticeText } from "../src/lib/notices.js";
+test("이어 붙이기 안내 글: 마니또·대상 모두 파트·이름 없이", () => {
+  const g = noticeText({ kind: "giver", fromSlot: 2, redo: true });
+  const r = noticeText({ kind: "receiver", fromSlot: 2 });
+  assert.equal(g.title, "내 대상이 바뀌었어요");
+  assert.equal(r.title, "내 마니또가 바뀌었어요");
+  assert.ok(g.items.some((x) => x.includes("2주차 미션은 새 대상에게 다시")), "되돌린 주차를 다시 하라고 알린다");
+  assert.ok(!noticeText({ kind: "giver", fromSlot: 3 }).items.some((x) => x.includes("다시 해")), "되돌리지 않았으면 그 말은 없다");
+  for (const t of [g, r]) {
+    const all = [t.lead, ...t.items, t.title].join(" ");
+    assert.doesNotMatch(all, /파트|같은 팀|EFA|PFA|VSEM/, "파트 이야기는 없다");
+  }
+  assert.match(r.lead, /2주차부터는 새 마니또/);
+  assert.equal(r.go, "detective"); assert.equal(g.go, "mission");
+});
