@@ -1723,3 +1723,50 @@ test("운영 화면 매주 남긴 마니또 추측: 주차마다 남긴 사람·
   assert.equal(rows.find((r) => r.pid === "a").cells[1], null, "안 남긴 주차는 null");
   assert.deepEqual(midGuessStats({ midGuesses, assignments, roster, week: 1 }).summary.map((x) => x.week), [1], "열린 주차까지만");
 });
+
+// 부서 공지용 결산 숫자(tools/report/compute.js): 사이트와 같은 식, 이름·짝은 결과에 없음
+import { computeReport } from "../tools/report/compute.js";
+test("결산 숫자: 완료율은 사이트 식, 인증·쪽지·공감·후기·추측", () => {
+  const easySite = MISSION_CARDS.easy.find((c) => !c.real && !c.from);
+  const normalReal = MISSION_CARDS.normal.find((c) => c.real && !c.from);
+  const pick = (c, level) => ({ level, cardId: c.id, text: c.text });
+  const backup = { collections: {
+    roster: {
+      a: { name: "가나", part: "P1", uid: "ua" }, b: { name: "다라", part: "P2", uid: "ub" }, c: { name: "마바", part: "P3", uid: "uc" },
+      d: { name: "사아", part: "P1", uid: "ud", dropout: true }, e: { name: "자차", part: "P2", uid: null },
+    },
+    assignments: { a: { receiverPid: "b" }, b: { receiverPid: "c" }, c: { receiverPid: "d" }, d: { receiverPid: "e" }, e: { receiverPid: "a" } },
+    giverMissions: {
+      a: { done: { 1: true }, choices: { 1: pick(easySite, "easy") } },
+      b: { done: { 1: true }, choices: { 1: pick(normalReal, "normal") } },
+      c: { done: { 2: true }, choices: { 1: pick(easySite, "easy") } },
+    },
+    redemptions: { K1: { receiverPid: "b", slot: 1 }, K2: { receiverPid: "c", slot: 1, voided: true } },
+    deliveries: {
+      b_1: { slot: 1, message: "안녕" }, c_1: { slot: 1, message: "반가워" }, c_1_n1: { slot: 1, message: "가린 쪽지", hidden: true },
+      x: { slot: 1, message: "  " }, d_2: { slot: 2, message: "2주차" },
+    },
+    feed: {
+      f1: { slot: 1, review: "첫 후기", likes: 3, createdAt: "2026-11-19T01:00:00.000Z" },
+      f2: { slot: 1, review: "둘째 후기", likes: 5, createdAt: "2026-11-19T02:00:00.000Z" },
+      f3: { slot: 1, review: "", hidden: true, likes: 10 }, f4: { slot: 1, review: "무효", voided: true, likes: 9 },
+      f5: { slot: 2, review: "2주차 후기", likes: 7 }, f6: { slot: 1, review: "공감 없음", likes: 0 },
+    },
+    midGuesses: { b: { guesses: { 1: "a" } }, c: { guesses: { 1: "a" } } },
+  } };
+  const r = computeReport(backup, { week: 1 });
+  assert.equal(r.completion, 50, "완료 2 ÷ 가입 4(uid 있는 사람, 사이트 progressPercents와 같음)");
+  assert.equal(r.nextCompletion, 25, "2주차 지금까지 1 ÷ 4");
+  assert.equal(r.verifiedPct, 50, "완료한 a·b 중 대상 b만 인증(c의 인증은 무효)");
+  assert.equal(r.notes, 2, "가린 쪽지·빈 쪽지·다른 주차 제외");
+  assert.equal(r.likes, 8, "가린 글·무효 글·다음 주차 글 제외");
+  assert.deepEqual(r.topReviews, [{ text: "둘째 후기", likes: 5 }, { text: "첫 후기", likes: 3 }]);
+  assert.deepEqual(r.levelMix, { easy: 50, normal: 50, hard: 0, praise: 0 }, "완료한 주차의 카드만(c의 1주차 카드는 완료 전)");
+  assert.deepEqual(r.howMix, { real: 50, site: 50 });
+  assert.equal(r.popular.length, 2);
+  assert.equal(r.guessPct, 67, "가입했고 중도 이탈이 아닌 3명 중 2명(운영 화면 midGuessStats와 같음)");
+  assert.equal(r.guessCorrect, 1, "b의 마니또는 a");
+  const out = JSON.stringify(r);
+  for (const n of ["가나", "다라", "마바", "사아", "자차", "ua", "P1"]) assert.ok(!out.includes(n), `결과에 ${n} 없음`);
+  assert.equal(computeReport(backup, { week: 3 }).nextCompletion, null, "3주차 다음은 없음");
+});

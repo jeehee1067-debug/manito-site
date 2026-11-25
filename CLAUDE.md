@@ -243,6 +243,7 @@ Firestore에 쓰는 값의 모양(필드 이름, 타입, 길이)을 바꾸면 **
 | `tests/rules.test.js` | 보안 규칙 테스트 |
 | `e2e/` | 화면 흐름 검증(`npm run test:e2e`, `run-all.cjs`가 15개를 차례로. `gold.cjs`는 2주차 새 카드·황금 카드·추첨을 화면으로 확인하고 사진을 `e2e/shots/gold`에, `awards.cjs`는 칭호·커피 쿠폰 장면 사진을 `e2e/shots/awards`에 남긴다). 로컬 에뮬레이터 데이터를 지우고 시작한다. `restore.cjs`는 Python `google-cloud-firestore`가 필요하다(`PYTHON=경로`) |
 | `tools/restore/restore_backup.py` | 전체 백업 JSON으로 Firestore 되살리기(지우지 않음, 기본은 없어진 문서만) |
+| `tools/report/` | 부서 공지용 주차 결산 그림(PNG)·메일 글(`report.mjs`, 숫자 계산 `compute.js` `computeReport` — 사이트 완료율·운영 화면 추측 통계와 같은 식, 이름·짝·파트별 숫자 없음, 맞힌 사람 0명이면 안 적음). 사용법은 README "부서 공지용 결산 그림과 메일 글" |
 | `src/pages/*` | 화면 |
 | `src/styles.css` | 방탈출 `assets/css/style.css`의 색·테두리·버튼·대사창 값을 따름. 시즌 장식은 여기 넣지 말고 `xmas.css`에 |
 | `public/char/p1~p4.png` | 방탈출 참가자 캐릭터 |
