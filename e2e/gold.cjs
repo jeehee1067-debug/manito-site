@@ -118,7 +118,32 @@ async function tokenOf(email) {
       await cards.first().waitFor();
       await (paid ? cards.filter({ has: p.locator(".cost-tag") }) : cards.filter({ hasNot: p.locator(".cost-tag") })).click();
       await s.locator(".chosen.is-gold").waitFor();
-      await s.locator("textarea").fill(`${n}의 황금 미션: 자리를 확인해 보세요`);
+      if (paid) {
+        // 마니또 카페(메뉴판 카드, 11/27): 단계 안내 → 완료 전에 메뉴판 쪽지 → 대상 화면에 "한마디로 주문" 안내 → 대상이 한마디로 주문 → 마니또 화면에 "주문이 왔어요"
+        const guide = s.locator(".flow-steps");
+        await guide.getByText(/메뉴판 보내기/).waitFor();
+        await s.getByRole("button", { name: "완료 전에 쪽지 먼저 보내기" }).click();
+        await s.locator(".pre-notes textarea").fill("마니또 카페 메뉴판: 1) 아메리카노 2) 유자차 3) 초코 과자");
+        await s.locator(".pre-notes").getByRole("button", { name: "쪽지 보내기" }).click();
+        await guide.locator("li.done", { hasText: "메뉴판 보내기" }).waitFor();
+        const r = u[target[n]];
+        await r.reload(); await H.tab(r, "피드");
+        const bar = r.locator(".reminder-bar p", { hasText: "마니또에게 한마디" });
+        await bar.waitFor();
+        await bar.getByRole("button", { name: "한마디 쓰러 가기" }).click();
+        await r.locator("nav.tabs button.is-on", { hasText: "추리 보드" }).waitFor();
+        await H.panel(r, "마니또에게서 온 것").locator(".reply-hint", { hasText: "먼저 보낸 쪽지예요" }).waitFor();
+        const tm = H.panel(r, "마니또에게 한마디");
+        await tm.locator("textarea").fill("2번 유자차로 주문할게요!");
+        await tm.getByRole("button", { name: "보내기" }).click();
+        await tm.locator(".dialogue", { hasText: "2번 유자차" }).waitFor();
+        await H.tab(r, "피드"); await r.waitForTimeout(500);
+        assert.equal(await r.locator(".reminder-bar p", { hasText: "마니또에게 한마디" }).count(), 0, "주문(한마디)을 보내면 안내가 사라진다");
+        await p.reload(); await H.tab(p, "내 미션");
+        await H.panel(p, "2주차 미션").locator(".flow-steps li.done", { hasText: "주문이 왔어요" }).getByText(/2번 유자차/).waitFor();
+        console.log(`  ${n}(마니또 카페): 메뉴판을 완료 전 쪽지로 → ${target[n]} 화면 할 일 줄·받은 쪽지에 '한마디로 주문' 안내 → 한마디로 주문 → ${n}의 단계 안내에 '주문이 왔어요'`);
+      }
+      await s.locator("textarea").first().fill(`${n}의 황금 미션: 자리를 확인해 보세요`);
       await s.getByRole("button", { name: "미션 완료 알리기" }).click();
       await H.panel(p, "2주차 미션 ✔").waitFor();
     }

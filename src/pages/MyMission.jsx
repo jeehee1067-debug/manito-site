@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { collection, doc, getDoc, increment, onSnapshot, query, serverTimestamp, setDoc, where, writeBatch } from "firebase/firestore";
 import { db } from "../firebase.js";
 import { useApp, Loading } from "../App.jsx";
-import { CARD_HOW, cardHow, DROP_TIP, DROP_TIP_SHORT, EXTRA_NOTES_MAX, FIRST_CLUE_DATE, PROFILE_DUE, shortDate, LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT, SCHEDULE, SPEND_GUIDE_WON, scheduleLabel, todayYmd, weekDeadline, deadlinePassed, isGoldCard, isNewCard } from "../lib/constants.js";
+import { CARD_HOW, cardFlow, cardHow, DROP_TIP, DROP_TIP_SHORT, EXTRA_NOTES_MAX, FIRST_CLUE_DATE, PROFILE_DUE, shortDate, LEVEL_LABEL, MISSION_CARDS, PHASE, PRAISE_SLOT, SCHEDULE, SPEND_GUIDE_WON, scheduleLabel, todayYmd, weekDeadline, deadlinePassed, isGoldCard, isNewCard } from "../lib/constants.js";
 import { DEAL_COUNT, dealCards, goldDeal } from "../lib/cards.js";
 import { isGoldChoice } from "../lib/gold.js";
 import { syncClues } from "../lib/sync.js";
@@ -246,6 +246,7 @@ export default function MyMission({ active = true }) {
           choice={missions.choices?.[slot]}
           done={Boolean(missions.done?.[slot])}
           notes={missions.notes?.[slot] || 0}
+          orders={fromReceiver.filter((m) => m.slot === slot)}
           allDone={missions.done || {}}
           open={running && slot === config.week}
           closed={(running && slot < config.week) || config.phase > PHASE.RUNNING}
@@ -299,7 +300,7 @@ function HowGuide() {
   );
 }
 
-function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, notes, allDone, open, closed = false, deadline = "", phase, remote, taken = [] }) {
+function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, notes, allDone, open, closed = false, deadline = "", phase, remote, taken = [], orders = [] }) {
   const [message, setMessage] = useState("");
   const [includeCode, setIncludeCode] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -512,6 +513,7 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
                 : "실물을 직접 두거나 건네야 해요(사이트 쪽지만 보내면 카드와 달라서 카드 추가분이 빠져요). 아래 쪽지 칸에는 둔 곳을 알려 주세요."}
             </p>
           )}
+          {hasCard && cardFlow(choice) && <FlowGuide flow={cardFlow(choice)} notes={notes} orders={orders} />}
           {hasCard && isRealCard(choice.cardId) && (
             <Dialogue speaker="꿀팁" tone="gold"><p>{DROP_TIP}</p></Dialogue>
           )}
@@ -584,11 +586,46 @@ function Slot({ slot, myPid, receiverPid, receiverName, code, choice, done, note
               다시 전달하고 {open ? "아래 \"쪽지 더 보내기\"로 위치나 코드를 알려 주면" : "운영진에게 알려 주면"} 돼요. 운영진이 두 사람에게 확인한 뒤 처리해요.
             </Dialogue>
           )}
+          {/* 메뉴판·예고를 보내려고 먼저 완료를 누른 경우(11/26 전에는 그 방법뿐이었다): 전달한 뒤 쪽지로 다시 알리게 */}
+          {open && !redeemed && cardFlow(choice) && (
+            <p className="how-line how-real" role="note">
+              <b>{cardFlow(choice) === "menu" ? "메뉴판을 보내려고 먼저 완료를 눌렀다면" : "도착 시각을 알리려고 먼저 완료를 눌렀다면"}</b>,
+              {" "}{cardFlow(choice) === "menu" ? "주문(내 대상의 한마디)을 받아 배달한 뒤" : "그 시각에 전달한 뒤"} 아래 <b>"쪽지 더 보내기"</b>로 둔 곳과 인증 코드를 다시 알려 주세요.
+              {" "}{receiverName}이 받은 것을 보고 인증하면서 "카드와 같아요"를 눌러야 카드 추가분과 황금 카드 추첨 대상이 돼요.
+              {orders.length > 0 && <> 주문: <b>"{orders[orders.length - 1].message}"</b></>}
+            </p>
+          )}
           {thanks && <Dialogue speaker={receiverName}>{thanks}</Dialogue>}
           {open && <MoreNotes slot={slot} myPid={myPid} receiverPid={receiverPid} receiverName={receiverName} code={code} sent={notes} showCode={!redeemed} />}
         </div>
       )}
     </Panel>
+  );
+}
+
+// 먼저 알리고 → 대상이 답하고 → 전달하는 카드의 단계 안내(사용자가 정함, 11/27: "메뉴판 형식으로 진행한 경우 이걸 또 알리는 방법이 있어야").
+// flow "menu"(마니또 카페·공범 카페): ① 메뉴판 → ② 대상의 주문(마니또에게 한마디) → ③ 배달하고 완료. "time"(타임어택): ① 도착 시각 예고 → ② 전달 → ③ 완료.
+// notes: 이번 주차에 보낸 쪽지 수(완료 전 쪽지 포함), orders: 이번 주차에 내 대상이 보낸 한마디
+function FlowGuide({ flow, notes = 0, orders = [] }) {
+  const sent = notes > 0;
+  const ordered = orders.length > 0;
+  const steps = flow === "menu"
+    ? [
+      { done: sent, text: <>메뉴판 보내기: 아래 <b>"완료 전에 쪽지 먼저 보내기"</b>로 메뉴 3가지를 보내요(인증 코드는 아직 안 가요).</> },
+      { done: ordered, text: ordered
+        ? <>주문이 왔어요: <b>"{orders[orders.length - 1].message}"</b> (이 탭 위 "내 대상이 보낸 한마디")</>
+        : <>주문 기다리기: 내 대상이 <b>"마니또에게 한마디"</b>로 주문하면 이 탭 위 "내 대상이 보낸 한마디"에 떠요(대상 화면에도 주문하라는 안내가 떠요). 주문이 없으면 내가 골라서 배달해요.</> },
+      { done: false, text: <>배달한 뒤 <b>"미션 완료 알리기"</b>: 둔 곳과 인증 코드가 함께 가요.</> },
+    ]
+    : [
+      { done: sent, text: <>도착 시각 알리기: 아래 <b>"완료 전에 쪽지 먼저 보내기"</b>로 "오늘 ○시에 선물이 도착합니다"를 보내요.</> },
+      { done: false, text: <>그 시각에 맞춰 몰래 전달하기</> },
+      { done: false, text: <>전달한 뒤 <b>"미션 완료 알리기"</b>: 인증 코드가 함께 가요.</> },
+    ];
+  return (
+    <ol className="flow-steps" aria-label="이 카드를 하는 순서">
+      {steps.map((x, i) => <li key={i} className={x.done ? "done" : ""}>{x.done ? "✔ " : ""}{x.text}</li>)}
+    </ol>
   );
 }
 

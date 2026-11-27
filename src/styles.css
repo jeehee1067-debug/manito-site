@@ -739,3 +739,8 @@ ul.plain.redeem-status li { flex: 0 0 auto; width: auto; margin: 0; }
   .gold-pop, .gold-pop.is-win .gold-pop-emoji, .gold-pop.is-win .gold-pop-title, .gold-pop.is-angel .gold-pop-emoji, .gold-confetti span { animation: none; }
   .gold-confetti { display: none; }
 }
+
+/* 먼저 알리고 → 대상이 답하는 카드의 단계 안내(MyMission FlowGuide), 대상 화면의 "한마디로 주문·답하기" 안내(Detective) */
+.flow-steps { margin: 6px 0 0; padding: 8px 10px 8px 28px; background: #fff8e1; border: 2px solid var(--ink, #1d2029); border-radius: 10px; font-size: 14px; display: grid; gap: 4px; }
+.flow-steps li.done { color: #2e7d32; }
+.reply-hint { background: #eef5ff; border-left: 4px solid #3d6ea8; padding: 4px 8px; border-radius: 4px; }
