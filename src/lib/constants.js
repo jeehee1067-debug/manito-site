@@ -122,7 +122,10 @@ export const MAIL_LINK = "@mail";
 
 // 게시돼 있어야 하는 보안 규칙 버전. firestore.rules의 rulesVersion과 같아야 한다.
 // 규칙에서 화면이 쓰는 경로·값의 모양을 바꿀 때 양쪽을 같이 올린다. 운영 화면이 이 값으로 "콘솔의 규칙이 예전 것"인지 확인해 알려 준다.
-export const RULES_VERSION = "20261129";
+export const RULES_VERSION = "20261130";
+// 마니또에게 한마디: 주차마다 보낼 수 있는 수(사용자가 정함, 11/27: "이번 주 한마디를 다 써서 선물 여부를 알릴 수가 없다" —
+// 마니또 카페 주문·받았다는 인사·찔러보기를 한 번에 다 할 수 없어서 1번 → 3번). firestore.rules의 toManito 문서 ID(_2·_3)와 같아야 한다(npm test).
+export const TO_MANITO_MAX = 3;
 
 // remote: 다른 근무지에 있는 대상에게도 할 수 있는 미션인지.
 // 대상이 다른 근무지면 remote 카드만 제시한다. 쉬움 카드는 모두 사이트 쪽지로 하는 무비용 미션.

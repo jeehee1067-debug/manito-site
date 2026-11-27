@@ -2030,3 +2030,12 @@ test("중도 이탈 처리: 계획·적용·되돌리기", () => {
   const mutual = structuredClone(store); mutual.assignments.Z = { receiverPid: "X" };
   assert.match(planHandover(data(mutual), { leaver: "Y", redo: true }).error, /맞마니또/);
 });
+
+// 마니또에게 한마디: 주차마다 보낼 수 있는 수가 보안 규칙의 문서 ID 모양과 같은지
+import { TO_MANITO_MAX } from "../src/lib/constants.js";
+test("마니또에게 한마디 횟수와 보안 규칙", () => {
+  const rules = readFileSync(new URL("../firestore.rules", import.meta.url), "utf8");
+  const block = rules.slice(rules.indexOf("match /toManito/{id}"), rules.indexOf("match /toManito/{id}") + 1500);
+  const suffixes = [...block.matchAll(/string\(request\.resource\.data\.slot\) \+ '_(\d)'\n/g)].map((m) => Number(m[1]));
+  assert.deepEqual([1, ...suffixes], Array.from({ length: TO_MANITO_MAX }, (_, i) => i + 1), "규칙의 _2·_3 문서 ID가 TO_MANITO_MAX와 맞아야 한다");
+});

@@ -1673,7 +1673,7 @@ describe("참여 재미 기능: 취향·알레르기, 마니또에게 한마디,
     await assertFails(getDoc(doc(as("stranger"), "prefs", "p002")));
   });
 
-  test("마니또에게 한마디 (Detective.jsx ToManito, MyMission.jsx FromReceiver): 주차마다 한 번, 열린 주차까지, 받는 사람과 그 마니또만 읽는다", async () => {
+  test("마니또에게 한마디 (Detective.jsx ToManito, MyMission.jsx FromReceiver): 주차마다 3번까지(앞 번호부터), 열린 주차까지, 받는 사람과 그 마니또만 읽는다", async () => {
     const msg = (slot, more = {}) => ({ receiverPid: "p002", slot, message: "혹시 커피 좋아하세요?", createdAt: serverTimestamp(), ...more });
     const db = p("p002"); // p002의 마니또는 p001
     await assertFails(setDoc(doc(db, "toManito", "p002_2"), msg(2))); // 아직 안 열린 주차
@@ -1682,8 +1682,14 @@ describe("참여 재미 기능: 취향·알레르기, 마니또에게 한마디,
     await assertFails(setDoc(doc(db, "toManito", "p002_1"), msg(1, { createdAt: new Date(2020, 0, 1) })));
     await assertFails(setDoc(doc(db, "toManito", "p002_x"), msg(1))); // 문서 ID 규칙
     await assertFails(setDoc(doc(p("p003"), "toManito", "p002_1"), msg(1))); // 남의 이름으로
+    await assertFails(setDoc(doc(db, "toManito", "p002_1_2"), msg(1))); // 첫 번째 없이 두 번째(규칙 20261130)
     await assertSucceeds(setDoc(doc(db, "toManito", "p002_1"), msg(1)));
-    await assertFails(setDoc(doc(db, "toManito", "p002_1"), msg(1, { message: "다시 씀" }))); // 한 번만(고칠 수 없음)
+    await assertFails(setDoc(doc(db, "toManito", "p002_1"), msg(1, { message: "다시 씀" }))); // 같은 칸은 한 번만(고칠 수 없음)
+    await assertFails(setDoc(doc(db, "toManito", "p002_1_3"), msg(1))); // 두 번째 없이 세 번째
+    await assertSucceeds(setDoc(doc(db, "toManito", "p002_1_2"), msg(1, { message: "카페 주문: 아메리카노요!" })));
+    await assertSucceeds(setDoc(doc(db, "toManito", "p002_1_3"), msg(1, { message: "선물 잘 받았어요!" })));
+    await assertFails(setDoc(doc(db, "toManito", "p002_1_4"), msg(1))); // 네 번째는 없다
+    await assertFails(setDoc(doc(db, "toManito", "p002_2_2"), msg(1))); // 주차와 문서 ID가 다름
     await assertFails(deleteDoc(doc(db, "toManito", "p002_1")));
     // 읽기: 마니또(p001)는 내 대상 앞으로 온 것만, 받는 사람은 자기가 보낸 것만
     await assertSucceeds(getDocs(query(collection(p("p001"), "toManito"), where("receiverPid", "==", "p002"))));

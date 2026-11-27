@@ -50,7 +50,7 @@ service cloud.firestore {
     // 게시된 규칙의 버전 확인용. 운영 화면이 이 경로를 읽어 보고, 거부되면 "콘솔의 규칙이 예전 것"이라고 알려 준다.
     // 화면이 쓰는 경로·값의 모양을 바꿀 때 src/lib/constants.js의 RULES_VERSION과 같이 올린다.
     match /rulesVersion/{v} {
-      allow get: if isAdmin() && v == '20261129';
+      allow get: if isAdmin() && v == '20261130';
     }
 
     // ── 설정 ──────────────────────────────────────────────────────────────
@@ -865,7 +865,12 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['receiverPid', 'slot', 'message', 'createdAt'])
         && request.resource.data.receiverPid == myPid()
         && request.resource.data.slot is int && request.resource.data.slot >= 1 && request.resource.data.slot <= week()
-        && id == myPid() + '_' + string(request.resource.data.slot)
+        // 주차마다 3번까지(src/lib/constants.js TO_MANITO_MAX, 규칙 20261130): 문서 ID = 나_주차, 나_주차_2, 나_주차_3 — 앞 번호가 있어야 다음 번호
+        && (id == myPid() + '_' + string(request.resource.data.slot)
+            || (id == myPid() + '_' + string(request.resource.data.slot) + '_2'
+                && exists(/databases/$(database)/documents/toManito/$(myPid() + '_' + string(request.resource.data.slot))))
+            || (id == myPid() + '_' + string(request.resource.data.slot) + '_3'
+                && exists(/databases/$(database)/documents/toManito/$(myPid() + '_' + string(request.resource.data.slot) + '_2'))))
         && request.resource.data.message is string
         && request.resource.data.message.trim().size() > 0 && request.resource.data.message.size() <= 200
         && request.resource.data.createdAt == request.time;
