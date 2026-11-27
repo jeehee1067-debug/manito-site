@@ -138,14 +138,22 @@ const step = (s) => console.log("▶", s);
     console.log("  운영자 화면이 센 완료율 25%(4명 중 1명) → 참여자 내 미션 맨 위 '1주차 미션 완료율 25%', 할 일 줄 '벌써 참여자의 25%가 완료했어요!'(인원 수는 문서에도 화면에도 없음)");
   }
 
-  step("마니또에게 한마디: 주차마다 한 번, 마니또 메뉴에 숫자");
+  step("마니또에게 한마디: 주차마다 3번까지, 마니또 메뉴에 숫자");
   {
     const r = u[R];
     const tm = H.panel(r, "마니또에게 한마디");
+    await tm.getByText(/주차마다 3번까지/).waitFor();
     await tm.locator("textarea").fill("혹시 가파트세요? 서랍 간식 잘 먹었어요!");
     await tm.getByRole("button", { name: "보내기" }).click();
-    await tm.getByText("1주차 한마디는 보냈어요").waitFor();
-    assert.equal(await tm.locator("textarea").count(), 0, "같은 주차에는 다시 못 보냄");
+    await tm.locator(".dialogue", { hasText: "혹시 가파트세요?" }).waitFor();
+    assert.match(await tm.locator("textarea").getAttribute("placeholder"), /남은 횟수 2번/, "첫 번째를 보내면 2번 남음");
+    for (const t of ["카페 주문은 아메리카노로 할게요", "선물 잘 받았어요!"]) {
+      await tm.locator("textarea").fill(t);
+      await tm.getByRole("button", { name: "보내기" }).click();
+      await tm.locator(".dialogue", { hasText: t }).waitFor();
+    }
+    await tm.getByText("1주차 한마디는 3번 다 보냈어요").waitFor();
+    assert.equal(await tm.locator("textarea").count(), 0, "같은 주차에 3번 보내면 더는 못 보냄");
     const g = u["가나"];
     const badge = g.locator("nav.tabs button", { hasText: "내 미션" }).locator(".tab-badge");
     await badge.waitFor();
@@ -362,7 +370,7 @@ const step = (s) => console.log("▶", s);
   const pres = admin.locator(".presenter");
   await pres.waitFor();
   const stats = (await pres.locator(".pres-stats").innerText()).replace(/\s+/g, " ");
-  assert.match(stats, /2번의 공감/); assert.match(stats, /1번의 "마니또에게 한마디"/);
+  assert.match(stats, /2번의 공감/); assert.match(stats, /3번의 "마니또에게 한마디"/);
   console.log("  첫 장면 숫자:", stats);
   const next = async () => { await pres.getByRole("button", { name: "다음 ▶" }).click(); await admin.waitForTimeout(120); };
   let sawPair = false, sawDetective = false, sawAngel = false;

@@ -2,7 +2,7 @@ import { useApp } from "../App.jsx";
 import { Giver, Panel, Target } from "../ui.jsx";
 import { GOLD_DRAW, PRIZES, PRIZES_ANNOUNCED, TICKET_RULES as R } from "../config/prizes.js";
 import { DEAL_COUNT } from "../lib/cards.js";
-import { CARD_HOW, DROP_TIP, EXTRA_NOTES_MAX, MISSION_CARDS, PROFILE_QUESTIONS, REVIEW_EDITS_MAX, REVIEW_MIN, SCHEDULE, SPEND_GUIDE_WON, clueScheduleText, daysBetween, shortDate, todayYmd, weekDeadline } from "../lib/constants.js";
+import { CARD_HOW, DROP_TIP, EXTRA_NOTES_MAX, MISSION_CARDS, PROFILE_QUESTIONS, REVIEW_EDITS_MAX, REVIEW_MIN, SCHEDULE, SPEND_GUIDE_WON, clueScheduleText, daysBetween, shortDate, todayYmd, weekDeadline, TO_MANITO_MAX } from "../lib/constants.js";
 
 // 낱말 정의(규칙 탭 맨 위. 사용자가 정함: "내가 누군가의 마니또이고 대상도 마니또라는 개념이 헷갈리는 분이 있다").
 // 마니또 = 챙겨 주는 쪽, 대상 = 받는 쪽. 한 사람이 두 역할을 다 한다는 것과 어느 탭이 어느 역할인지를 적는다.
@@ -216,7 +216,7 @@ export default function Rules() {
 
       <Panel title="소소한 재미">
         <ul className="rules-list">
-          <li><b>마니또에게 한마디</b>: 추리 보드에서 주마다 한 번, 내 마니또에게 익명으로 말을 걸 수 있어요.</li>
+          <li><b>마니또에게 한마디</b>: 추리 보드에서 주마다 {TO_MANITO_MAX}번까지, 내 마니또에게 익명으로 말을 걸 수 있어요(마니또 카페 주문, 받았다는 인사도).</li>
           <li><b>주차별 추측</b>: 매주 의심되는 사람을 남기면, 송년회에서 "가장 먼저 알아챈 사람"이 발표돼요(응모권과는 상관없어요).</li>
           <li><b>공감</b>: 피드의 후기마다 한 번 누를 수 있어요(취소는 안 돼요).</li>
           <li><b>후기·답장 고치기</b>: 추리 보드 "내가 인증한 것"에서 집계 전까지 합쳐서 {REVIEW_EDITS_MAX}번 고칠 수 있어요. 운영진이 가리거나 지우면 그 이유가 나에게만 보이고, 다시 쓸 수 있어요. <b>후기·답장에 사람 이름은 쓰지 말아 주세요.</b></li>

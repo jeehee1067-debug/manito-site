@@ -6,7 +6,7 @@ import { db } from "../firebase.js";
 import { forgetFeed } from "../lib/feedCache.js";
 import { useApp } from "../App.jsx";
 import { Avatar, Dialogue, Giver, HowTag, Panel, RoleNote } from "../ui.jsx";
-import { cardHow, isGoldCard, LEVEL_LABEL, PHASE, PRAISE_SLOT, PROFILE_QUESTIONS, REVIEW_EDITS_MAX, REVIEW_MIN, CLUE_COUNT, PART_HINT_IDX, clueScheduleText } from "../lib/constants.js";
+import { cardHow, isGoldCard, LEVEL_LABEL, PHASE, PRAISE_SLOT, PROFILE_QUESTIONS, REVIEW_EDITS_MAX, REVIEW_MIN, CLUE_COUNT, PART_HINT_IDX, clueScheduleText, TO_MANITO_MAX } from "../lib/constants.js";
 import { normalizeCode } from "../lib/random.js";
 import { bump } from "../lib/writes.js";
 import { TICKET_RULES } from "../config/prizes.js";
@@ -158,32 +158,42 @@ function AngelInbox() {
   );
 }
 
-// 마니또에게 한마디: 받는 사람이 내 마니또에게 주차마다 한 번 익명으로 말을 건다(고칠 수 없음).
-// "혹시 ○○파트세요?"처럼 찔러보기도 된다. 마니또는 "쪽지 더 보내기"로 답할 수 있다.
+// 마니또에게 한마디: 받는 사람이 내 마니또에게 주차마다 TO_MANITO_MAX(3)번까지 익명으로 말을 건다(고칠 수 없음).
+// "혹시 ○○파트세요?"처럼 찔러보기도, 마니또 카페 주문도, 받았다는 인사도 된다. 마니또는 "쪽지 더 보내기"로 답할 수 있다.
+// 문서 ID: 나_주차, 나_주차_2, 나_주차_3(보안 규칙이 앞 번호가 있어야 다음 번호를 받는다).
+const toManitoId = (pid, week, k) => (k === 1 ? `${pid}_${week}` : `${pid}_${week}_${k}`);
 function ToManito({ myPid }) {
   const { config } = useApp();
-  const [sent, setSent] = useState(undefined); // { slot: message }
+  const [sent, setSent] = useState(undefined); // [{ id, slot, message }]
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => onSnapshot(query(collection(db, "toManito"), where("receiverPid", "==", myPid)), (s) =>
-    setSent(Object.fromEntries(s.docs.map((d) => [d.data().slot, d.data().message]))), () => setSent({})), [myPid]);
+    setSent(s.docs.map((d) => ({ id: d.id, ...d.data() }))), () => setSent([])), [myPid]);
   const open = config.phase === PHASE.RUNNING || config.phase === PHASE.GUESSING;
   const week = config.week || 1;
-  if (sent === undefined || (!open && Object.keys(sent).length === 0)) return null;
+  if (sent === undefined || (!open && sent.length === 0)) return null;
+  const ids = new Set(sent.map((m) => m.id));
+  // 비어 있는 첫 번호(운영자가 하나를 지웠으면 그 자리)
+  const nextK = [1, 2, 3].slice(0, TO_MANITO_MAX).find((k) => !ids.has(toManitoId(myPid, week, k)));
+  const usedThisWeek = sent.filter((m) => m.slot === week).length;
+  const left = Math.max(0, TO_MANITO_MAX - usedThisWeek);
+  const ordered = [...sent].sort((a, b) => a.slot - b.slot || a.id.localeCompare(b.id));
 
   async function send(e) {
     e.preventDefault();
     const message = text.trim();
-    if (!message) return;
-    if (!window.confirm(`${week}주차 한마디는 한 번만 보낼 수 있어요. 보낼까요?\n\n"${message}"`)) return;
+    if (!message || !nextK) return;
+    if (!window.confirm(`${week}주차 한마디는 보내면 고칠 수 없어요(이번 주 남은 횟수 ${left}번). 보낼까요?\n\n"${message}"`)) return;
     setBusy(true);
     setError("");
     try {
-      await setDoc(doc(db, "toManito", `${myPid}_${week}`), { receiverPid: myPid, slot: week, message, createdAt: serverTimestamp() });
+      await setDoc(doc(db, "toManito", toManitoId(myPid, week, nextK)), { receiverPid: myPid, slot: week, message, createdAt: serverTimestamp() });
       setText("");
     } catch {
-      setError("보내지 못했어요. 이번 주에 이미 보냈거나 보낼 수 없는 단계예요.");
+      setError(nextK > 1
+        ? "보내지 못했어요. 운영진에게 규칙 게시를 확인해 달라고 알려 주세요(한마디를 주차마다 여러 번 보내려면 새 규칙이 필요해요)."
+        : "보내지 못했어요. 이번 주에 이미 보냈거나 보낼 수 없는 단계예요.");
     } finally {
       setBusy(false);
     }
@@ -191,17 +201,17 @@ function ToManito({ myPid }) {
 
   return (
     <Panel title="마니또에게 한마디">
-      <p className="small"><Giver>내 마니또</Giver>에게만 보여요. 주차마다 한 번, 200자까지. 고맙다는 말도, "혹시 ○○파트세요?" 같은 찔러보기도 좋아요. 마니또는 쪽지로 답할 수 있어요.</p>
-      {Object.entries(sent).sort(([a], [b]) => a - b).map(([slot, m]) => (
-        <Dialogue key={slot} speaker={`나 → 마니또 · ${slot}주차`}><p>{m}</p></Dialogue>
+      <p className="small"><Giver>내 마니또</Giver>에게만 보여요. 주차마다 {TO_MANITO_MAX}번까지, 200자까지. 고맙다는 말도, 받았다는 인사도, "혹시 ○○파트세요?" 같은 찔러보기도 좋아요. 마니또는 쪽지로 답할 수 있어요.</p>
+      {ordered.map((m) => (
+        <Dialogue key={m.id} speaker={`나 → 마니또 · ${m.slot}주차`}><p>{m.message}</p></Dialogue>
       ))}
-      {open && !sent[week] && (
+      {open && nextK && left > 0 && (
         <form className="stack" onSubmit={send}>
-          <textarea className="pk-input" rows={2} maxLength={200} value={text} onChange={(e) => setText(e.target.value)} placeholder={`${week}주차 한마디`} aria-label={`${week}주차 마니또에게 한마디`} />
+          <textarea className="pk-input" rows={2} maxLength={200} value={text} onChange={(e) => setText(e.target.value)} placeholder={`${week}주차 한마디 (남은 횟수 ${left}번)`} aria-label={`${week}주차 마니또에게 한마디`} />
           <button className="pk-btn sm" disabled={busy || !text.trim()}>보내기</button>
         </form>
       )}
-      {open && sent[week] && <p className="small muted">{week}주차 한마디는 보냈어요. 다음 주차에 또 보낼 수 있어요.</p>}
+      {open && (!nextK || left === 0) && <p className="small muted">{week}주차 한마디는 {TO_MANITO_MAX}번 다 보냈어요. 다음 주차에 또 보낼 수 있어요.</p>}
       {error && <p className="error small" role="alert">{error}</p>}
     </Panel>
   );
