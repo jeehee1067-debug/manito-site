@@ -3,7 +3,28 @@
 //  - 참여자 화면: 사이트를 열면 어느 탭에서나 맨 위에 "할 일" 줄이 뜬다(App.jsx ReminderBar ← myReminders)
 //  - 운영 화면: 운영자의 회사 메일로 보내는 "재촉 메일"(InviteMail.jsx ReminderMail ← reminderTargets·reminderMessage)
 // 여기에는 Firestore를 부르는 코드가 없다(tests/logic.test.js).
-import { MISSION_SLOTS, PHASE } from "./constants.js";
+import { MISSION_SLOTS, PHASE, TO_MANITO_MAX, cardFlow } from "./constants.js";
+
+const millis = (t) => (t?.toMillis ? t.toMillis() : typeof t === "number" ? t : t?.seconds ? t.seconds * 1000 : Date.now());
+/**
+ * 내 마니또가 "먼저 알린 것"에 내가 답해야 하는지(사용자가 정함, 11/27: 메뉴판 형식 미션을 알리는 방법).
+ * inbox: 내 앞으로 온 deliveries, talks: 내가 보낸 "마니또에게 한마디"(toManito where receiverPid == 나), mine: 내 인증
+ * 이번 주차에 ① 완료 알림 없이 먼저 온 쪽지(메뉴판·예고일 수 있다) 또는 ② 메뉴판 카드의 완료 알림(아직 인증 전)이 왔고,
+ * 그 뒤로 내가 이번 주 한마디를 보내지 않았으며 아직 보낼 수 있으면 [주차]. 아니면 [].
+ */
+export function replyReminder({ inbox = [], talks = null, mine = null, week = 1, phase }) {
+  if (!(phase === PHASE.RUNNING || phase === PHASE.GUESSING) || !talks) return [];
+  const thisWeek = inbox.filter((d) => d.slot === week && !d.hidden);
+  const done = thisWeek.some((d) => d.kind === "mission" || d.kind === "praise");
+  const redeemed = (mine || []).some((r) => r.slot === week);
+  const asks = thisWeek.filter((d) => (d.kind === "note" && !done) || (d.kind === "mission" && cardFlow(d.card) === "menu" && !redeemed));
+  if (!asks.length) return [];
+  const mineWeek = talks.filter((t) => t.slot === week);
+  if (mineWeek.length >= TO_MANITO_MAX) return [];
+  const lastAsk = Math.max(...asks.map((d) => millis(d.createdAt)));
+  const lastTalk = mineWeek.length ? Math.max(...mineWeek.map((t) => millis(t.createdAt))) : 0;
+  return lastTalk >= lastAsk ? [] : [week];
+}
 
 // 주차별 추측을 할 일로 띄우는 때(사용자가 정함, 11/23): 그 주 단서 2개가 공개된 뒤부터 그 주차가 닫힐 때까지(미션 진행 단계).
 // 단서는 금요일에 주차마다 2개씩 나가므로(공개 개수 ≤ 2 × 주차) "공개 개수 ≥ 2 × 주차" = 이번 주 단서가 나왔다.

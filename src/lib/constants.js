@@ -195,9 +195,9 @@ export const MISSION_CARDS = {
     { id: "h12", guess: true, remote: true, text: "대상이 꼭 가 보고 싶은 여행지를 알아내 쪽지로 맞혀 보기 (방법은 자유, 틀리면 카드 추가분 없음)" },
     { id: "h13", guess: true, remote: true, text: "대상이 쉬는 날 주로 하는 일을 알아내 쪽지로 맞혀 보기 (방법은 자유, 틀리면 카드 추가분 없음)" },
     // 황금 카드(2주차부터, 일반 도전 카드 두 장에는 안 나온다)
-    { id: "h14", name: "타임어택 배달", gold: true, from: 2, real: true, remote: true, text: "타임어택 배달: '오늘 오후 ○시에 선물이 도착합니다'라고 미리 알린 뒤, 그 시각에 맞춰 직접 만든 것(그림·상장·종이접기 등)이 대상 자리에 나타나게 하기 (다른 근무지면 공범이 대신 전달)" },
-    { id: "h15", name: "마니또 카페", gold: true, from: 2, real: true, cost: true, remote: false, text: "마니또 카페: 간식·음료 3가지 메뉴판을 사이트로 보내고, 대상이 '마니또에게 한마디'로 주문하면 그 메뉴를 몰래 배달하기 (5천원 이하. 주문이 없으면 마니또가 골라서)" },
-    { id: "h16", name: "공범 카페", gold: true, from: 2, real: true, cost: true, remote: true, remoteOnly: true, text: "공범 카페: 간식·음료 3가지 메뉴판을 사이트로 보내고, 대상이 '마니또에게 한마디'로 주문하면 공범을 섭외해 그 메뉴를 대신 배달하게 하기 (5천원 이하. 공범에게도 비밀 유지 부탁)" },
+    { id: "h14", name: "타임어택 배달", gold: true, from: 2, real: true, remote: true, flow: "time", text: "타임어택 배달: '오늘 오후 ○시에 선물이 도착합니다'라고 미리 알린 뒤, 그 시각에 맞춰 직접 만든 것(그림·상장·종이접기 등)이 대상 자리에 나타나게 하기 (다른 근무지면 공범이 대신 전달)" },
+    { id: "h15", name: "마니또 카페", gold: true, from: 2, real: true, cost: true, remote: false, flow: "menu", text: "마니또 카페: 간식·음료 3가지 메뉴판을 사이트로 보내고, 대상이 '마니또에게 한마디'로 주문하면 그 메뉴를 몰래 배달하기 (5천원 이하. 주문이 없으면 마니또가 골라서)" },
+    { id: "h16", name: "공범 카페", gold: true, from: 2, real: true, cost: true, remote: true, remoteOnly: true, flow: "menu", text: "공범 카페: 간식·음료 3가지 메뉴판을 사이트로 보내고, 대상이 '마니또에게 한마디'로 주문하면 공범을 섭외해 그 메뉴를 대신 배달하게 하기 (5천원 이하. 공범에게도 비밀 유지 부탁)" },
   ],
 };
 
@@ -221,6 +221,12 @@ export const isGoldCard = (card) => Boolean(findCard(card)?.gold);
 // 2주차부터 새로 들어온 카드인지
 export const isNewCard = (card) => (findCard(card)?.from || 1) >= 2;
 // "site" | "real" | null(목록에 없는 카드: 3주차 "칭찬만" 등)
+// 먼저 알리고 → 대상이 답하고 → 전달하는 카드(사용자가 정함, 11/27: "메뉴판 형식으로 진행한 경우 이걸 또 알리는 방법이 있어야"):
+//   "menu" = 메뉴판을 보내고 대상이 "마니또에게 한마디"로 주문(마니또 카페·공범 카페), "time" = 도착 시각을 미리 알림(타임어택 배달).
+// 마니또 화면은 단계 안내(MyMission.jsx FlowGuide), 대상 화면은 "한마디로 주문·답하기" 안내(Detective.jsx, App.jsx ReminderBar)를 보인다.
+// 카드 글·번호는 그대로 두고 표시만 더한 것(미션 시작 뒤 카드 글을 바꾸면 카드 추가분이 사라진다).
+export const cardFlow = (card) => findCard(card)?.flow || null;
+
 export function cardHow(card) {
   const c = findCard(card);
   return c ? (c.real ? "real" : "site") : null;

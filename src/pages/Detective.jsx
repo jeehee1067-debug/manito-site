@@ -6,7 +6,7 @@ import { db } from "../firebase.js";
 import { forgetFeed } from "../lib/feedCache.js";
 import { useApp } from "../App.jsx";
 import { Avatar, Dialogue, Giver, HowTag, Panel, RoleNote } from "../ui.jsx";
-import { cardHow, isGoldCard, LEVEL_LABEL, PHASE, PRAISE_SLOT, PROFILE_QUESTIONS, REVIEW_EDITS_MAX, REVIEW_MIN, CLUE_COUNT, PART_HINT_IDX, clueScheduleText, TO_MANITO_MAX } from "../lib/constants.js";
+import { cardHow, isGoldCard, LEVEL_LABEL, PHASE, PRAISE_SLOT, PROFILE_QUESTIONS, REVIEW_EDITS_MAX, REVIEW_MIN, CLUE_COUNT, PART_HINT_IDX, clueScheduleText, TO_MANITO_MAX, cardFlow } from "../lib/constants.js";
 import { normalizeCode } from "../lib/random.js";
 import { bump } from "../lib/writes.js";
 import { TICKET_RULES } from "../config/prizes.js";
@@ -95,6 +95,17 @@ function Inbox({ myPid, items, onUseCode }) {
                 : "마니또가 미션을 했대요. 주변을 살펴보세요!")}</p>}
             {it.card && <p className="small">마니또가 고른 카드: {isGoldCard(it.card) && <span className="gold-tag">✨ 황금 카드</span>} {LEVEL_LABEL[it.card.level] || it.card.level} · {it.card.text}</p>}
             {it.card && cardHow(it.card) && <p className="small how-hint"><HowTag card={it.card} /> {howHint(it.card)}</p>}
+            {/* 먼저 알리고 → 대상이 답하는 미션(사용자가 정함, 11/27): 완료 알림 없이 먼저 온 쪽지, 메뉴판 카드의 완료 알림 */}
+            {!it.hidden && canRedeem && ((it.kind === "note" && !items.some((d) => d.slot === it.slot && (d.kind === "mission" || d.kind === "praise")))
+              || (it.kind === "mission" && cardFlow(it.card) === "menu" && !redeemedSlots.has(it.slot))) && (
+              <p className="small reply-hint">
+                {it.kind === "note"
+                  ? "마니또가 미션을 하기 전에 먼저 보낸 쪽지예요(메뉴판·도착 예고일 수 있어요). 주문하거나 답하려면 "
+                  : "메뉴판을 보내는 카드예요. 주문은 "}
+                <button type="button" className="text-btn" onClick={() => document.getElementById("to-manito")?.scrollIntoView({ block: "start" })}>마니또에게 한마디</button>
+                {it.kind === "note" ? "로 보내 주세요. 미션을 마치면 마니또가 완료를 알리고 인증 코드를 보내요." : "로 보내고, 받은 뒤에 인증해 주세요."}
+              </p>
+            )}
             {it.code && (
               <p className="small">
                 인증 코드 <strong className="mono">{it.code}</strong>{redeemedCodes.has(it.code) ? " (인증 완료)" : ""}
@@ -200,7 +211,7 @@ function ToManito({ myPid }) {
   }
 
   return (
-    <Panel title="마니또에게 한마디">
+    <Panel title="마니또에게 한마디" id="to-manito">
       <p className="small"><Giver>내 마니또</Giver>에게만 보여요. 주차마다 {TO_MANITO_MAX}번까지, 200자까지. 고맙다는 말도, 받았다는 인사도, "혹시 ○○파트세요?" 같은 찔러보기도 좋아요. 마니또는 쪽지로 답할 수 있어요.</p>
       {ordered.map((m) => (
         <Dialogue key={m.id} speaker={`나 → 마니또 · ${m.slot}주차`}><p>{m.message}</p></Dialogue>

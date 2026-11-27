@@ -24,8 +24,8 @@ import HandoverPopup from "./pages/HandoverPopup.jsx";
 import { Garland, XmasFooter } from "./xmas.jsx";
 import { Icon, TAB_ICON } from "./icons.jsx";
 import { Giver, Panel } from "./ui.jsx";
-import { guessReminderOpen, myReminders } from "./lib/reminders.js";
-import { deadlinePassed, weekDeadline } from "./lib/constants.js";
+import { guessReminderOpen, myReminders, replyReminder } from "./lib/reminders.js";
+import { TO_MANITO_MAX, deadlinePassed, weekDeadline } from "./lib/constants.js";
 
 const AppCtx = createContext(null);
 export const useApp = () => useContext(AppCtx);
@@ -177,12 +177,22 @@ function ReminderBar({ myPid, config, inbox, current, go, modNew = 0, crowd = nu
     return onSnapshot(doc(db, "midGuesses", myPid), (s) => setGuesses(s.exists() ? s.data().guesses || {} : {}), () => setGuesses(null));
   }, [myPid, guessOpen]);
   const { toVerify, toDo, toGuess } = myReminders({ inbox, mine, missions, week, phase: config.phase, guesses, cluesReleased: config.cluesReleased || 0 });
+  // 내 마니또가 먼저 알린 것(메뉴판·예고)에 "마니또에게 한마디"로 답할 차례인지. 내가 보낸 한마디는 미션 진행·최종 지목 단계에만 읽는다
+  // (추리 보드의 "마니또에게 한마디"와 같은 질의라 함께 열려 있으면 한 번만 읽힌다)
+  const talkOpen = config.phase === PHASE.RUNNING || config.phase === PHASE.GUESSING;
+  const [talks, setTalks] = useState(null);
+  useEffect(() => {
+    if (!talkOpen) { setTalks(null); return undefined; }
+    return onSnapshot(query(collection(db, "toManito"), where("receiverPid", "==", myPid)), (s) => setTalks(s.docs.map((d) => d.data())), () => setTalks(null));
+  }, [myPid, talkOpen]);
+  const toReply = replyReminder({ inbox, talks, mine, week, phase: config.phase });
+  const showReply = toReply.length > 0 && current !== "detective";
   const showDo = toDo.length > 0 && current !== "mission";
   const showVerify = toVerify.length > 0 && current !== "detective";
   const showGuess = toGuess.length > 0 && current !== "detective";
   // 운영진이 내 후기·답장을 가리거나 지우거나 무효 처리했고 아직 추리 보드에서 보지 않은 것(추리 보드를 열면 본 것으로 친다)
   const showMod = modNew > 0 && current !== "detective";
-  if (closed || (!showDo && !showVerify && !showMod && !showGuess)) return null;
+  if (closed || (!showDo && !showVerify && !showMod && !showGuess && !showReply)) return null;
   const weeks = (list) => list.map((s) => `${s}주차`).join("·");
   return (
     <div className="reminder-bar" role="status">
@@ -202,6 +212,12 @@ function ReminderBar({ myPid, config, inbox, current, go, modNew = 0, crowd = nu
           <p>
             <Giver>내 마니또</Giver>가 보낸 <b>{weeks(toVerify)} 미션</b>을 아직 인증하지 않았어요. 인증해야 나와 마니또 모두 응모권이 쌓여요.{" "}
             <button type="button" className="text-btn" onClick={() => go("detective")}>추리 보드에서 인증하기</button>
+          </p>
+        )}
+        {showReply && (
+          <p>
+            <Giver>내 마니또</Giver>가 먼저 보낸 것이 있어요(메뉴판·도착 예고일 수 있어요). <b>주문하거나 답하려면 "마니또에게 한마디"</b>를 써 주세요. 이번 주 {TO_MANITO_MAX}번까지 보낼 수 있어요.{" "}
+            <button type="button" className="text-btn" onClick={() => { go("detective"); setTimeout(() => document.getElementById("to-manito")?.scrollIntoView({ block: "start" }), 80); }}>한마디 쓰러 가기</button>
           </p>
         )}
         {showGuess && (

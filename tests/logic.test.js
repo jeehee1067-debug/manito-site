@@ -2039,3 +2039,28 @@ test("마니또에게 한마디 횟수와 보안 규칙", () => {
   const suffixes = [...block.matchAll(/string\(request\.resource\.data\.slot\) \+ '_(\d)'\n/g)].map((m) => Number(m[1]));
   assert.deepEqual([1, ...suffixes], Array.from({ length: TO_MANITO_MAX }, (_, i) => i + 1), "규칙의 _2·_3 문서 ID가 TO_MANITO_MAX와 맞아야 한다");
 });
+
+// 먼저 알리고 → 대상이 답하는 미션(메뉴판·예고): 대상에게 "마니또에게 한마디로 주문·답하기"를 알릴지
+import { replyReminder } from "../src/lib/reminders.js";
+import { cardFlow, PHASE } from "../src/lib/constants.js";
+test("메뉴판 카드 표시와 한마디로 답하기 알림", () => {
+  const cafe = MISSION_CARDS.hard.find((c) => c.id === "h15");
+  assert.equal(cardFlow(cafe), "menu");
+  assert.equal(cardFlow({ text: cafe.text }), "menu", "완료 알림의 카드(번호 없이 글만)로도 찾는다");
+  assert.equal(cardFlow(MISSION_CARDS.hard.find((c) => c.id === "h14")), "time");
+  assert.equal(cardFlow(MISSION_CARDS.easy[0]), null);
+  const P = PHASE.RUNNING;
+  const note = { kind: "note", slot: 2, createdAt: 1000 };
+  assert.deepEqual(replyReminder({ inbox: [note], talks: [], week: 2, phase: P }), [2], "완료 전에 먼저 온 쪽지 → 한마디로 답하기");
+  assert.deepEqual(replyReminder({ inbox: [note], talks: null, week: 2, phase: P }), [], "내 한마디를 아직 못 읽었으면 띄우지 않는다");
+  assert.deepEqual(replyReminder({ inbox: [note], talks: [{ slot: 2, createdAt: 2000 }], week: 2, phase: P }), [], "그 뒤에 한마디를 보냈으면 없음");
+  assert.deepEqual(replyReminder({ inbox: [note], talks: [{ slot: 2, createdAt: 500 }], week: 2, phase: P }), [2], "쪽지보다 먼저 보낸 한마디는 답이 아니다");
+  assert.deepEqual(replyReminder({ inbox: [note], talks: [1, 2, 3].map((k) => ({ slot: 2, createdAt: k })), week: 2, phase: P }), [], "이번 주 한마디를 다 썼으면 없음");
+  assert.deepEqual(replyReminder({ inbox: [note, { kind: "mission", slot: 2, createdAt: 900, card: { level: "easy", text: "쪽지" } }], talks: [], week: 2, phase: P }), [], "완료 알림이 온 주차의 쪽지는 먼저 온 쪽지가 아니다");
+  const menuMission = { kind: "mission", slot: 2, createdAt: 3000, card: { level: "hard", text: cafe.text } };
+  assert.deepEqual(replyReminder({ inbox: [menuMission], talks: [], mine: [], week: 2, phase: P }), [2], "메뉴판 카드로 먼저 완료를 알린 경우도 주문 안내");
+  assert.deepEqual(replyReminder({ inbox: [menuMission], talks: [], mine: [{ slot: 2 }], week: 2, phase: P }), [], "인증까지 했으면 없음");
+  assert.deepEqual(replyReminder({ inbox: [{ ...note, slot: 1 }], talks: [], week: 2, phase: P }), [], "지난 주차 쪽지는 아니다");
+  assert.deepEqual(replyReminder({ inbox: [note], talks: [], week: 2, phase: PHASE.SETUP }), []);
+  assert.deepEqual(replyReminder({ inbox: [{ ...note, hidden: true }], talks: [], week: 2, phase: P }), [], "운영진이 가린 쪽지는 아니다");
+});
